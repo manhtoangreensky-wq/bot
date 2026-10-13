@@ -88,6 +88,96 @@ class AdminTicketHubNavigationTests(unittest.TestCase):
             self.assertEqual("menu|admin_support", _button(returned, "⬅").callback_data)
             self.assertEqual([((), {})], panel.answers)
 
+    def test_emitted_admin_ticket_entry_skips_unused_language_lookup(self):
+        ns, route, cleared, _ = _runtime()
+        language_reads = []
+        ns["get_user_language"] = lambda uid: language_reads.append(uid) or "vi"
+        emitted = next(
+            button
+            for row in ns["admin_module_keyboard"]("support").inline_keyboard
+            for button in row
+            if button.text == "🎧 Ticket admin"
+        )
+
+        query = fixture._dispatch(route, emitted.callback_data)
+
+        self.assertEqual("ticket|admin", emitted.callback_data)
+        self.assertEqual([], language_reads)
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual([True], cleared)
+        self.assertEqual(1, len(query.edits))
+        self.assertEqual(ns["support_admin_menu_text"](), query.edits[0][0])
+        self.assertEqual("menu|admin_support", _button(query, "⬅").callback_data)
+
+    def test_emitted_admin_ticket_list_skips_unused_language_lookup(self):
+        ns, route, cleared, reads = _runtime()
+        language_reads = []
+        ns["get_user_language"] = lambda uid: language_reads.append(uid) or "vi"
+        module_entry = next(
+            button
+            for row in ns["admin_module_keyboard"]("support").inline_keyboard
+            for button in row
+            if button.text == "🎧 Ticket admin"
+        )
+        hub = fixture._dispatch(route, module_entry.callback_data)
+        emitted = _button(hub, "🆕 Ticket mới")
+        self.assertEqual("ticket|al|new|0", emitted.callback_data)
+        language_reads.clear()
+        reads.clear()
+        cleared.clear()
+
+        query = fixture._dispatch(route, emitted.callback_data)
+
+        self.assertEqual([], language_reads)
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual([True], cleared)
+        self.assertEqual([("list", "new", 0)], reads)
+        self.assertEqual("INERT LIST", query.edits[0][0])
+
+    def test_emitted_admin_ticket_static_panels_skip_unused_language_lookup(self):
+        cases = (
+            ("📊 Thống kê", "ticket|stats|admin", "INERT STATS", ["stats"], None, True),
+            ("📚 Mẫu trả lời", "ticket|templates|admin", "INERT TEMPLATES", ["templates"], None, True),
+            ("👤 Theo user", "ticket|asearch|user", "Nhập user ID", [], "user", False),
+            ("🔍 Tìm ticket", "ticket|asearch|all", "Nhập mã ticket", [], "all", False),
+        )
+        for label, expected_callback, expected_text, expected_reads, search_source, expect_clear in cases:
+            with self.subTest(label=label):
+                ns, route, cleared, reads = _runtime()
+                language_reads = []
+                pending = []
+                ns["get_user_language"] = lambda uid: language_reads.append(uid) or "vi"
+                ns["set_support_ticket_pending"] = lambda uid, step, **fields: pending.append(
+                    (uid, step, fields)
+                )
+                module_entry = next(
+                    button
+                    for row in ns["admin_module_keyboard"]("support").inline_keyboard
+                    for button in row
+                    if button.text == "🎧 Ticket admin"
+                )
+                hub = fixture._dispatch(route, module_entry.callback_data)
+                emitted = _button(hub, label)
+                self.assertEqual(expected_callback, emitted.callback_data)
+                language_reads.clear()
+                pending.clear()
+                cleared.clear()
+                reads.clear()
+
+                query = fixture._dispatch(route, emitted.callback_data)
+
+                self.assertEqual([], language_reads)
+                self.assertEqual([((), {})], query.answers)
+                self.assertEqual([True] if expect_clear else [], cleared)
+                self.assertEqual(expected_reads, reads)
+                self.assertIn(expected_text, query.edits[0][0])
+                self.assertEqual("ticket|admin", _button(query, "⬅").callback_data)
+                self.assertEqual("menu|main", _button(query, "🏠").callback_data)
+                if search_source:
+                    self.assertEqual([(123, "admin_search", {"source": search_source})], pending)
+                else:
+                    self.assertEqual([], pending)
+
     def test_sibling_panel_and_self_press_keep_immediate_origin(self):
         ns, route, _, _ = _runtime()
         hub = fixture._dispatch(route, "ticket|admin")

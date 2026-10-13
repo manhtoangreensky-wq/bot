@@ -1,8 +1,16 @@
-import asyncio
 import html
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+
+
+def _run_inert(coroutine):
+    try:
+        yielded = coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    coroutine.close()
+    raise AssertionError(f"No-I/O handler unexpectedly yielded: {yielded!r}")
 
 
 def load_support_ticket_callbacks():
@@ -59,12 +67,16 @@ def load_support_ticket_callbacks():
         ticket.update(fields)
         return dict(ticket)
 
+    async def read_only_thread(helper, *args, **kwargs):
+        return helper(*args, **kwargs)
+
     async def safe_edit_or_send(query, text, reply_markup=None, **kwargs):
         edits.append((text, reply_markup))
 
     namespace = {
         "Update": Update,
         "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "asyncio": SimpleNamespace(to_thread=read_only_thread),
         "InlineKeyboardButton": button,
         "InlineKeyboardMarkup": markup,
         "get_support_ticket": get_ticket,
@@ -112,10 +124,14 @@ class SupportRefundPendingNoticeIdempotencyTests(unittest.TestCase):
             for row in keyboard.inline_keyboard
             for button in row
         }
-        pending = "ticket|st|73|refund_pending"
-        waiting = "ticket|st|73|waiting_provider"
-        self.assertIn(pending, emitted)
-        self.assertIn(waiting, emitted)
+        pending = next(
+            callback for callback in emitted
+            if callback.startswith("ticket|st|73|refund_pending|")
+        )
+        waiting = next(
+            callback for callback in emitted
+            if callback.startswith("ticket|st|73|waiting_provider|")
+        )
 
         async def replay_and_reenter():
             await namespace["click"](pending)
@@ -131,7 +147,7 @@ class SupportRefundPendingNoticeIdempotencyTests(unittest.TestCase):
             self.assertEqual(ticket["status"], "refund_pending")
             self.assertEqual(len(namespace["notices"]), 2)
 
-        asyncio.run(replay_and_reenter())
+        _run_inert(replay_and_reenter())
         self.assertEqual(len(namespace["edits"]), 4)
         self.assertEqual(
             namespace["notices"],

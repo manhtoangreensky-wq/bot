@@ -1,5 +1,4 @@
 """Queue-entered command guides preserve navigation without executing commands."""
-import asyncio
 import html
 import importlib.util
 import re
@@ -16,6 +15,7 @@ CASES = ("unfreeze_tool", "freeze_video", "refund_job")
 def _runtime(admin=True):
     ns, cleared = fixture._load(admin)
     ns.update(html=html, re=re)
+    ns["_local_video_planning_clear_pending"] = lambda _context: None
     ns["localized_start_menu_text"] = lambda *_args: "MAIN MENU"
     ns["localized_main_menu_keyboard"] = lambda *_args: fixture.Markup([])
     exec(fixture._assignment("ADMIN_CONFIRM_ACTIONS"), ns)
@@ -35,8 +35,17 @@ def _dispatch(route, callback):
     if not route.pattern.match(callback):
         raise AssertionError("emitted control is not registered")
     query = fixture.Query(callback)
-    asyncio.run(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+    _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
     return query
+
+
+def _run_no_io(awaitable):
+    try:
+        awaitable.send(None)
+    except StopIteration as completed:
+        return completed.value
+    awaitable.close()
+    raise AssertionError("static Admin guide fixture unexpectedly yielded I/O")
 
 
 def _controls(query):
@@ -44,6 +53,44 @@ def _controls(query):
 
 
 class QueueConfirmGuideOriginTests(unittest.TestCase):
+    def test_queue_refund_help_button_opens_registered_static_guide(self):
+        ns, menu_route, _ = _runtime()
+
+        queue_page = _dispatch(menu_route, "menu|admin_queue")
+        button = next(
+            button
+            for button in _controls(queue_page)
+            if button.text == "Hướng dẫn hoàn Xu khi job lỗi"
+        )
+        self.assertEqual("admin_help|refund|admin_queue", button.callback_data)
+
+        for name in (
+            "admin_handbook_section_text",
+            "admin_handbook_section_keyboard",
+            "handle_admin_help_callback",
+        ):
+            exec(compile("from __future__ import annotations\n" + fixture._function(name), "bot.py:" + name, "exec"), ns)
+        registrations = []
+        ns["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        ns["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in fixture.SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback," in line
+        )
+        exec(registration, ns)
+        guide_route = next(route for route in registrations if route.callback is ns["handle_admin_help_callback"])
+
+        guide = _dispatch(guide_route, button.callback_data)
+        self.assertEqual([((), {})], guide.answers)
+        self.assertIn("/refund_job", guide.edits[0][0])
+        self.assertIn("job lỗi thật", guide.edits[0][0])
+        guide_callbacks = [item.callback_data for item in _controls(guide) if item.callback_data]
+        self.assertIn("menu|admin_queue", guide_callbacks)
+        self.assertIn("menu|main", guide_callbacks)
+
     def test_command_guide_entry_labels_identify_read_only_pages_across_admin_surfaces(self):
         ns, route, _ = _runtime()
         for name in ("queue_status_keyboard", "freeze_status_keyboard", "freeze_action_keyboard",
@@ -110,7 +157,7 @@ class QueueConfirmGuideOriginTests(unittest.TestCase):
                         for name in guard_names:
                             await ns[name](update, context)
                         await route.callback(update, context)
-                    asyncio.run(dispatch())
+                    _run_no_io(dispatch())
                     self.assertEqual([((), {})], query.answers)
                     self.assertEqual(1, len(query.edits))
 

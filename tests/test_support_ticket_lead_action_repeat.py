@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import html
 from pathlib import Path
 import re
@@ -38,6 +37,15 @@ class _Query:
 
     async def answer(self, *args, **kwargs):
         self.answers.append((args, kwargs))
+
+
+def _run_inert(coroutine):
+    try:
+        yielded = coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    coroutine.close()
+    raise AssertionError(f"No-I/O handler unexpectedly yielded: {yielded!r}")
 
 
 def _load_actual_code():
@@ -89,11 +97,15 @@ def _load_actual_code():
     async def safe_edit_or_send(_query, text, reply_markup=None, **_kwargs):
         edits.append((text, reply_markup))
 
+    async def to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
     def now_text():
         clock["value"] += 1
         return f"test-time-{clock['value']}"
 
     namespace.update({
+        "asyncio": SimpleNamespace(to_thread=to_thread),
         "get_support_ticket": lambda ticket_id, *_args: dict(ticket) if int(ticket_id) == ticket["id"] else None,
         "update_support_ticket": update_ticket,
         "support_ticket_admin_text": lambda _ticket: "Admin lead ticket",
@@ -132,7 +144,7 @@ class SupportTicketLeadActionRepeatTests(unittest.TestCase):
 
     def _click(self, callback_data: str, admin_id: int = 501):
         query = _Query(callback_data, admin_id)
-        asyncio.run(self.ns["handle_ticket_callback"](
+        _run_inert(self.ns["handle_ticket_callback"](
             SimpleNamespace(callback_query=query),
             SimpleNamespace(),
         ))

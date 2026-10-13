@@ -626,3 +626,222 @@ def test_transient_feedback_classification_failure_preserves_pending_for_same_me
         if button.callback_data.startswith("ticket|pv|")
     )
     assert emitted_view == "ticket|pv|901|feedback_result"
+
+
+def _source_function(name):
+    match = re.search(
+        rf"(?m)^(?:async\s+)?def {re.escape(name)}\s*\(",
+        BOT_SOURCE,
+    )
+    assert match, f"missing source function: {name}"
+    boundary = re.search(
+        r"(?m)^(?:async\s+)?def\s+\w+\s*\(|^class\s+\w+|^[A-Z][A-Z0-9_]*\s*=",
+        BOT_SOURCE[match.end():],
+    )
+    end = match.end() + boundary.start() if boundary else len(BOT_SOURCE)
+    return BOT_SOURCE[match.start():end].rstrip()
+
+
+def test_feedback_home_callback_returns_main_and_releases_only_feedback_pending():
+    _labels, emitted_callbacks = _emitted_feedback_category_callbacks()
+    home_callback = next(callback for callback in emitted_callbacks if callback == "menu|main")
+    assert 'CallbackQueryHandler(handle_menu_callback, pattern=r"^menu\\|")' in BOT_SOURCE
+    assert re.match(r"^menu\|", home_callback)
+
+    user_id = 123
+    pending = {
+        f"feedback:{user_id}": {"pending_action": "feedback", "category": "image_error"},
+        f"unrelated:{user_id}": {"pending_action": "preserve"},
+    }
+    cleanup_calls = []
+    dependencies = {
+        "USER_PENDING": pending,
+        "feedback_pending_key": lambda uid: f"feedback:{uid}",
+        "Update": object,
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "VIDEO_TAIL9_TEXT_INPUT_KEY": "video_tail_pending",
+        "DOC_TOOL_MENU_ACTIONS": set(),
+        "InlineKeyboardButton": lambda text, callback_data=None: SimpleNamespace(
+            text=text, callback_data=callback_data
+        ),
+        "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
+        "time": SimpleNamespace(perf_counter=lambda: 1.0, time=__import__("time").time),
+        "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+        "is_admin_user": lambda _uid: False,
+        "get_user_language": lambda _uid: "vi",
+        "clear_translation_session": lambda _uid: False,
+        "localized_menu_content": lambda action, *_args: (f"main:{action}", "main-keyboard"),
+    }
+
+    async def render(query, text, **kwargs):
+        query.edits.append((text, kwargs))
+
+    dependencies["safe_edit_query_message"] = render
+    cleanup_names = (
+        "clear_free_hub_pending", "clear_support_ticket_pending",
+        "clear_quick_media_pending", "clear_quick_image_flow",
+        "clear_public_image_prompt_pending", "clear_public_video_prompt_pending",
+        "clear_media_aspect_pending", "clear_public_video_package_context",
+        "clear_creative_motion_pending", "clear_cinematic_ad_pending",
+        "clear_trend_video_flow_pending", "clear_trend_workflow_confirm_pending",
+        "clear_image_menu_pending", "clear_frame_video_state", "clear_storyboard_state",
+        "clear_developing_video_pending", "clear_product_context",
+        "clear_music_guided_pending", "clear_translation_menu_pending",
+        "clear_video_editor_pending", "clear_video_downloader_pending",
+        "clear_video_dubbing_pending", "clear_video_finalization_state",
+        "clear_video_addon_state", "clear_marketing_pending",
+        "clear_shopaikey_pending_confirmations_for_user",
+        "clear_finance_compliance_pending",
+        "clear_internal_archive_pending", "clear_doc_tool_pending",
+        "clear_storage_addon_pending", "clear_memory_guided_pending",
+        "clear_pending_admin_tool_test",
+        "_local_video_planning_clear_pending",
+    )
+    dependencies.update({name: lambda _uid: False for name in cleanup_names})
+    dependencies["video_ai_edit_state"] = SimpleNamespace(clear_draft=lambda _uid: False)
+    source = "\n\n".join(
+        _source_function(name)
+        for name in (
+            "feedback_pending_key", "get_feedback_pending", "handle_feedback_pending_text",
+            "clear_feedback_pending", "clear_media_creator_pending_states", "handle_menu_callback",
+        )
+    )
+    namespace = {**dependencies, "QUICK_MEDIA_PENDING_TTL_SECONDS": 900}
+    exec(compile(source, "bot.py:feedback_to_main_navigation", "exec"), namespace)
+    actual_clear_feedback_pending = namespace["clear_feedback_pending"]
+
+    def track_feedback_cleanup(uid):
+        cleanup_calls.append(uid)
+        return actual_clear_feedback_pending(uid)
+
+    namespace["clear_feedback_pending"] = track_feedback_cleanup
+
+    class MenuQuery:
+        def __init__(self, data):
+            self.data = data
+            self.from_user = SimpleNamespace(id=user_id, username="tester", first_name="Tester")
+            self.answers = []
+            self.edits = []
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+    query = MenuQuery(home_callback)
+    context = SimpleNamespace(user_data={})
+    _run_immediate(namespace["handle_menu_callback"](
+        SimpleNamespace(callback_query=query), context,
+    ))
+
+    assert query.answers == [((), {})]
+    assert query.edits == [("main:main", {"reply_markup": "main-keyboard"})]
+    assert cleanup_calls == [user_id]
+    assert pending == {f"unrelated:{user_id}": {"pending_action": "preserve"}}
+
+    class Message:
+        text = "feedback content after leaving the form"
+
+        async def reply_text(self, *_args, **_kwargs):
+            raise AssertionError("feedback text must not be consumed after Home")
+
+    update = SimpleNamespace(
+        message=Message(),
+        effective_user=SimpleNamespace(id=user_id),
+    )
+    assert _run_immediate(namespace["handle_feedback_pending_text"](update, context)) is False
+
+
+def test_feedback_prompt_back_restores_category_picker_and_releases_old_pending():
+    labels, emitted_callbacks = _emitted_feedback_category_callbacks()
+    category_callback = next(
+        callback for callback in emitted_callbacks
+        if callback == "feedback|cat|image_error"
+    )
+    assert _registered_feedback_pattern().match(category_callback)
+    pending = {"feedback:1234": {"pending_action": "preserve"}}
+    copy = {
+        **{f"feedback_{key}": key for key in (
+            "payment_topup", "image_error", "video_error", "document_pdf",
+            "package_combo", "refund", "feature_request", "other",
+        )},
+        "main_menu": "Main",
+        "feedback_prompt_back": "Back",
+        "feedback_prompt_title": "Feedback",
+        "feedback_prompt_body": "Enter details",
+    }
+    dependencies = {
+        "Update": object,
+        "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+        "USER_PENDING": pending,
+        "FEEDBACK_CATEGORY_LABELS": labels,
+        "QUICK_MEDIA_PENDING_TTL_SECONDS": 900,
+        "time": __import__("time"),
+        "html": html,
+        "normalize_user_language": lambda lang: lang or "vi",
+        "user_ui_lang": lambda _uid: "vi",
+        "public_hub_copy": lambda _lang: copy,
+        "sanitize_log_text": lambda value: value,
+        "clear_support_ticket_pending": lambda _uid: False,
+        "InlineKeyboardButton": lambda text, callback_data=None: SimpleNamespace(
+            text=text, callback_data=callback_data
+        ),
+        "InlineKeyboardMarkup": lambda rows: SimpleNamespace(inline_keyboard=rows),
+    }
+    async def render(query, text, **kwargs):
+        query.edits.append((text, kwargs))
+
+    dependencies["safe_edit_or_send"] = render
+    source = "\n\n".join(
+        _source_function(name)
+        for name in (
+            "feedback_pending_key", "set_feedback_pending", "get_feedback_pending",
+            "clear_feedback_pending", "feedback_start_text", "feedback_category_keyboard",
+            "feedback_message_prompt", "handle_feedback_pending_text", "handle_feedback_callback",
+        )
+    )
+    namespace = dict(dependencies)
+    exec(compile(source, "bot.py:feedback_prompt_back", "exec"), namespace)
+
+    def dispatch(callback_data):
+        query = _Query(callback_data)
+        query.edits = []
+        query.from_user.id = 123
+        _run_immediate(namespace["handle_feedback_callback"](
+            SimpleNamespace(callback_query=query), SimpleNamespace(),
+        ))
+        assert query.answers == [((), {})]
+        return query
+
+    prompt = dispatch(category_callback)
+    assert pending["feedback:123"]["category"] == "image_error"
+    back = next(
+        button.callback_data
+        for row in prompt.edits[0][1]["reply_markup"].inline_keyboard
+        for button in row
+        if button.text.startswith("⬅")
+    )
+    assert back == "feedback|start"
+    assert _registered_feedback_pattern().match(back)
+
+    picker = dispatch(back)
+    assert picker.edits[0][0] == namespace["feedback_start_text"]("vi")
+    assert "feedback:123" not in pending
+    assert pending["feedback:1234"] == {"pending_action": "preserve"}
+    picker_callbacks = {
+        button.callback_data
+        for row in picker.edits[0][1]["reply_markup"].inline_keyboard
+        for button in row
+        if button.callback_data
+    }
+    assert set(emitted_callbacks) <= picker_callbacks
+
+    class Message:
+        text = "ordinary text after Back"
+
+        async def reply_text(self, *_args, **_kwargs):
+            raise AssertionError("feedback text must not be consumed after Back")
+
+    update = SimpleNamespace(
+        message=Message(),
+        effective_user=SimpleNamespace(id=123),
+    )
+    assert _run_immediate(namespace["handle_feedback_pending_text"](update, SimpleNamespace())) is False

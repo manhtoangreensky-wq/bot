@@ -13,6 +13,37 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 
 ## Per-registration ledger
 
+Fresh Admin Ticket continuation (S12.35.304): the six emitted admin action
+controls (`reply`, `ask`, `suggest`, `note`, `assign`, `lead`) dispatch through
+the exact `handle_ticket_callback` registration in
+`tests/test_admin_ticket_stale_actions_emitted.py`. Focused pytest checks
+language/ticket SELECT scheduling, stale alerts, valid actions, public denial,
+one ACK, and disappearing-assign recovery. Adjacent Lead-repeat tests remain
+green. This is fixture-level scheduling and selected action evidence; it does
+not establish live Ticket latency or coverage of every Admin terminal.
+
+S12.35.307 also dispatches the actual emitted `📎 Xem file đính kèm` callback
+through that registration. Fixture document/photo sends verify both reads use
+the async thread seam and ACK precedes the fake send; stale ticket, non-admin,
+retry and cleanup cases remain covered. A later no-I/O selector-based unittest
+recheck passed all 7 cases, including concurrent duplicate suppression; its
+selector rejects file-descriptor registration. Ubuntu CI remains pending. No
+real file send, production ticket read, or client-latency claim is made.
+S12.35.308 verifies the actual “🎧 Ticket admin” button from the Admin Support
+keyboard: the authorized exact route renders the unchanged Ticket hub with one
+ACK and no unnecessary SQLite language lookup. Existing public-denial behavior
+and all other action paths remain covered; this removes only a source-level
+pre-ACK DB risk and does not establish a measured live delay.
+S12.35.309 follows the same emitted Admin Support → Ticket hub path to
+“Ticket mới”; valid Admin list callbacks preserve one ACK, kind/offset and list
+payload while skipping the unused locale SELECT. The full hub fixture keeps
+malformed and public-denial behavior green. Neither spec is live-latency proof.
+S12.35.310 likewise covers emitted Stats, Templates, Search-by-User and
+Search-Ticket controls. Exact valid Admin callback shapes preserve report/prompt,
+ACK, pending and Back/Home behavior without the unused locale SELECT; malformed,
+legacy and public denial remain covered. This is source-level evidence only,
+not live-latency proof.
+
 ### S12.35.230 — Fresh callback timing aggregate and menu-phase boundary
 
 - Source-order detail: the `menu|main` handler awaits callback ACK before language lookup, pending cleanup, keyboard construction and Telegram edit. Those post-ACK phases may delay the visible screen, but no live phase sample currently establishes that they are slow.
@@ -33,13 +64,46 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 | `dispatch_throttle_callback_guard` — bot.py:272499 | `<no pattern>`; group `-11` | `test_callback_dispatch_timing.py`; `test_p0_secfix_b5_dispatch_throttle.py`; `tests.test_admin_queue_confirm_back_origin` | PARTIAL: S12.35.12 executes the actual source-extracted allow path before registered Queue `menu|` controls in inert fixtures; throttle-denial/retry timing and live Application dispatch are not covered here. |
 | `safe_mode_callback_guard` — bot.py:272501 | `<no pattern>`; group `-10` | `test_callback_dispatch_timing.py`; `test_p0_video_ai_real_pilot_ui.py`; `tests.test_admin_queue_confirm_back_origin` | PARTIAL: S12.35.12 traverses the actual guard with normal and tool/maintenance-freeze fixtures before registered Queue confirmation/guide callbacks. Emergency/payment/provider-specific blocked paths and live dispatch remain unverified. |
 | `video_public_callback_dedupe_guard` — bot.py:272502 | `<no pattern>`; group `-9` | `test_callback_dispatch_timing.py`; `test_p0_video_route5_full_callback_image_ai_backstack.py`; `test_video_public_callback_dedupe_guard.py` | PARTIAL: S12.35.225 executes the extracted registered guard before the actual `vprofile` registration boundary: replaying the same Telegram query ID is stopped and acknowledged once; a distinct query ID passes. This is exact-update replay protection only, not proof of idempotency for separate rapid taps or of the protected Video handler's action. No product route body, job, provider or wallet was invoked. |
-| `handle_music_quick_callback` — bot.py:172696; registration bot.py:274369 | <code>r"^(music_quick&#124;sfx_quick&#124;media_quick)\|"</code>; group `0` | S12.35.64/.93 dispatch emitted Audio Studio root/Voice Hub controls through the registered handler; Voice Hub Back returns to Audio Studio and Home to Main. S12.35.88 directly runs 19 in-memory Voice TTS settings Back/pending assertions through the registered handler; its module is included in final safe-navigation CI. | Partial verified UI/settings only; remote batch CI and Telegram-client rendering remain pending; TTS/STT/generation/provider and remaining dynamic terminals are not proven |
-| `handle_product_progress_callback` — historical inventory line bot.py:273595; current source bot.py:12427 / registration 274774 | `^progress\\|status\\|`; group `0` | `test_p0_23a_unified_product_progress_status_panel.py`; `test_p0_23b_safe_auto_refresh_restore_music_engine.py` (+9 candidates) | SOURCE-REVIEWED, NOT DISPATCHED IN UI-ONLY AUDIT: SubDub status can rehydrate/terminalize a persisted job, recover and redeliver an MP4, finalize the panel, and send a receipt; Music status can call `maybe_deliver_music_progress_job`. This is not a navigation-only route. Keep it unverified until a fixture proves every delivery/send seam inert; no job/provider/wallet/Telegram action was run. Current main 5c38bd31 and audit source have no diff hunk for this handler/registration. |
-| `handle_media_preview_callback` — bot.py:273596 | `^(play_sfx\|play_music\|select_sfx\|select_music\|open_sfx_source\|open_music_source\|license_sfx\|license_music)\\|(?:[0-9a-f]{32}\\|)?\d+$`; group `0` | `test_media_preview_callback_snapshot.py` | PARTIAL on current branch: 19 focused cases exercise emitted Music/SFX Select, Preview and selected-video License controls through the registration; stale snapshot, user, context, expiry, tokenless and invalid-index controls fail closed. Real Telegram/provider delivery and user experience remain unverified. |
-| `handle_pixabay_media_callback` — bot.py:273597 | `^(play_media\|select_media)\\|(?:[0-9a-f]{32}\\|)?\d+$`; group `0` | `test_media_preview_callback_snapshot.py` | PARTIAL on current branch: emitted Pixabay Select and Preview controls traverse the registration; valid current snapshots dispatch with their token, stale snapshots/context and invalid owner/expiry paths fail closed. Real Telegram/provider delivery remains unverified. |
+| `handle_music_quick_callback` — bot.py:172696; registration bot.py:274369 | <code>r"^(music_quick&#124;sfx_quick&#124;media_quick)\|"</code>; group `0` | S12.35.64/.93 dispatch emitted Audio Studio root/Voice Hub controls through the registered handler; Voice Hub Back returns to Audio Studio and Home to Main. S12.35.88 directly runs 19 in-memory Voice TTS settings Back/pending assertions through the registered handler. S12.35.314 adds 15 registered Music suggestion Back/pending-state fixtures across showroom/Video Add-on contexts; its pytest module is selected in final safe-navigation CI. | Partial verified UI/settings only; consolidated CI and Telegram-client rendering remain pending; TTS/STT/generation/provider and remaining dynamic terminals are not proven |
+| `handle_product_progress_callback` — current main bot.py:12427 / registration 275133 | `^progress\\|status\\|`; group `0` | `test_admin_root_menu_callback_single_ack.py` (CI-selected); `test_p0_23a_unified_product_progress_status_panel.py`; `test_p0_23b_safe_auto_refresh_restore_music_engine.py` (+9 candidates) | PARTIAL: S12.35.374 dispatches the emitted `video_ai_real` update button twice through the registered handler with a matching in-memory job; each click ACKs once and renders the actual progress panel. S12.35.375 reproduces missing and foreign video jobs generating a synthetic 5% panel; a video-only UI guard now shows localized unavailable/retry copy with Back/Home and does not register refresh. Both use inert reads/refresh and fail-on-call delivery/reprocess seams. SubDub rehydrate/redelivery/receipt, Music delivery, Frame Video receipt DB, live refresh, production job state and Telegram remain unverified. Current main `381c71bb…`; no engine file or SubDub/Music branch changed. |
+| `handle_media_preview_callback` — bot.py:273596 | `^(play_sfx\|play_music\|select_sfx\|select_music\|open_sfx_source\|open_music_source\|license_sfx\|license_music)\\|(?:[0-9a-f]{32}\\|)?\d+$`; group `0` | `test_media_preview_callback_snapshot.py` | PARTIAL on current branch: S12.35.352's exact-main `bot.py` literal scan found no unmatched static callback; dynamic `play_{kind}`, `select_{kind}`, and `license_{kind}` prefixes resolve to this pattern once type/token/index suffixes are present. Existing 19-case fixture run exercised Music/SFX and License route/stale snapshot cases through the registered handler. S12.35.353 adds direct emitted SFX Select+Play route verification with exact snapshot and a fake preview helper; this new case ran separately and is already selected by CI. No engine/provider or real Telegram send. Live client delivery/latency remains unverified. |
+| `handle_pixabay_media_callback` — bot.py:273597 | `^(play_media\|select_media)\\|(?:[0-9a-f]{32}\\|)?\d+$`; group `0` | `test_media_preview_callback_snapshot.py` | PARTIAL on current branch: S12.35.352's exact-main literal scan found no unmatched static callback; `play_media|`/`select_media|` are dynamic prefixes whose registered pattern requires the optional snapshot token and numeric item index. The existing 19-case fixture run dispatched emitted Pixabay Select/Preview controls with their tokens; stale snapshot/context and wrong-owner/expiry cases fail closed. No real Telegram/provider delivery; live user experience remains unverified. |
 | `handle_image_story_callback` — bot.py:274423 | <code>r"^(image_story_aspect\|.+|image_story_render_hint)$"</code>; group `0` | `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: the pre-existing aspect callbacks are registered, acknowledge the chosen ratio, and reply that a future pack will use it, but `cmd_image_story` still builds at fixed 9:16; no selected-aspect application is claimed. The mismatch between the callback's promise and the prompt pack remains unresolved because Owner excluded output-affecting S12.35.106; dependent cleanup S12.35.108 was dropped. Only the independent `image_story_render_hint` route is retained as local test-only evidence (S12.35.107); prior aspect/expiry test results are historical and were run against reverted code. No real rendering/provider call or Telegram-client visual test; Image engine behavior remains unverified and protected. |
-| `handle_local_video_studio_preview_callback` — bot.py:273599 | `^lvs27a\\|`; group `0` | `test_p1_localvideostudio27a_preview.py` | NOT PROVEN: candidate references are not executed route evidence |
-| `handle_local_video_studio_public_callback` — bot.py:273600 | `^lvs27b\\|`; group `0` | `test_p0_18k_video_menu_flow_standardization_routing_matrix.py`; `test_p1_localvideostudio27b_public_ui.py` | NOT PROVEN: candidate references are not executed route evidence |
+| `handle_local_video_studio_preview_callback` — current main bot.py:70830 / registration 275137 | `^lvs27a\\|`; group `0` | `test_admin_root_menu_callback_single_ack.py` (CI-selected); `test_p1_localvideostudio27a_preview.py` | PARTIAL: S12.35.376 emits the admin command's actual Local Video Studio Preview keyboard, matches `open|create` against the exact registered callback handler, then dispatches the emitted Back, Home, Close and stale Back. It verifies one ACK per callback, stale replay alert/no state recreation, and non-admin denial before edit. The preview capability index is local and read-only; no provider, job or product-video render runs. Live client rendering/latency remains unverified. |
+| `handle_local_video_studio_public_callback` — current main bot.py:71207 / registration 275138 | `^lvs27b\\|`; group `0` | `test_admin_root_menu_callback_single_ack.py` (CI-selected); `test_p0_18k_video_menu_flow_standardization_routing_matrix.py`; `test_p1_localvideostudio27b_public_ui.py` | PARTIAL: S12.35.377 dispatches emitted `lvs27b|open` + Back through the exact registration; .378 verifies emitted persist idempotency through it; .380 dispatches emitted `plans` → saved-plan `view` → `library` Back with one ACK each and owner/chat-scoped fixture reads. Uses only local planner code and a shared in-memory SQLite fixture; no production DB, provider, job, render, wallet, or engine action. Edit/delete/expiry/repeat paths and Telegram-client rendering/latency remain unverified. |
+
+S12.35.354 addendum for `handle_media_preview_callback`: the current SFX License
+button was emitted by the media-preview keyboard and dispatched through this
+registered handler with the exact snapshot token/index. The focused fixture
+asserted one ACK and the fake license-helper arguments; output was
+`SFX_LICENSE_REGISTERED_ROUTE_OK: exact emitted token/index, one ACK, fake license
+helper only` (exit 0). No media/provider/Telegram/engine action was run. This
+does not verify downstream licensing or client-visible latency.
+
+S12.35.355 addendum for `handle_pixabay_media_callback`: the current production
+Pixabay keyboard's Select and View buttons were emitted and dispatched through
+the registered handler with their exact snapshot/index. The fixture asserted
+one ACK per action, selected item content and the fake preview-helper arguments.
+Output: `CURRENT_PIXABAY_SELECT_PLAY_REGISTERED_ROUTE_OK: exact emitted
+callback/token/index, one ACK each, fake preview sink` (exit 0). No actual media,
+search provider, job, Telegram API, or product engine action was run; downstream
+delivery and live-client latency remain unverified.
+
+S12.35.356 addendum for `handle_music_quick_callback`: the Pixabay keyboard's
+Find-more button emits `music_quick|media` and dispatches to the registered
+handler. The focused fixture verified one ACK and the Media Library guide with
+its quick keyboard while setting the search/provider seam fail-fast; no provider
+was called. Output: `PIXABAY_FIND_MORE_REGISTERED_ROUTE_OK: emitted callback,
+one ACK, inert guide/keyboard, provider untouched` (exit 0). This does not verify
+external search or actual media delivery.
+
+S12.35.357 addendum for `handle_music_quick_callback`: the production Media
+Library keyboard emits Back as `music_quick|showroom|music_hub`; dispatch through
+the registered route returns the fixture Audio Studio hub and ACKs once. Pending
+clear and render seams are fake; provider/search is fail-fast and remains
+untouched. Output: `MEDIA_LIBRARY_BACK_REGISTERED_ROUTE_OK: emitted callback,
+one ACK, Audio Studio hub, provider untouched` (exit 0). No client latency or
+downstream audio/media processing is established.
 | `handle_product_video_public_confirm_callback` — bot.py:273601 | `^vproduct\\|b14_confirm$`; group `0` | `test_p0_product_video_pv09_full_button_flow_matrix_truth.py`; `test_p0_product_video_pv10_deterministic_all_product_e2e.py` (+14 candidates) | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_product_video_public_confirm_callback` — bot.py:273602 | `^vproduct\\|b14_confirm\\|[a-f0-9]{12}$`; group `0` | `test_p0_product_video_pv09_full_button_flow_matrix_truth.py`; `test_p0_product_video_pv10_deterministic_all_product_e2e.py` (+14 candidates) | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_video_tail_callback` — bot.py:273603 | `^video_tail\\|`; group `0` | `test_p0_product_video_full_menu_tail_to_status_matrix.py`; `test_p0_product_video_manual_tail_matrix.py` (+25 candidates) | NOT PROVEN: candidate references are not executed route evidence |
@@ -76,40 +140,40 @@ Source baseline: `0929d61ade4b8f0d60b803b62417763e90acce9e`. Production deployme
 | `handle_storyboard_image_callback` — bot.py:273635 | `^vstoryimg\\|`; group `0` | `test_p0_video_realistic_restore1_last_green_lock.py`; `test_p0_video_route6_storyboard_selfshot_idea_longvideo.py` (+1 candidates) | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_create_media_callback` — bot.py:273636 | `^create_media\\|`; group `0` | `test_core.py`; `test_logo_watermark_image_video_flow.py` (+6 candidates) | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_frame_video_callback` — bot.py:273637 | `^framevideo\\|`; group `0` | `test_core.py`; `test_p0_17b7_2_image_to_video_dedupe_flow.py` (+13 candidates) | NOT PROVEN: candidate references are not executed route evidence |
-| `handle_suggest_music_callback` — bot.py:273638 | `^suggest_music\\|`; group `0` | None found by name | NOT PROVEN: candidate references are not executed route evidence |
+| `handle_suggest_music_callback` — bot.py:273638 | `^suggest_music\\|`; group `0` | `tests/test_suggest_music_callback_ui_route.py` | PARTIAL: S12.35.321 builds all five emitted style controls and dispatches each through the exact registered callback; each ACKs once and returns the matching static search phrase and `/music_library` instruction. Unknown style falls back to the safe static recommendation. No playback, provider, generation, DB, wallet or engine call is exercised. This closes only the named static UI route; music action paths and live/client latency remain unverified. |
 | `handle_engine_async_job_callback` — bot.py:273639 | `^enginejob\\|`; group `0` | `test_p0_13_job_polling_provider_discovery.py`; `test_p0_16a3_music_cleanup_preview_quota.py` | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_shopaikey_public_callback` — bot.py:273640 | `^shopai\\|`; group `0` | `test_core.py`; `test_lock_audio_translation_public_guards_18s.py` (+10 candidates) | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_public_video_status_callback` — bot.py:273641 | `^video\\|status\\|`; group `0` | `test_p0_19i_final_subdub_voice_lock_direct_dub_shared_status.py`; `test_p0_video_realistic_restore1_last_green_lock.py` | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_shopaikey_video_job_callback` — bot.py:273642 | `^shopai_video_job\\|`; group `0` | `test_lock_audio_translation_public_guards_18s.py`; `test_task3d7_video_lock_dedupe_public_guards.py` | NOT PROVEN: candidate references are not executed route evidence |
 | `handle_human_support_callback` — bot.py:273643 | `^support\\|`; group `0` | `test_core.py`; `test_p0_free1_refresh_free_tools_menu_existing_zero_cost_shortcuts.py` (+3 candidates); `test_profile_support_pending_origin.py`; `test_profile_support_read_back_origin.py` | PARTIAL: S12.35.129 reran 19 registered-handler Support pending/Back and Account/Ticket ancestry cases (`Ran 19 tests in 141.541s — OK`); .130 source-compared the five-row/eight-control Support root; .215–.216 execute emitted public informational controls plus Back/Home; .217 executes emitted public `support|ticket` to the general-support prompt and verifies actor-only pending cleanup/foreign-state preservation; .220 dispatches My Tickets from public and Account-origin Admin-contact, Auto-support and Premium pages, then verifies Back restores the exact Support child. A fresh 2026-10-10 run of Ticket ancestry + Support read-only Back/Home + Support pending/expiry modules passed 34 tests in 515.271s — OK. The separate `ticket|start` category picker remains intentionally off the public root per the 2026-10-09 delegated choice to preserve the one-step form. Other action paths, localized client rendering and runtime timing remain partial. |
-| `handle_ticket_callback` — bot.py:273644 | `^ticket\\|`; group `0` | `test_admin_stale_ticket_detail_callback_single_ack.py`; `test_admin_stale_ticket_status_callback_single_ack.py`; `test_profile_ticket_ancestry.py` (+19 candidates) | PARTIAL: S12.35.60 covers selected owned Account-origin list/detail/prompt paths and malformed/foreign controls with fixture reads; .218 dispatches public Support's emitted `ticket|mine|support` through the registered handler and verifies Support-root Back/Home; .219 fixes public My Tickets → owned detail Back losing its list parent; .220 fixes list Back returning to Support root instead of the emitting Support child or Ticket category menu, including Account-scoped child origins. Fresh 2026-10-10 run of the Ticket ancestry and Support Back/pending suites passed 34 tests in 515.271s — OK. Account-root and Feedback-result origins remain regression-checked. Admin/action-capable values and live/client timing remain open. |
+| `handle_ticket_callback` — bot.py:273644 | `^ticket\\|`; group `0` | `test_admin_stale_ticket_detail_callback_single_ack.py`; `test_admin_stale_ticket_status_callback_single_ack.py`; `test_profile_ticket_ancestry.py`; `test_admin_ticket_stale_actions_emitted.py` (+19 candidates) | PARTIAL: S12.35.60 covers selected owned Account-origin list/detail/prompt paths and malformed/foreign controls with fixture reads; .218 dispatches public Support's emitted `ticket|mine|support` through the registered handler and verifies Support-root Back/Home; .219 fixes public My Tickets → owned detail Back losing its list parent; .220 fixes list Back returning to Support root instead of the emitting Support child or Ticket category menu, including Account-scoped child origins. Fresh 2026-10-10 run of the Ticket ancestry and Support Back/pending suites passed 34 tests in 515.271s — OK. S12.35.302 verifies all six emitted Admin Ticket actions at stale/valid/public-denied boundaries, plus disappearing-assign recovery; the correct recovery Back is `menu|admin_support` (fixture only, CI pending). Account-root and Feedback-result origins remain regression-checked. Other Admin/action-capable terminals and live/client timing remain open. |
 | `handle_feedback_callback` — bot.py:273645 | `^feedback\\|`; group `0` | `test_core.py`; `test_feedback_callback_single_ack.py` (+3 candidates) | PARTIAL: existing focused tests cover single ACK, start/category/cancel destinations, and unsupported-action denial; S12.35.131 passes two concurrent copies of one Telegram message through the actual in-process idempotency wrapper decorating handle_message and reaches Feedback pending handling once (one classify/create/clear/reply/notify). S12.35.132 consumes only expired Feedback input, responds with dedicated expiry copy verified for all 17 supported locales and the category keyboard, and stops fall-through to later handlers. S12.35.133 rejects unknown Feedback categories before ACK or pending mutation and confirms all eight emitted categories are whitelisted. Distinct rapid message IDs, cross-process behavior, error/retry, other emitted values, localized client rendering and live timing remain open. |
 | `handle_image_tools_callback` — bot.py:273646 | `^imgtool\\|`; group `0` | `test_admin_root_menu_callback_single_ack.py` (+ existing candidate references) | PARTIAL: S12.35.157 executes the actual `^imgtool\\|` registration for emitted `imgtool|prompt_need_image`, verifies the intake pending state, then dispatches emitted Back through registered Menu and confirms actor-only pending cleanup plus exact Image-hub restoration. S12.35.160 likewise dispatches the actual main-image hub's `imgtool|edit_ai_start` through the registration without a source image; emitted `menu|main_image` Back restores the exact hub and clears only the actor's `image_edit_wait_image`, preserving another user's state. Combined focused Image routes: 2 tests pass; full CI-listed root/menu module including S12.35.160: 44 tests in 50.612s — OK. No image was uploaded or processed. Other image actions/processing and live/client latency remain unverified. |
 | `handle_storage_addon_callback` — bot.py:273647 | `^storage\\|`; group `0` | `test_storage_addon_pending_reset_on_start.py`; `test_storage_addon_navigation_callbacks.py` | PARTIAL: S12.35.58 exercises emitted custom-input → Back through the exact registration; S12.35.147 verifies expiry consumption through the source-extracted `handle_message` chain and localized no-charge notice for all supported languages. Payment confirmation/repeat and real Telegram-client timing remain untested. |
 | `handle_memory_callback` — bot.py:273648 | `^memory\\|`; group `0` | `test_memory_empty_delete_state.py`; `test_memory_pending_reset_on_start.py`; `test_admin_root_menu_callback_single_ack.py` (+1 candidates) | PARTIAL: S12.35.57 executes empty-delete to verify stale pending clears; S12.35.62 dispatches the actual emitted empty-delete button through the registered handler and its Back through registered Menu to Notes/Docs; S12.35.65 verifies Saved Notes → owned detail → Back and Delete Cancel → same detail → Back; S12.35.66 verifies Delete-picker choice → confirmation → Cancel returns to that picker; S12.35.67 dispatches actual search text/results → detail → delete-confirm Cancel → Back to the exact result list, and stale/expired/foreign origins fail closed. Start/Menu regression also checks registration. Delete execution, other Memory expiry/repeat paths and live/client timing remain unverified. |
-| `handle_translation_callback` — bot.py:273649 | `^tr_(target\|more\|pick\|transcribe)(\\|\|$)`; group `0` | `test_p0_i18n_root_flow_copy.py`; `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: S12.35.110 dispatches emitted text/file picker `tr_more|<source>` and matching `tr_pick|<source>` Back with exact option restoration; S12.35.111 aligns the voice picker label with `tr_pick|voice` and dispatches Voice → More → Back through the registration. S12.35.162 verifies emitted `tr_target|text|en`; S12.35.286 adds emitted `tr_target|file|en` and `tr_target|voice|en` through the exact handler to inert pre-provider boundaries. `tr_transcribe`, media/input, actual provider execution, and full-handler behavior remain untested; no whole-handler claim. |
+| `handle_translation_callback` — bot.py:273649 | `^tr_(target\|more\|pick\|transcribe)(\\|\|$)`; group `0` | `test_p0_i18n_root_flow_copy.py`; `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: S12.35.110 dispatches emitted text/file picker `tr_more|<source>` and matching `tr_pick|<source>` Back; .111 verifies voice picker More/Back; .162 verifies text target; .286 covers file/voice target to inert pre-provider boundaries. S12.35.381 dispatches the actual emitted `tr_transcribe` button through the exact registration and fixes missing-media recovery to restore the existing action/Home keyboard; the fail-on-call transcription seam is untouched. Other media/input processing, provider execution, complete-handler coverage and client latency remain unverified. Current-main #1424 diff has no Translation callback hunk; this is not a live/runtime claim. |
 | `handle_language_callback` — bot.py:273650 | `^(lang\\|(?:[a-z]{2}\|fil)\|lang_more\|back_lang\|lang_back)$`; group `0` | `test_free_tools_hub_v1.py`; `test_language_callback_single_ack.py`; `tests.test_admin_root_menu_callback_single_ack`; `test_profile_language_back_origin.py` | PARTIAL: S12.35.113 dispatches the actual public-root back_lang entry then the emitted lang_back through the exact registered handler and verifies the exact original main-menu callback set returns, one ACK each, and no preference/usage/broadcast write. S12.35.258 dispatches every locale emitted by the Account picker through this registration, verifies the callback-byte bound, one in-memory preference/usage update, one ACK and return to Account. Other language branches, expiry/repeat, persisted preference/broadcast behavior, and client/runtime timing remain open. |
 | `handle_package_purchase_callback` — bot.py:273651 | `^pkgbuy\\|`; group `0` | `tests.test_pkgcombo_navigation_registered_callback.PackageComboNavigationTests.test_emitted_package_confirmation_dispatches_to_inert_purchase_seam` | PARTIAL: S12.35.255 builds the auto-checkout confirmation control from the actual package-detail route and dispatches its emitted `pkgbuy|confirm|…` callback through this exact registration. It ACKs once and delegates to an inert `start_package_purchase` seam with exact user/type/code/message arguments; no order, PayOS, DB, wallet, provider or real message runs. Manual/invalid branches and actual checkout completion remain untested. |
 | `handle_pkgcombo_callback` — bot.py:273652 | `^pkgcombo:`; group `0` | `test_pkgcombo_navigation_registered_callback.py`; `test_p0_global_pricing_i18n_locale_expansion.py` | PARTIAL: S12.35.61 dispatches the emitted Image package group and Back. S12.35.188 adds registered-route-origin checks for Catalog, Account Pricing main, Account Catalog, and public/Account Total → Packages → exact parent round-trips; .253 verifies package callback byte limits and group/detail ancestry across all origin tokens. S12.35.255 dispatches the emitted confirmation-screen Back through this handler and restores the same group. Actual package order creation, PayOS and payment completion remain untested. |
 | `handle_pricing_callback` — bot.py:273653 | `^pricing\\|`; group `0` | `test_profile_pricing_back_origin.py`; `test_core.py`; `test_free_tools_hub_v1.py` (+2 candidates) | PARTIAL: S12.30 covers Account Pricing/catalog/detail and Membership ancestry; S12.35.3 is merged/deployed and exercises emitted Top-up from main/offers/promo guide/Video/Image, all 14 locale-fallback Catalog keyboards, and Xu via the registered Pricing handler. S12.35.4 offline GREEN: focused `/pricing_xu` → Top-up → Back coverage passed; runtime source is superseded in S12.35.105 at `9835b432…`. Local S12.35.184–.187 verify public Voice/Guide/Catalog Member/Total parent routes. S12.35.188 verifies scoped package entries and Account/Total ancestry; after two stale expected callback values were aligned, the complete Pricing module passed `28 tests in 118.453s — OK` using a Windows fixture driver that rejects yielded I/O. Client visual QA, generated-document/payment terminals, remaining catalog actions and live/client latency remain open. |
 | `handle_buy_plan_callback` — bot.py:273654 | `^buy_plan\\|`; group `0` | `test_profile_pricing_back_origin.AccountPricingOriginTests.test_public_stale_buy_plan_callback_is_safe_and_registered` | VERIFIED SAFE LEGACY FALLBACK: S12.35.256 confirms no current emitter; one stale public callback reaches this exact registration, ACKs once, renders current public package destinations, and does not call purchase. Admin checkout remains untested. |
-| `handle_doc_tool_callback` — bot.py:273655 | `^docflow\\|`; group `0` | `test_core.py`; `test_doc_page_prompt_reset_on_start.py`; `test_doc_split_back_emitted_callback.py` | PARTIAL: S12.35.57 executes split-page prompt Back and parent Back through the exact registration. S12.35.134 dispatches an expired `save_document` Back through the same registration. S12.35.137 covers after-file Add-more and Remove-last. S12.35.159 reproduced confirmation Add-more clearing staged state and changed only its emitter to existing `docflow|send_more`; 7 focused fixture functions passed, including the separate after-file `reset_files` guard. S12.35.161 dispatches actual confirmation Back for active `split_pdf` and `save_document` through the registration; both origin keyboards, actor-only cleanup, unrelated-user state preservation, and single ACK passed (2 origin scenarios). Full `tests/test_doc_split_back_emitted_callback.py` rerun passed all 8 test functions in 10.887s; full `bot.py` syntax gate remains open. Processing/send actions, other expiries/repeats, and client/runtime timing remain unverified. |
-| `handle_internal_archive_callback` — bot.py:273656 | `^archive\\|`; group `0` | `test_internal_archive_metadata_reset_on_start.py`; `test_internal_archive_type_back_label.py`; `test_internal_archive_search_back_origin.py`; `test_admin_root_menu_callback_single_ack.py` (+3 candidates) | PARTIAL: S12.35.31 verifies type-screen Back; S12.35.59 covers Archive root → Notes; S12.35.138 dispatches actual root/department Search Back through the registered handler, including TTL-expired department context and live-state precedence, then dispatches the emitted Search Home through the exact registered Menu handler and confirms actor-only pending cleanup (full root/menu module: 51 tests passed). S12.35.151 dispatches the emitted `archive|view|id` through the registered route and verifies fixture detail rendering; malformed/missing/stale `view` and stale/malformed `file` selections fail closed with one ACK and no unrelated pending cleanup. S12.35.152 dispatches the emitted `archive|file|id` through the same registered handler and verifies exact fixture ID/caption at a fake Telegram send boundary (6 focused Archive tests passed). S12.35.207/.232 identify `get_internal_document` before the view/file callback answer as a possible synchronous pre-ACK wait; no route-correlated live delay is proven; standard unittest stalls before handler entry in Windows Proactor setup, while 3 focused assertions pass via immediate no-I/O dispatch (S12.35.252). Stale/error alert UX remains unchanged. No production document/file was accessed or sent. Remaining action values, repeat paths, and manual client timing/visual remain untested. |
+| `handle_doc_tool_callback` — bot.py:273655 | `^docflow\\|`; group `0` | `test_core.py`; `test_doc_page_prompt_reset_on_start.py`; `test_doc_split_back_emitted_callback.py`; `test_doc_tool_callback_single_ack.py` | PARTIAL: S12.35.57 executes split-page prompt Back and parent Back through the exact registration. S12.35.134 dispatches an expired `save_document` Back through the same registration. S12.35.137 covers after-file Add-more and Remove-last. S12.35.159 reproduced confirmation Add-more clearing staged state and changed only its emitter to existing `docflow|send_more`; 7 focused fixture functions passed, including the separate after-file `reset_files` guard. S12.35.161 dispatches actual confirmation Back for active `split_pdf` and `save_document` through the registration; both origin keyboards, actor-only cleanup, unrelated-user state preservation, and single ACK passed (2 origin scenarios). S12.35.299 reproduces the valid `docflow|confirm` SQLite-backed language lookup before ACK and fixes only that branch to ACK once, then offload the lookup; the insufficient-file alert remains unchanged (4 focused no-I/O callback assertions passed). Full `tests/test_doc_split_back_emitted_callback.py` rerun passed all 8 test functions in 10.887s; full `bot.py` syntax gate remains open. Processing/send actions, other expiries/repeats, and client/runtime timing remain unverified. |
+| `handle_internal_archive_callback` — bot.py:273656 | `^archive\\|`; group `0` | `test_internal_archive_metadata_reset_on_start.py`; `test_internal_archive_type_back_label.py`; `test_internal_archive_search_back_origin.py`; `test_admin_root_menu_callback_single_ack.py` (+3 candidates) | PARTIAL: S12.35.31 verifies type-screen Back; S12.35.59 covers Archive root → Notes; S12.35.138 dispatches actual root/department Search Back through the registered handler, including TTL-expired department context and live-state precedence, then dispatches emitted Search Home through the exact registered Menu handler and confirms actor-only pending cleanup (full root/menu module: 51 tests passed). S12.35.151 dispatches emitted `archive|view|id` through the registered route and verifies fixture detail rendering; malformed/missing/stale `view` and stale/malformed `file` selections fail closed with one ACK and no unrelated pending cleanup. S12.35.152 dispatches emitted `archive|file|id` through the same registered handler and verifies exact fixture ID/caption at a fake Telegram send boundary (6 focused Archive tests passed). The historical S12.35.207/.232 pre-ACK concern was fixed in S12.35.271: current handler ACKs before `asyncio.to_thread(get_internal_document, ...)`. S12.35.346 rechecks both emitted View and File controls through the registered handler; a no-yield fixture asserts ACK before both fake reads, renders the detail screen, and keeps the file send at a fake sink. No production document/file was accessed or sent. Live/client timing, remaining action values and repeat/error paths outside tested cases remain unverified. |
 | `handle_aichat_callback` — bot.py:273657 | `^aichat\\|`; group `0` | `test_p0_aichat1b_free_tools_menu_cleanup.py`; `test_p0_aichat1_copilot_consent.py`; `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: S12.35.112 dispatches emitted Free Tools `aichat|on` and consent Back; S12.35.150 verifies stale-consent denial and valid pending-consent grant with fixture state. S12.35.163 covers emitted Trace → active-status Back; S12.35.164 covers emitted Status → read-only status/Trace/Back/Home; S12.35.165 dispatches enabled-state Back to Free Tools root. Each tested callback ACKs once; read-only routes do not persist state. AI message/action/provider behavior, remaining branches and client timing remain unverified. |
 | `handle_free_hub_callback` — bot.py:273658 | `^freehub\\|`; group `0` | `test_p0_i18n_free_hub_root_static.py`; `test_admin_tool_test_pending_reset.py`; `test_admin_root_menu_callback_single_ack.py` | PARTIAL: S12.35.15 exercises emitted Free Tools root and maintenance custom-input cleanup; .34 verifies the public-root Free Tools route; .68–.74 cover Prompt Library, utilities, translation, prompt-generator and upload Back; .259 dispatches the actual emitted `freehub|hook` control through this registration, checks `hook_script` suggestion entry, owner-scoped pending cleanup, and emitted Back/Home with inert fixtures, without entering Voice/SubDub engines. Other tool terminals and client behavior remain open; no paid provider action is claimed. |
-| `handle_payos_risk_callback` — bot.py:273659 | `^payrisk\\|`; group `0` | `test_p0_17c3_payos_admin_risk_lock_review.py`; `test_payos_risk_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
+| `handle_payos_risk_callback` — bot.py:273659 | `^payrisk\\|`; group `0` | `test_p0_17c3_payos_admin_risk_lock_review.py`; `test_payos_risk_callback_single_ack.py` | PARTIAL: S12.35.326 dispatches six obsolete/malformed action-payload cases through the exact registration and verifies one alert ACK with no render/action; emitted report/help, valid admin ACK and non-admin denial regressions also pass. Other valid actions, expiry/repeat paths and client/runtime timing remain open. |
 | `handle_remote_worker_canary_callback` — bot.py:273660 | `^remote_worker_canary_(create\|status)(\\|\|$)`; group `0` | `test_p0_17w4_remote_worker_canary.py`; `test_remote_worker_canary_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_remote_worker_prod_canary_callback` — bot.py:273661 | `^remote_worker_prod_canary_(create\|status)(\\|\|$)`; group `0` | `test_p0_17w5_remote_worker_admin_prod_canary.py`; `test_remote_worker_prod_canary_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
-| `handle_knowledge_vault_callback` — bot.py:273662 | `^vault\\|`; group `0` | `test_p0_22a_knowledge_vault_prompt_media_extraction.py`; `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: S12.35.128 verifies the emitted Vault status control matches the registered `vault|` route and adds Home=`menu|main`; that emitted Home dispatches through the registered `handle_menu_callback` and renders Main with one ACK. S12.35.135 source-extracts the actual keyboard and corrects Import/Search labels to identify their command-guide destinations, preserving callback values. No Vault operation is run; prompt/media actions, auth boundaries, and client/runtime UX remain unverified. |
+| `handle_knowledge_vault_callback` — bot.py:273662 | `^vault\\|`; group `0` | `test_p0_22a_knowledge_vault_prompt_media_extraction.py`; `tests.test_admin_root_menu_callback_single_ack` | PARTIAL: S12.35.128 verifies emitted Vault status matches the registered route and Home=`menu|main` reaches Menu with one ACK. S12.35.135 corrects Import/Search labels as command guides. S12.35.340 dispatches both guide callbacks with one ACK, correct copy and Vault keyboard. S12.35.341 fixes missing Back/Home on non-empty callback prompt/review lists; item actions remain and navigation reaches the expected parents with one ACK. S12.35.342 dispatches Video/Image/Audio categories to the matching read-only list arguments. S12.35.343 verifies admin-only `/vault_review` registration and Back/Home. S12.35.344 verifies `/kho_prompt` and `/vault_prompt` aliases for Admin/public, empty/non-empty results and role-valid exits. S12.35.348 dispatches the emitted Admin approve-item callback through the registered handler using a fake Vault; public replay cannot invoke approval. S12.35.349 dispatches emitted `vault|use|id` for Admin/public; visibility scopes are correct, one ACK each, escaped prompt text goes only to the fake reply sink. No real prompt was approved/used. Tests are inert fixtures; other Vault authorization/action terminals and live Telegram rendering/latency remain unverified. |
 | `handle_admin_gopy_callback` — bot.py:273663 | `^admin_gopy\\|`; group `0` | `test_admin_feedback_button_route.py`; `test_admin_feedback_callback_admin_guard.py` | PARTIAL: S12.22 dispatches the emitted Support inbox control through its callback to the read-only command/result renderer and verifies empty/populated/filtered rendering plus Back/Home. No live inbox data or real message was accessed. |
 | `handle_admin_help_callback` — bot.py:273664 | `^admin_help\\|`; group `0` | `test_admin_feedback_button_route.py`; `test_admin_help_callback_single_ack.py` (+4 candidates) | PARTIAL: S12.35.127 verifies registered route, one ACK + admin handbook render, all emitted module-guide Back paths, runtime guide labels and stale Support denial; S12.35.149 dispatches all eight Admin Handbook root sections and verifies label-to-section mapping, matching handbook text, plus Handbook/Admin/Home callbacks accepted by the registered Menu handler. The CI-listed module ran 6 tests in 2.840s. No operational Admin action; other handbook branches and live/client rendering remain open. |
 | `handle_admin_growth_callback` — bot.py:273665 | `^admin_growth\\|`; group `0` | `tests.test_admin_module_child_back_origin.AdminGrowthNavigationTests` | PARTIAL: S12.35.109 dispatches emitted Growth root links and read-only Affiliates/Ideas/Calendar/Revenue & Click/Channels/Packages pages through the exact registered callback. S12.35.236 reran the five dynamic-trail/navigation/auth assertions using an immediate no-I/O driver (`Ran 5 tests in 33.561s — OK`); the ordinary Windows runner stalled and is not counted. Report/list/render seams were in-memory. Affiliate/publish/campaign writes, production reports/data, client visuals and real Telegram remain untested. |
 | `handle_broadcast_lite_callback` — bot.py:273666 | `^broadcast_lite\\|`; group `0` | `test_broadcast_lite_back_pending_cleanup.py`; `test_p0_admin_broadcast2.py` | PARTIAL: S12.35.21 covers emitted read-only History/Schedule/Limits controls and immediate-parent Back. S12.35.195 replays the emitted controls through the actual registered handler, checks Back/Menu pending-owner release while retaining a temporary draft, and verifies nested Limits → Schedule Back (4 fixture tests in 0.801s). Delivery, schedule writes/toggles and AutoPost WIP remain excluded. |
-| `handle_menu_callback` — bot.py:273667 | `^menu\\|`; group `0` | `test_admin_billing_guide_labels.py`; `test_admin_finance_action_renderers.py`; `test_admin_queue_confirm_back_origin.py`; `test_admin_menu_denied_callback_single_ack.py`; `test_admin_root_menu_callback_single_ack.py`; `test_admin_module_child_back_origin.py` | PARTIAL: S12.35.8 dispatches all ten emitted `menu|admin_*` Admin-root entries to matching registered module roots and immediate Admin Back; the separate `admin_growth|main` route and Back are also verified. Fresh Admin/customer root-menu safe-flow rerun on 2026-10-10: 50 tests in 48.397s — OK, after a test-only immediate no-yield authorization-fixture correction. Other child/action terminals, stateful/payment/provider paths, expiry/repeat coverage and client/runtime timing remain partial or excluded. |
+| `handle_menu_callback` — bot.py:273667 | `^menu\\|`; group `0` | `test_admin_billing_guide_labels.py`; `test_admin_finance_action_renderers.py`; `test_admin_queue_confirm_back_origin.py`; `test_admin_menu_denied_callback_single_ack.py`; `test_admin_root_menu_callback_single_ack.py`; `test_admin_module_child_back_origin.py`; `test_menu_video_callback_timing.py` | PARTIAL: S12.35.8 dispatches all ten emitted `menu|admin_*` Admin-root entries to matching registered module roots and immediate Admin Back; the separate `admin_growth|main` route and Back are also verified. Fresh Admin/customer root-menu safe-flow rerun on 2026-10-10: 50 tests in 48.397s — OK, after a test-only immediate no-yield authorization-fixture correction. S12.35.315 dispatches public Translation → SubDub landing and verifies Back/Home without activating `videodub|` processing. S12.35.347 directly invokes eight current-source Video entry/Back assertions with a no-yield driver: emitted `menu|main_video`/`menu|main`, one ACK, Video/Main screens, draft preservation, render-error propagation and timing-phase labels; no Video tool, job or provider action. This is deterministic fixture evidence, not pytest/CI or live client timing. Other child/action terminals, stateful/payment/provider paths, expiry/repeat coverage and client/runtime timing remain partial or excluded. |
 | `handle_provider_choice` — bot.py:273668 | `^prov\\|`; group `0` | `test_provider_choice_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_payos_alert_callback` — bot.py:273669 | `^payosalert\\|`; group `0` | `test_p0_14_admin_ux_provider_cleanup.py`; `test_p0_pricing_manual_callback_locale_regression.py` (+1 candidates) | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
-| `handle_manual_package_choice` — bot.py:273670 | `^manual\\|`; group `0` | `test_core.py`; `test_p0_17c3_payos_admin_risk_lock_review.py` (+1 candidates) | NOT PROVEN: candidate references are not executed route evidence |
-| `handle_package_choice` — bot.py:273671 | `^(payos_pkg\|pkg)\\|`; group `0` | `test_p0_17c2_payos_auto_topup_limits.py`; `test_p0_global_pricing_i18n_locale_expansion.py` (+1 candidates) | NOT PROVEN: candidate references are not executed route evidence |
+| `handle_manual_package_choice` — bot.py:273670 | `^manual\\|`; group `0` | `test_core.py`; `test_p0_17c3_payos_admin_risk_lock_review.py`; `test_profile_topup_back_origin.py`; `test_manual_package_callback_single_ack.py`; `test_manual_foreign_owner_callback_single_ack.py` | PARTIAL: S12.35.301 dispatches the emitted customer Top-up entry through the registered handler and verifies one ACK + manual menu. S12.35.399 reproduces the Admin approval-denial double ACK and fixes only ACK order: a non-admin gets exactly one alert without DB access; authorized Admin still ACKs before a fixture read-only lookup (`Ran 2 tests in 0.514s — OK`). S12.35.400 emits ten owner-bound controls from manual top-up and PayOS-recovery keyboards; pre-change audit HEAD yielded two ACKs for all ten foreign-owner clicks, while the current source returns one denial alert (`Ran 3 tests in 1.843s — OK` with the related manual-package suite). Real bill/payment/wallet actions, expiry/replay, Admin approval terminal, whole-handler coverage and live latency remain unverified. Consolidated CI and source compile are pending. |
+| handle_package_choice — bot.py:273671 | ^(payos_pkg|pkg)\\|; group 0 | test_p0_17c2_payos_auto_topup_limits.py; test_p0_global_pricing_i18n_locale_expansion.py; test_package_choice_callback_ack_order.py | PARTIAL: S12.35.300 confirms ACK before expiry cleanup. S12.35.303 builds the actual `main_topup_keyboard()` and dispatches all six emitted PayOS amount callbacks through the registered production handler; each ACKs once before inert expiry cleanup and stops before package/payment logic. S12.35.319 reproduced the foreign-owner double ACK on the emitted/registered callback; owner-approved ACK-only fix now gives the foreign user one denial alert, the authorized owner one early ACK, and malformed-length data one normal ACK, with expiry cleanup retained after each ACK. Fresh focused regression rerun: 3 pytest cases passed in 2.46s; exact PR head `669b5c1f` passed full CI run `38361311896`, including complete-source compile and the explicit safe-navigation test step, so the ACK fix is locked on draft PR #1426, not live. Fixture-only, no production DB/payment/order/provider/wallet effects. Payment/order/provider branches and client timing remain unverified; exact-main comparison and one-batch delivery remain open. |
 | `handle_video_job_callback` — bot.py:273672 | `^job\\|`; group `0` | `test_video_job_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_pipeline_callback` — bot.py:273673 | `^pipe\\|`; group `0` | `test_pipeline_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_trend_callback` — bot.py:273674 | `^trend\\|`; group `0` | `test_trend_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
@@ -782,4 +846,774 @@ The public Pricing Catalog and Account → Pricing → Catalog → Packages rout
 - New actual product defect: `ticket|pv` raised IndexError on candidate while main answered safely; superscript detail IDs raised ValueError and lost pending on both sources. Only the customer/admin detail ID predicates were changed to bounded ASCII decimal validation before lookup/cleanup.
 - New matrix RED: 5 failures/4 errors. GREEN: 16 malformed-ID combinations and foreign recovery passed 2 tests/15.784s; full ancestry/reply-origin modules passed 41 tests/206.240s. Actor/foreign pending, ownership and semantic Back checks remain asserted. Full candidate compile exited 0 at bot blob `93ed446354e11947f52bee923a9f5a846c6ad6f1`.
 - Text declaration comparator: 43 UI blocks changed, 2 UI helpers added, 0 removed; 5,347 protected-pattern blocks unchanged and no protected file changes. This is source evidence, not live product-output/client coverage. No production DB, wallet, paid provider, Telegram action, merge/deploy/restart occurred during these checks.
+
+## S12.35.305 — Admin Ticket status callback read scheduling — 2026-10-11
+
+- All three status buttons emitted by the actual Admin Ticket detail keyboard
+  (`resolved`, `refund_pending`, `waiting_provider`) dispatch through the exact
+  registered `ticket|` handler. Before the patch, both `get_user_language` and
+  `get_support_ticket` performed SQLite SELECTs synchronously on the event loop;
+  five new focused scheduling assertions reproduced the missing thread seam.
+- The narrow patch adds only `st` to the existing Admin Ticket read-offload set
+  and moves its ticket SELECT through `asyncio.to_thread`. A combined no-I/O
+  pytest run returned 43 passed in 10.41s, covering the emitted status matrix,
+  one ACK, public denial before ticket lookup, stale-ticket alert/no update,
+  status update order, one refund warning on a transition, and list/Main controls.
+- `tests/test_admin_stale_ticket_status_callback_single_ack.py` is now selected
+  in the existing Small Navigation CI command; no deploy step changed.
+- All three changed test modules passed `py_compile`; audit-state and workflow
+  YAML parsed; `git diff --check` exited 0. Final combined `bot.py` compile and
+  consolidated CI have not run yet.
+- This prevents the SQLite reads from blocking the shared event loop; it is not
+  evidence that client-visible spinner/render time is lower. No real ticket,
+  database, admin/customer message, wallet/payment, provider or Telegram action
+  occurred. A7, final combined CI, current-main/protected-source sync and the
+  single batch release gate remain open.
+
+## S12.35.306 — Admin confirmed reply Send read scheduling — 2026-10-11
+
+- The actual token-bearing Send button emitted from the Admin reply preview
+  dispatches through the registered `ticket|` handler. Before the fix, the
+  handler synchronously read language and ticket from SQLite before the ACK.
+  Five new preview-Send assertions reproduced the missing scheduling seam.
+- The minimal source change adds only `send` to the existing Admin read-offload
+  condition and schedules its ticket SELECT with `asyncio.to_thread`. Stale and
+  tokenless previews still send nothing; valid previews ACK once before the
+  fake customer send, keep the per-ticket in-flight lock, and remain retryable
+  after a simulated delivery failure.
+- Combined no-I/O pytest: `48 passed, 2 subtests passed in 19.23s`. A later
+  selector-based standard-library unittest recheck returned `Ran 2 tests in
+  0.855s — OK` for concurrent single-send/replacement-preview and failure/retry
+  behavior. The test-only selector rejects file-descriptor registration; the
+  Ubuntu CI selection still must run.
+- No real Telegram message, production ticket/DB, provider, wallet/payment,
+  AutoPost, protected engine, deploy or restart. This is event-loop protection,
+  not measured client-latency improvement; A7 and final batch gates remain open.
+
+## S12.35.311 — Admin Ticket detail skips unused language lookup — 2026-10-11
+
+- RED: the actual filtered Admin Ticket list emitted valid detail callbacks;
+  both the existing-ticket and stale-ticket Admin paths called the SQLite
+  language getter after their early ACK even though these screens use fixed
+  Vietnamese copy. The unauthorized path was already denied before the ticket
+  read.
+- The exact authorized detail branch now uses the existing Vietnamese default;
+  the early ACK, offloaded ticket lookup, unchanged detail/stale recovery and
+  list/Home controls are preserved. No other route's locale handling changed.
+- GREEN: the valid detail, stale recovery, and unauthorized denial cases passed:
+  `Ran 3 tests in 11.088s — OK`. The test-only inert coroutine runner avoids a
+  Windows event-loop setup stall before these no-I/O fixture handlers. This is
+  source-level handler evidence, not a live Telegram/client latency measurement.
+- The test module is already selected in CI. Adjacent Ticket regression,
+  whole-bot compile, consolidated CI, current-main/protected-source comparison
+  and one-batch release remain open. Changed-test `py_compile` and
+  `git diff --check` exited 0; the diff check showed an existing line-ending
+  warning in an unrelated file. State YAML parsing is NOT_VERIFIED locally
+  because PyYAML is unavailable; the existing CI step installs PyYAML and
+  parses the file. A full local unittest run stalled at the next-page async
+  case after two tests reported OK; it was interrupted and marked NOT_VERIFIED,
+  not a failure or pass. CI must execute the full selected test module.
+- No production ticket/database, admin/customer message, Telegram send,
+  provider, wallet/payment, AutoPost, or protected engine was invoked.
+
+### S12.35.311 local full-module verification refresh
+
+- The initial module runner stalls inside Windows `asyncio` `_fallback_socketpair`
+  while `asyncio.run` initializes, before dispatching the callback. `faulthandler`
+  captured that exact stack in the preview/attach fixture.
+- These test coroutines use only inert fake handlers and mocked `asyncio.to_thread`;
+  no coroutine should yield external I/O. Replaced only their test-driver calls
+  with `_run_inert`, which fails explicitly if a coroutine yields unexpectedly.
+- Full `tests.test_support_ticket_reply_origin_pagination` now returns
+  `Ran 19 tests in 63.943s — OK`; changed-test `py_compile` and `git diff --check`
+  exit 0. This resolves the local verification stall without changing production
+  code. Consolidated CI still must run its selected module.
+
+## A7 — All-callback timing aggregate — 2026-10-11 18:26 +07
+
+- The approved read-only 24-hour all-route aggregate returned four callback
+  events across three groups. Only counts and timing statistics were returned;
+  raw logs, IDs and payloads were not printed.
+- `menu|main_video` (admin, n=1): render max 72.066ms; handler/dispatch max
+  135.942ms. `menu|main` (admin, n=2): render average 2833.405ms / max
+  5582.814ms; dispatch average 2909.028ms / max 5678.657ms. `account_root`
+  (n=1) dispatched in 295.238ms.
+- The Home outlier spent 5582.814ms in the awaited render/edit helper; its
+  pre-ACK, language, cleanup and build phases were fast. The logs cannot
+  distinguish Telegram API wait from VPS network or client rendering. Owner's
+  latest Video → Back observation was <1s, but no exact timestamp was supplied
+  to correlate it to this aggregate.
+- No change was made to the shared render helper: a single server-side outlier
+  is not a reproduced client-visible defect, and the helper is shared by
+  protected routes. Other routes had no sample, so A7/all-button smoothness
+  remains partial. No raw log, runtime/source change, send, provider, wallet,
+  deploy or restart occurred.
+
+## S12.35.317 — Memory delete confirmation concurrent replay
+
+- The actual emitted delete confirmation callback was dispatched twice with
+  distinct callback-query IDs, both suspended at the ACK await, through the
+  matching registered pattern and extracted production handler. The fixture
+  asserted one ACK per click, exactly one successful archive update/event, and
+  one consumed-confirmation response.
+- Focused result: `Ran 1 test in 0.812s — OK`; changed test-file `py_compile`
+  exited 0. The deterministic scheduler is test-only and has no external I/O.
+- No duplicate effect reproduced: pending confirmation is synchronously
+  consumed before the next handler await. No production fix was warranted.
+  The test remains inside the CI-selected root-menu module; consolidated CI,
+  whole-bot compile and cross-process behavior are not established here.
+- No production DB, Telegram send, provider, wallet, job, AutoPost or protected
+  engine action occurred.
+
+## S12.35.326 — PayOS Risk stale/invalid callback ACKs once
+
+- Root cause: the registered admin callback ACKed before action/payload
+  validation, then its unsupported-action fallback ACKed again. Obsolete
+  actions and malformed required IDs therefore produced two answers.
+- The exact registered `^payrisk\\|` route now validates the action and its
+  required payload before the normal early ACK. Invalid values return the
+  existing alert once; valid branches preserve their early ACK and non-admin
+  denial. No risk action, payment, order, wallet, or provider behavior changed.
+- RED/GREEN: four test methods ran through a direct bundled-Python
+  no-I/O/no-yield driver (`Ran 4 tests in 0.505s — OK`), including all six
+  malformed subcases, emitted report/help controls, and non-admin denial.
+  Native `unittest`/`asyncio.run` stalled before its first async fixture
+  completed under Windows Proactor and was interrupted; it is not counted as a
+  pass. The test is selected in CI, which remains pending.
+- Fixture-only: no production DB, risk mutation, payment, wallet, provider,
+  Telegram send/callback, merge, deploy or restart. Whole-bot compilation and
+  live behavior remain unverified.
+
+## S12.35.320 — Admin Ticket input-prompt Back ancestry
+
+- The Admin Ticket detail keyboard's actual Reply, Ask, and Note controls were
+  each opened through the registered `ticket|` handler. Their emitted Back
+  callback `ticket|av|41|new|0` was dispatched through that same handler and
+  returned the matching ticket detail.
+- The source-extracted fixture uses the actual `set_support_ticket_pending` and
+  `clear_support_ticket_pending` helpers with in-memory `USER_PENDING`: each
+  Back clears actor 501's prompt state and preserves user 999's unrelated state.
+  ACK, detail read and render are asserted; update/send seams remain unused.
+- Sixteen focused test-function cases passed via the bundled Python no-yield
+  runner; test-file `py_compile` and `git diff --check` exited 0. This is direct
+  fixture evidence, not a pytest/CI or live-latency pass. No product mismatch
+  reproduced; no production source fix was needed. Full batch CI, whole-bot
+  compile and global A3/A5/A7 closure remain pending.
+
+## S12.35.327 — Admin Ticket stale status emitted-route confirmation
+
+- `support_ticket_admin_keyboard()` emitted
+  `ticket|st|987654321|resolved|new|0`; this exact value matched the registered
+  `ticket|` handler and was dispatched with an inert stale-ticket lookup.
+- One not-found alert was observed, with no status update or screen render.
+  The malformed-status guard and existing Ticket hub ACK/render cases also pass.
+- The same stale-status assertion passed against `git show HEAD:bot.py`, so no
+  product defect was reproduced. The focused test was strengthened from a
+  hard-coded abbreviated value to the actual emitted callback; no production
+  source was changed.
+- Three direct no-I/O assertions passed, along with focused test `py_compile`
+  and `git diff --check`. CI/live latency remain unverified; no production
+  ticket query, message, or Telegram action occurred.
+
+### S12.35.328 — PayOS Risk report route supplement
+
+The emitted `payrisk|report` control was dispatched through the exact registered
+callback with report, audit, and render sinks replaced by inert fixture functions.
+It ACKed once, rendered the supplied fixture report, recorded exactly one
+fixture audit event, and exposed the expected refresh, Admin, and Main callbacks.
+This closes only the read-only report UI plumbing slice; report-data accuracy,
+other payment-risk actions, production behavior, and live/client rendering remain
+unverified. No database, payment, wallet, provider, real Telegram, or production
+data operation occurred.
+
+### S12.35.329 — Legacy Language `lang_more` route supplement
+
+The retained legacy `lang_more` callback was matched to the registered Language
+handler and dispatched with inert language and render functions. It ACKed once
+and rendered the canonical picker with the fixture's current locale choices,
+`lang_back`, and `menu|main`; preference and usage sinks were not touched. The
+fixture used a two-locale set and does not establish all-locale or persisted
+preference behavior. A heavier composite-test import stalled before route entry;
+the lean source-extracted fixture is the only counted evidence for this slice.
+
+### S12.35.330 — Manual Top-up Back route supplement
+
+The real manual-payment menu keyboard emits menu|main_topup for its Back-to-
+Top-up control. That exact value was dispatched through the registered Menu
+handler and returned the Top-up selector with the expected package and manual
+entry controls, with one ACK. A direct no-I/O fixture and the existing Account
+Top-up suite (5 tests, OK) found no route defect. Payment/order/provider paths
+and Telegram-client latency were not exercised; no financial operation or
+production source change occurred.
+
+### S12.35.331 — ReplyKeyboard Home with Support pending input
+
+The actual extracted handle_message Home branch was composed with the actual
+cmd_start and Support pending-state helpers using inert non-Support cleanup and
+render seams. With an awaiting_ticket_reply fixture, Home rendered Main before
+the Support text handler, cleared only the actor's pending state, retained the
+other user's pending entry, and preserved the actor's last-ticket return ID.
+The no-yield fixture passed; no production/test patch or real Telegram action
+occurred. This does not measure ReplyKeyboard delivery latency or close other
+pending families.
+
+### S12.35.333 — Feedback Home-to-Main registered-route supplement
+
+The Feedback category keyboard's actual Home button emits `menu|main`, which
+matches the registered Menu callback. Dispatching that value through the actual
+`handle_menu_callback` with the production feedback cleanup and inert other
+cleanup families rendered Main, ACKed once, removed the actor's Feedback pending
+entry, and preserved an unrelated pending marker. The subsequent feedback text
+handler returned false without replying. The focused direct fixture passed;
+broader direct execution of the module did not complete and is not counted. No
+production callback defect or `bot.py` change was found. Client rendering,
+live timing, whole-batch CI and other pending families remain unverified.
+
+### S12.35.335 — Memory expired delete-confirmation supplement
+
+The production delete-confirm keyboard's emitted confirmation callback was
+dispatched through the registered Memory handler after its in-memory pending
+state exceeded the TTL. The handler ACKed once, displayed the existing expired
+button message, removed only the actor's expired state, preserved another user's
+state, and reached neither the note-read nor DB seam. The focused fixture passed;
+no production defect or `bot.py` change was found. Other Memory stale/repeat
+routes, live/client behavior and consolidated CI remain unverified.
+
+### S12.35.334 — Feedback prompt Back-to-picker registered-route supplement
+
+The actual Feedback category control was dispatched through its registered
+handler, then the prompt's emitted `feedback|start` Back was dispatched through
+that same registration. The category picker returned with one ACK; the actor's
+old Feedback pending state was cleared, an unrelated user's state was preserved,
+and the next ordinary text was not consumed by the abandoned form. The focused
+direct fixture passed. No production defect or `bot.py` change was found; the
+broader module and live/client behavior remain unverified.
+
+### S12.35.336 — Expired Document confirm callback
+
+The actual Document after-file keyboard's `docflow|confirm` value was dispatched
+through the registered `^docflow\\|` handler after the actor's fixture pending
+state expired. The handler ACKed once, returned the existing expired/no-charge
+Document hub screen, removed only the actor's expired record, preserved a second
+user's fresh state, and did not reach `run_doc_tool_state`. This is stale-control
+navigation evidence only; document processing and live/client timing remain
+unverified.
+
+### S12.35.337 — Expired Document run callback
+
+The actual Document confirmation keyboard's final `docflow|run` value was
+dispatched through the registered `^docflow\\|` handler after the actor's
+fixture pending state exceeded its TTL. It ACKed once, returned the existing
+expired/no-charge hub recovery, removed only the actor's expired state, retained
+another user's fresh pending entry, and did not reach `run_doc_tool_state`.
+Document processing and live/client timing remain unverified.
+
+### S12.35.338 — Expired Document file controls
+
+The actual after-file keyboard's `docflow|send_more`, `docflow|pop`, and
+`docflow|clear` values were each dispatched through the registered `^docflow\\|`
+handler after the actor's fixture pending state expired. Each click ACKed once,
+returned the existing expired/no-charge Document hub screen, removed only the
+actor's stale state and preserved another user's fresh state. No file state was
+mutated and no document processing occurred; live/client behavior remains
+unverified.
+
+### S12.35.339 — Active Document clear-list callback
+
+The active after-file keyboard's `docflow|clear` button was dispatched through
+the registered `^docflow\\|` handler. It ACKed once before locale lookup,
+cleared only the current user's staged file IDs/count/options, preserved a
+second user's pending state, and returned to the upload prompt. No document
+processing, database, charge, provider or Telegram-send operation was invoked.
+This fixture does not establish live rendering or client latency.
+
+### S12.35.358 — Media Library Home callback
+
+The production `media_library_quick_keyboard` emitted `menu|main`; the callback
+matched the registered Menu handler and rendered the fake Main screen with one
+ACK via the handler's actual `localized_menu_content` path. Output:
+`MEDIA_LIBRARY_HOME_REGISTERED_ROUTE_OK: emitted menu|main, one ACK, Main
+screen/keyboard, fixture-only cleanup` (exit 0). No production account/payment,
+provider, job, Telegram-client or engine action was performed.
+
+### S12.35.360 — Admin Provider/Worker handbook guide callbacks
+
+All six testing-labelled buttons emitted by the Provider/Worker module keyboard
+carry the contextual callback `admin_help|provider|admin_provider_worker`. Each
+was dispatched through the exact registered `handle_admin_help_callback`, ACKed
+once, rendered the static Provider/Worker guide and exposed Back to
+`menu|admin_provider_worker` plus Home `menu|main`. The CI-selected
+`test_admin_module_child_back_origin.py` fixture printed
+`ADMIN_PROVIDER_WORKER_GUIDES_OK: 6 emitted controls -> registered help route,
+one ACK, scoped Back/Home, no provider calls` (exit 0). No operational provider,
+worker, TTS/ASR/SubDub or canary action ran; this is route evidence, not live UI or
+operational-check evidence.
+
+### S12.35.361 — Admin Support handbook guide callback
+
+The actual Admin Support module keyboard emitted `📌 Hướng dẫn hỗ trợ` as
+`admin_help|support|admin_support`. It matched the registered
+`handle_admin_help_callback`, ACKed once, rendered the static Support guide, and
+emitted Back to `menu|admin_support` plus Home `menu|main`. Focused fixture output:
+`ADMIN_SUPPORT_GUIDE_REGISTERED_ROUTE_OK: exact emitted callback, one ACK,
+Support Back/Home, no ticket/data action` (exit 0). No Ticket, customer-data or
+notification action was invoked; live rendering/latency remains unverified.
+
+### S12.35.362 — Admin module handbook footer matrix
+
+For every key in the current `ADMIN_CONTROL_MODULES` registry, the fixture emitted
+its module-footer `📘 Hướng dẫn` button and dispatched the exact contextual
+callback through the registered `handle_admin_help_callback`. All guide routes
+ACKed once, rendered the corresponding static handbook section, and exposed Back
+to `menu|admin_<module>` plus Home `menu|main`. The CI-selected route fixture
+printed `ADMIN_MODULE_GUIDE_MATRIX_OK: all emitted footer guides -> exact
+registered handler, one ACK, scoped Back/Home` (exit 0). No operational checks,
+providers, DB/customer reads, payment, engine or Telegram action was run.
+
+### S12.35.363 — External callback-emitter source census
+
+A read-only source search found 16 Python files under `services/` or `handlers/`
+containing `callback_data` or `InlineKeyboardButton`. The five `handlers/*`
+modules appear imported only by `handlers/__init__.py` in the source search; no
+runtime reachability is claimed. Active service emitters found in `bot.py` map
+to locked AutoPost, Product/Video, or SubDub/Music progress areas, except the
+shared navigation helper already covered by S12.35.351. `workflow_graph_contract`
+contains callback matching/validation but is not proof of an actual Telegram
+keyboard. This is a grep census, not AST/runtime route evidence; protected and
+opaque routes remain open and were not exercised.
+
+### S12.35.364 — FreeHub empty publish-package guidance
+
+The production Free Tools keyboard's `freehub|publish_package` callback was
+dispatched through the exact registered `handle_free_hub_callback` with empty
+pending state. The handler ACKed once, rendered localized prompt guidance with
+the no-Xu copy, and preserved the hub keyboard. Result text/keyboard helpers were
+fail-fast and not called; no AutoPost, provider, engine, wallet, social publish,
+Telegram send or production-data operation was run. Output:
+`FREEHUB_EMPTY_PACKAGE_GUIDE_OK: emitted callback -> registered route, one ACK,
+actual copy/no-Xu, no publish helper, hub keyboard retained` (exit 0).
+
+### S12.35.365 — FreeHub package result Back ancestry
+
+The production `free_hub_result_keyboard` emitted `freehub|publish_package`; with
+fixture result state, the exact registered FreeHub handler ACKed once and rendered
+the package summary. Its emitted `freehub|prompt_back` was dispatched through the
+same registration, ACKed once, and restored the same result content and exact
+keyboard while preserving pending state. The result's emitted `freehub|main`
+then returned to the fixture Free Tools root, cleared only the actor's pending
+result, and preserved another user's pending record. The emitted `freehub|copy`
+also remained on the same result and only added localized copy instructions.
+Output: `FREEHUB_PACKAGE_BACKSTACK_OK: package Back restores result; Copy stays
+on same result; Home clears actor only; ACK/state assertions pass` (exit 0). No generation, save/persist,
+AutoPost, provider, payment, wallet, engine, data or Telegram-send action ran.
+
+### S12.35.366 — Admin Queue refund guide callback
+
+The actual Queue module screen emitted “Hướng dẫn hoàn Xu khi job lỗi” with
+`admin_help|refund|admin_queue`. Dispatch through the registered
+`handle_admin_help_callback` ACKed once, rendered the static refund instructions,
+and exposed Back to `menu|admin_queue` plus Home `menu|main`. Output:
+`ADMIN_QUEUE_REFUND_GUIDE_ROUTE_OK: emitted scoped callback -> registered help,
+one ACK, Queue Back/Home, no job/refund` (exit 0). No job query, refund/payment,
+wallet, provider, customer data or production Telegram action ran.
+
+### S12.35.367 — Admin Provider/Worker Route Info Back/Home
+
+The real Provider/Worker screen emitted `menu|admin_provider_routes|admin_provider_worker`.
+Through the exact registered Menu handler it ACKed once, rendered fixture route
+information, and emitted Back to `menu|admin_provider_worker` plus Home
+`menu|main`. Output: `PROVIDER_ROUTE_INFO_BACK_HOME_OK: exact emitted callback,
+one ACK, Back to Provider/Worker, Home, fake report only` (exit 0). No provider
+or worker check or production report read ran.
+
+### S12.35.368 — FreeHub translation input Back
+
+The actual Free Tools keyboard emitted `freehub|open_translate`, which matched
+the registered `handle_free_hub_callback`, ACKed once, and rendered the input
+prompt with actor-scoped pending state. The prompt's emitted `freehub|main` Back
+was dispatched through that same registration, ACKed once, returned to the hub,
+and cleared only the actor's pending input; another user's state was preserved.
+Output: `FREEHUB_TRANSLATION_PROMPT_REGISTERED_BACK_OK: emitted callback, exact
+handler, one ACK each, actor-only pending cleanup` (exit 0). No user text,
+translation, provider, production state or Telegram send was involved.
+
+### S12.35.369 — FreeHub Docs immediate-parent Back
+
+The production `free_hub_docs_keyboard` emitted `freehub|docs_split_merge` and
+`freehub|docs_summary_guard`. Both exact registered callbacks rendered their
+static guides and emitted Back=`freehub|docs`; dispatching Back previously
+returned `menu_text_main_memory_i18n` / `main_memory_keyboard`, the wrong parent.
+The narrow fix routes only `action == "docs"` back to the FreeHub PDF/Word tools
+screen and preserves the legacy `action == "notes"` Memory destination. Both
+Back paths now restore the original docs text/keyboard with HTML parsing and one
+ACK per click.
+Output: `FREEHUB_DOCS_BACK_ROUTE_GREEN: split/summary Back returns exact docs
+keyboard; legacy notes destination preserved` (exit 0). No file, provider,
+payment, production data or protected engine action ran.
+
+### S12.35.370 — FreeHub Docs image/compress hint origin
+
+The production FreeHub Docs keyboard's Image→PDF and Compress-PDF buttons
+previously emitted generic `menu|hint_doc_*` routes; those Menu-handler hints
+returned Back=`menu|main_docs`, not the originating FreeHub docs keyboard. The
+narrow fix scopes only these two FreeHub emitters as `freehub|docs_image_to_pdf`
+and `freehub|docs_compress_pdf`, reuses the localized hint text, and returns
+Back=`freehub|docs`. Generic Main Docs hint routes remain untouched. Focused
+registered-route fixture output: `FREEHUB_DOC_HINT_BACK_ROUTE_GREEN: image/compress
+hint Back restores exact FreeHub Docs screen; generic docs routes unchanged`
+(exit 0). It verifies both routes, HTML parsing and one ACK; no file/provider or
+engine action ran. A protected comparator also dispatches generic
+all five `main_docs_keyboard` `menu|hint_doc_*` controls and confirms each Back
+remains `menu|main_docs` with the original keyboard. Existing FreeHub Docs
+keyboard expectations in `test_core.py` and `test_free_tools_hub_v1.py` were
+updated to scoped callback values; the generic emitter remains unchanged.
+
+### S12.35.371 — Current-main inline-button callback expression census
+
+Token-stream extraction followed by per-constructor AST parsing on exact local
+`origin/main:bot.py` (`381c71bb9e52876eb35b15f5c417ca2cf833dc28`, 15,029,211 bytes)
+returned 4,003 `InlineKeyboardButton` calls; 3,979 had callback data and 24 did
+not. It parsed 914 non-literal expressions (names/calls/f-strings/conditionals/
+subscripts), with zero per-call parse failures. Counts align with the earlier
+S12.35.350 button inventory. This does not prove handler coverage/permissions or
+dispatch correctness for dynamic values; no callbacks were executed and no
+product/provider/AutoPost routes were touched.
+
+### S12.35.372 — FreeHub legacy BYOK disabled fallback
+
+The current Free Tools root keyboard does not emit `freehub|byok`, but the
+registered handler still accepts older/stale callback buttons. With BYOK disabled,
+the legacy route previously rendered generic support-setup copy in place of an
+explicit unavailable/no-key warning. The narrow copy branch now says in both
+Vietnamese and English that TOAN AAS is not accepting API keys and keys must not
+be sent in chat. The registered-route fixture passed (1 test, exit 0), ACKed once,
+cleared only the actor's temporary pending state, preserved another user's state,
+and rendered the actual Free Tools root keyboard. It did not inspect or accept a
+key or call a provider. Whole-source py_compile was interrupted after about six
+minutes without an exit result and remains unverified; `git diff --check` exited
+0 with existing LF-to-CRLF warnings. No production runtime, provider, wallet,
+database or Telegram send was touched.
+
+### S12.35.373 — FreeHub root Music/SFX shortcut ancestry
+
+The exact Music/SFX button emitted from the actual Free Tools root previously
+shared `freehub|lib_music` with the Prompt Library category button. Dispatching
+that root shortcut through the registered FreeHub handler opened the Music/SFX
+suggestions page, but its Back emitted `freehub|library`, the wrong parent; the
+focused regression reproduced this RED. The fix gives only the root shortcut a
+distinct `freehub|lib_music_root` callback, stores its parent (`freehub|main`)
+in that user's temporary FreeHub state, and emits root-scoped More/Pick/item-Back
+callbacks. Its Back label and destination now identify Free Tools; More and item
+Back preserve the origin, and a stale root-scoped More returns to Free Tools.
+Selecting a music prompt and choosing Copy also preserves the root-scoped item
+Back callback.
+The same Music category from the Prompt Library still emits `freehub|lib_music`
+and returns to `freehub|library`. Latest registered-route fixture: 1 test in
+0.805s — OK; related FreeHub regressions: 4 tests in 3.283s — OK. The test stubbed
+the prompt library, so no prompt source, audio/music engine, provider, database,
+wallet, Telegram or production state was accessed. Full-source compile and CI
+remain release gates; no push/PR/merge/deploy/restart occurred.
+
+The adjacent Aichat Back → Free Tools assertion also checks the updated root
+callback set. Its first `asyncio.run` attempt stalled in the Windows fixture;
+the dispatcher was changed to the existing no-yield runner (no production
+behavior change). Final targeted Aichat-root + Music/SFX registered-route rerun:
+2 tests in 1.062s — OK. No Chatbot behavior/state was altered.
+
+### S12.35.378 — Local Video Studio public-planner persist callback
+
+The actual planner summary emitter produced `lvs27b|<session>|persist`; the
+callback matched the production `^lvs27b\\|` registration and dispatched through
+`handle_local_video_studio_public_callback`. A test-local, shared-memory SQLite
+database stored exactly one plan. Replaying the same Telegram callback ID was
+ACK-only/no-edit; a distinct ID for the unchanged plan returned the saved view
+without creating another row or incrementing its version. An unrelated
+`video_edit_sentinel` in the same context remained unchanged. Output:
+`test_local_video_public_plan_save_button_uses_registered_handler_idempotently`
+ran 1 test in 0.132s — OK. No production DB, provider, wallet, job, video render,
+Telegram API or engine operation was used. Other saved-plan list/view/edit/delete
+routes and public client rendering/latency remain unverified.
+
+S12.35.378 updates the `lvs27b` row above: the emitted persist control is now
+verified through the exact registered handler using a shared in-memory SQLite
+database. One plan row is created; the same callback ID is ACK-only, and a new
+callback ID with unchanged plan content does not add a row or increment version.
+The remaining local saved-plan list/view/edit/delete callbacks and actual client
+rendering/latency remain unverified.
+
+### S12.35.382 — `/profile` command-emitted Account callback round-trip
+
+The registered `/profile` command emitted the production localized Account
+keyboard. Its actual `menu|profile_packages` button matched the source's
+registered `handle_menu_callback` route and dispatched with one ACK. The
+fixture-only Packages screen emitted Back=`menu|main_profile` and Home=`menu|main`;
+Back restored the same six-row command keyboard and Home returned to the fixture
+Main screen. Targeted output: `Ran 1 test in 0.718s — OK`. No production account
+or package data, payment, wallet, provider, AutoPost, or engine path was used.
+Current main #1424 diff does not mention `cmd_profile`, `main_profile_keyboard`,
+or the Account callback values; no latest-main runtime/deploy claim is made.
+
+### S12.35.383 — Customer Ticket Done stale replay
+
+The production Ticket-detail keyboard emitted the scoped Done callback and the
+exact `^ticket\|` registered handler processed two separate query objects.
+Before the fix, the second press after the fixture Ticket had become `resolved`
+called `update_support_ticket(status="resolved")` a second time and rewrote the
+close/update timestamp. The Done branch now skips only that redundant update for
+an already `resolved`/`closed` owned Ticket; the same ACK, success text, pending
+cleanup and Back/Home keyboard are preserved. Replays against both resolved and
+closed fixture Tickets keep the update count at one. GREEN: duplicate replay,
+existing Done Back ancestry, and emitted Done/ACK regression returned
+`Ran 3 tests in 15.852s — OK`. Fixture-only; no production Ticket, notification,
+provider, wallet, or Telegram operation. Main #1424 diff does not touch this
+Ticket handler/keyboard; runtime behavior is not claimed.
+
+### S12.35.379 — Current-main #1424 Owner-live callback (static only)
+
+Read-only GitHub API reports `main=e2b48f215f30a088156a1e29c1f402170274dcf0`
+(2026-10-12), one commit beyond local `origin/main` `381c71bb…`. The commit
+modifies `bot.py` and provider/spend-guard, Key4U/ShopAI TTS, video provider,
+video queue and public-chat services. Its bot patch adds an Owner live-accept
+button, a dedicated handler, a `VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES` entry and
+`video_route_expected_handler` mapping. The same patch has no explicit
+`CallbackQueryHandler(handle_product_video_owner_live_accept_callback, ...)`
+registration; the existing broad `^vproduct\|` handler is unchanged. Static
+evidence leaves the actual dispatcher owner uncertain, so this is a possible
+misroute, not a confirmed runtime defect.
+
+The new handler validates a durable Owner receipt and may propagate to
+`confirm_video_project_invoice` to authorize a paid live test. For that reason
+this audit did not dispatch the callback, read a receipt, call a provider, touch
+queue/wallet state, add a registration, or rebase the protected main delta. A
+separate explicit Owner approval is required before wiring or exercising the
+paid path. Keep this route `NOT_VERIFIED / OWNER_GATE`; it does not stop other
+safe callback audits.
+
+### S12.35.380 — Local Video Studio saved-plan list/detail/back
+
+The audit-worktree planner summary keyboard emitted the saved-plan list callback; its list
+emitted the current owner's saved-plan detail callback; Detail emitted `library`
+Back. All three values matched the source's actual `CallbackQueryHandler`
+registration and dispatched through its callback with one ACK each. A shared
+in-memory SQLite fixture confirmed owner/chat-scoped rows, restored the same list
+after Back, and retained exactly the three seed rows. Output:
+`Ran 1 test in 0.145s — OK`. No production DB, plan mutation, provider, wallet,
+job, render, Telegram API, or Product/Edit engine was used. The source was the
+audit branch based on `381c71bb…`, not protected latest-main #1424 (`e2b48f2…`)
+or live runtime; this result is not a latest-main/live claim.
+
+### S12.35.384 — Customer Ticket Done concurrent callback
+
+Two callbacks using the actual emitted scoped Done value were dispatched through
+the exact registered `handle_ticket_callback`, with deterministic scheduling that
+held both owner-scoped fixture reads at `new`. The pre-existing sequential replay
+guard allowed two writes under this race, reproduced by a fixture SQLite trigger.
+The narrow fix delegates only customer Done to
+`resolve_support_ticket_once(ticket_id, user_id)`, a conditional owner-scoped SQL
+UPDATE excluding `resolved`/`closed`, followed by an owned-row readback. The test
+confirmed one transition total, one ACK for each callback, unchanged success
+rendering and identical Ticket-detail Back navigation. Focused combined result:
+`Ran 4 tests in 54.808s — OK`; changed test modules' bundled `py_compile` and
+`git diff --check` exited 0. The fixture used shared in-memory SQLite only. No
+production Ticket, notification, payment, wallet, provider, engine, AutoPost or
+Telegram action occurred. Full `bot.py` compile and latest-main/live behavior
+remain unverified; this evidence closes only the concurrent Done route slice.
+
+### S12.35.385/.386 — Admin Ticket status validation and response order
+
+The Admin Ticket detail keyboard emits three status values only:
+`resolved`, `refund_pending`, and `waiting_provider`. A callback derived from its
+actual resolved button but changed to `not_a_status` previously performed a
+Ticket read and wrote the unsupported value; the handler now rejects unsupported
+statuses before any read/update. All three emitted values still pass through the
+exact registered `handle_ticket_callback`, update only the fixture, ACK once, and
+preserve the existing refund warning. Six focused source-extracted checks passed;
+the refund-notice replay regression ran `Ran 1 test in 0.304s — OK`.
+
+The valid emitted status route also previously performed synchronous language and
+Ticket reads before acknowledging the callback (`[('language', 0), ('ticket', 0)]`).
+It now performs exactly one ACK before both reads. If the ticket is stale, it edits
+to a localized not-found screen with Back to the original source/page and Main
+Home; it does not attempt a second alert ACK or update. The same focused six checks
+cover this order/recovery. Focused status test functions and existing refund replay
+passed; the broad origin/page regression is recorded `NOT_VERIFIED` because it
+stalled locally. Full `bot.py` compile currently has a no-result local process
+pending, so no full-source or CI pass is claimed. Fixture-only; no production
+Ticket, payment, wallet, provider, engine, AutoPost or Telegram action occurred.
+
+## S12.35.405 — Owner live-accept callback receipt binding — exact-head lock
+
+Both actual Owner live-accept keyboard builders now emit the 12-character
+receipt token consumed by the dedicated registered callback route. The route
+rejects missing or stale receipt tokens with one expiry response before the
+existing paid-test gate. RED reproduced the keyboard-token mismatch and showed
+that a stale button could otherwise reach that gate. Exact PR head
+`669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed source compile
+`38361311908` and full CI `38361311896` (all 23 steps). This is locked on draft
+PR #1426 only; it is not merged or live. No Telegram event, paid job, provider,
+invoice, wallet, production data, or Product Video engine path was exercised.
+
+## Exact-head verification update — 2026-10-13
+
+Superseding earlier “CI pending” or “not proven” notes for the specific
+S12.35.319 and S12.35.399–.402 slices: PR head
+`669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI run `38361311896`,
+including complete-source compilation and the explicit navigation test step.
+That CI locks only the already-described ACK-order, malformed Video-status ACK,
+and Image Back-origin fixes on draft PR #1426. The handler families remain
+PARTIAL where their other terminals, production actions, or live client behavior
+were not exercised; this does not claim those routes are fully verified or live.
+
+### S12.35.404 — Product Video Owner live-accept callback registration
+
+The current-main keyboard emitted `vproduct|owner_live_accept` or the same
+callback with a 12-character lowercase-hex receipt token. The route map expected
+`handle_product_video_owner_live_accept_callback`, but lifespan registered only
+the generic Product Video route. RED: the exact dedicated route regression
+failed because that registration was absent. The narrow fix registers the
+existing handler with an anchored token pattern before the generic handler and
+excludes this action from the generic pattern. GREEN: focused route/dedupe tests
+passed (2 tests); source compile #38353329268 and full CI #38353329226 both
+passed on exact commit `b3f91bb0e8b7a74fdc9d7255617624f384b2135b`, including the
+Product Callback Replay Guard Boundary step. The handler can admit an
+Owner-authorized paid Product Video test; no callback was dispatched and no
+invoice, job, provider, wallet, or production data was touched. This closes only
+the callback registration defect; PR #1426 is still OPEN/DRAFT and not deployed.
+
+### S12.35.395 — Local Video Studio saved-plan navigation/CRUD fixture result
+
+The actual Local Video Studio saved-plan `lvs27b` callback registration, entry,
+list, detail, Back, edit, confirmed delete, owner/chat isolation, delete-failure
+recovery, and optimistic-version fixtures returned without product assertions
+failing. The original direct runner exited 1 during Windows temporary SQLite
+cleanup, so it is not counted as a clean test PASS. A focused pytest retry stayed
+silent for more than four minutes and was interrupted; record it as
+NOT_VERIFIED. The four local SQLite-backed saved-plan tests have been selected
+in the existing Linux Small Navigation CI step; that result is pending push/CI.
+No video generation/render/provider, payment, wallet, production DB, Telegram,
+or protected engine action was used.
+
+### S12.35.400 — Manual top-up foreign-owner ACK count
+
+Ten customer controls emitted by the real manual top-up and PayOS-recovery
+keyboards were dispatched through the exact registered manual callback route
+for a non-owner.
+Before the narrow change, each produced an empty ACK followed by the existing
+denial alert. Deferring the ACK until after the owner check leaves exactly one
+denial alert. The regression asserts that no state/DB/payment/provider seam is
+entered. Bundled-Python verification with the related manual-package suite:
+`Ran 3 tests in 1.843s — OK`. CI selection now includes the new test; full-source
+compile and consolidated CI remain pending.
+
+### S12.35.395 — Local Video Studio saved-plan route recheck
+
+The exact registered `^lvs27b\\|` handler pattern covers the emitted entry and
+saved-plan actions. The registered entry/Back fixture passed its assertions,
+including expired Back recovery. Four additional existing fixture bodies
+dispatched list/view/edit/delete-confirm and failure/retry cases through the
+source-extracted handler with owner/chat-scoped temporary SQLite data; all
+assertion bodies returned without assertion failure. No ownership, Back, retry,
+or stale-plan defect was reproduced. The direct runner exited non-zero only while
+Windows attempted temporary SQLite cleanup; the exact temp directory was removed
+after process exit. Bundled pytest is unavailable, so these results are not a
+clean full-module or test-suite PASS. No product code, production DB, render,
+provider, wallet, job, Telegram API, AutoPost, protected engine, merge, deploy,
+or runtime was touched.
+
+### S12.35.393 addendum — last-confirmed-main PayOS callback regression
+
+The table's S12.35.319 single-ACK fix describes the audit branch, not the last-
+confirmed main source (read-only SHA check 2026-10-12). Exact
+`e2b48f215f30a088156a1e29c1f402170274dcf0:bot.py` extraction through the emitted
+`payos_pkg|10k|123` control and registered handler reproduced
+the pre-fix foreign-owner behavior: two ACKs (`ACK_COUNT=2`) and event order
+`expire → ACK → ACK`. The audit-branch fixture invoked all five top-level
+assertions successfully. This is source/test evidence only; latest VPS runtime,
+final-main CI and delivery remain unverified. Do not repeat or claim the fix is
+live before final exact-main reconciliation.
+
+### S12.35.390 — Home clears Local Video Studio text-input ownership
+
+`cmd_start` (also used by `/menu`) and the common `handle_menu_callback` cleanup
+did not clear `_LOCAL_VIDEO_PLANNING_PENDING_KEY`, even though the next text
+message handler consumes that marker as Local Video Studio brief input. The
+emitted Home button from `main_video_keyboard()` is `menu|main` and matches the
+registered `^menu\|` route. RED was reproduced through the actual command and
+registered callback handler fixtures. The fix calls the existing
+`_local_video_planning_clear_pending(context)` at both exit boundaries; only the
+input-owner marker is removed, while saved planner session and Video Edit state
+remain unchanged. Direct fixture output: `PASS (cmd_start, cmd_menu, emitted
+Video-menu Home via registered Menu handler)`. No rendering/provider, Xu, DB,
+Telegram, or protected engine work occurred. Full-source CI/compile and broader
+A3/A5/A6/A7 acceptance remain open.
+
+### S12.35.389 — PayOS foreign-owner denial locale
+
+An actual package-choice button was dispatched through the exact registered
+`handle_package_choice` handler with callback owner 123 and clicker 456. The
+fixture configured different locales and proved RED: the handler looked up the
+package owner's language, so the clicker's denial could be rendered in the
+wrong language. The one-line branch change now looks up `query.from_user.id`.
+All five focused package-choice assertions pass, including one denial alert and
+the already-verified ACK-before-expiry order. No payment/order path or production
+data was entered. The test is CI-selected; full bot compile and consolidated CI
+remain release gates.
+
+### S12.35.387 — Memory delete confirmation owner scope and replay
+
+The emitted `memory|delete_yes|445|fixture-delete-token` control matched the
+registered `^memory\\|` handler and was dispatched through the extracted
+production handler. The fixture observed one owner-scoped archive update, one
+ACK/event/success render, actor-only pending cleanup, and preservation of another
+user's pending marker. Replaying the consumed callback ACKed once and returned
+expired/invalid guidance without another update or event. The focused assertion
+and existing expired-confirm assertion passed; test-file compilation and
+`git diff --check` exited 0. The full Memory module stalled after its first dot
+and is `NOT_VERIFIED`, not a product failure. No production note/DB, Telegram,
+provider, wallet, AutoPost, or protected engine was touched; consolidated CI,
+whole-source compile, remaining A3/A5/A6/A7, main/protected comparison and batch
+delivery remain open.
+
+### S12.35.388 — Memory search-origin delete Cancel pending cleanup
+
+RED reproduced on the actual emitted cancel value
+`memory|view|445|search|old-search`: after the search TTL expired, the registered
+Memory handler returned to its root screen but left the matching fresh
+`delete_confirm` state pending. The narrow fix stores the origin search token on
+search-origin confirmations and clears only the pending action with matching
+note ID and token on invalid/expired search context or missing result. It
+preserves a newer confirmation with a different token. The emitted route fixture,
+owner/replay confirmation regression, and expired-confirm regression passed
+(`Ran 3 tests in 3.419s — OK`); test-file `py_compile` and `git diff --check`
+exited 0. No production Memory data, provider, wallet, Telegram send, AutoPost,
+or protected engine action occurred. Full module/source compile and consolidated
+CI remain open; this closes only this stale search-cancel route.
+
+### S12.35.391 — `/start` and `/menu` release Finance Compliance input
+
+The `menu|main` callback already calls `clear_finance_compliance_pending`, but
+`cmd_start` and `/menu` did not. An emitted/registered-menu comparison therefore
+showed inconsistent Home exits: fixture state remained pending after
+`/start`/`/menu`, and the next ordinary text could still be parsed as a
+compliance-note update. A source-extracted command fixture reproduced RED. The
+minimal change calls `clear_finance_compliance_pending(uid)` from `cmd_start`.
+Direct fixture GREEN: `Home pending cleanup regressions: PASS (Video planner
+/start, /menu, emitted callback; Finance Compliance actor-only /start and
+/menu)`. Another user's marker is preserved; finance note persistence is never
+called. No financial data, payment, wallet or production path was accessed.
+
+### S12.35.385 — Admin Ticket status values fail closed
+
+The actual Admin Ticket keyboard emits only `resolved`, `refund_pending`, and
+`waiting_provider` status actions. A registered callback derived from the real
+button but with its status replaced by `not_a_status` previously read the fixture
+Ticket and wrote that unsupported status. The handler now rejects other values
+with one unsupported-action alert before Ticket lookup/update/render. All three
+actual emitted status callbacks still dispatch through the registered handler,
+ACK once and apply their fixture status; the existing refund-only explanation is
+unchanged. Focused Admin status fixtures: four checks passed; refund-notice replay
+regression: `Ran 1 test in 0.563s — OK`. Bundled test-module `py_compile` and
+`git diff --check` exited 0. The broader Admin origin/offset test stalled and was
+interrupted (`NOT_VERIFIED`), so no full-module or CI claim is made. No production
+Ticket, payment, wallet, provider, engine, AutoPost or Telegram action occurred.
 

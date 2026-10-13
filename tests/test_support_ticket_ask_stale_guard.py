@@ -52,6 +52,7 @@ def _load_ticket_ask_code():
     namespace = {
         "InlineKeyboardButton": _Button,
         "InlineKeyboardMarkup": _Markup,
+        "asyncio": asyncio,
     }
     exec(compile(keyboard + "\nasync def ask_callback_branch():\n" + ask_branch, str(bot_path), "exec"), namespace)
     return source, namespace
@@ -95,7 +96,6 @@ class SupportTicketAskStaleGuardTests(unittest.TestCase):
         self.namespace.update(action="ask", query=query, uid=query.from_user.id, parts=query.data.split("|"))
 
         async def run():
-            await query.answer()
             await self.namespace["ask_callback_branch"]()
 
         asyncio.run(run())
@@ -107,7 +107,7 @@ class SupportTicketAskStaleGuardTests(unittest.TestCase):
 
         self.assertEqual(self.pending, [])
         self.assertEqual(self.edits, [])
-        self.assertEqual(query.answers[-1], (("Không tìm thấy ticket.",), {"show_alert": True}))
+        self.assertEqual(query.answers, [(("Không tìm thấy ticket.",), {"show_alert": True})])
 
     def test_existing_ticket_keeps_current_ask_prompt_and_pending_state(self):
         ticket = {"id": 73, "ticket_code": "TA-TEST-73"}
@@ -122,6 +122,7 @@ class SupportTicketAskStaleGuardTests(unittest.TestCase):
         )
         self.assertEqual(len(self.edits), 1)
         self.assertIn("👤 Nhập câu hỏi", self.edits[0][0])
+        self.assertEqual(query.answers, [((), {})])
 
 
 if __name__ == "__main__":

@@ -90,6 +90,7 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
         self.namespace = {
             "Update": object,
             "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+            "asyncio": SimpleNamespace(to_thread=self._read_only_thread),
             "InlineKeyboardButton": _Button,
             "InlineKeyboardMarkup": _Markup,
             "USER_PENDING": self.user_pending,
@@ -127,6 +128,9 @@ class SupportTicketSendConcurrencyTests(unittest.TestCase):
 
     async def _safe_edit(self, query, text, reply_markup=None, **kwargs):
         self.edits.append({"query": query, "text": text, "reply_markup": reply_markup})
+
+    async def _read_only_thread(self, helper, *args, **kwargs):
+        return helper(*args, **kwargs)
 
     def _run(self, awaitable):
         return asyncio.run(awaitable)

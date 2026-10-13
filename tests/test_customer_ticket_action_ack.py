@@ -35,6 +35,15 @@ def _runtime(ticket=None):
     async def to_thread(function, *args, **kwargs):
         return function(*args, **kwargs)
 
+    def resolve_owned_ticket_once(ticket_id, uid):
+        assert ticket and ticket_id == ticket["id"]
+        assert str(ticket.get("user_id")) == str(uid)
+        if ticket.get("status") in {"resolved", "closed"}:
+            return dict(ticket)
+        writes.append((ticket_id, {"status": "resolved"}))
+        ticket["status"] = "resolved"
+        return dict(ticket)
+
     ns.update({
         "asyncio": SimpleNamespace(to_thread=to_thread),
         "InlineKeyboardButton": Button, "InlineKeyboardMarkup": Markup,
@@ -42,6 +51,7 @@ def _runtime(ticket=None):
         "public_hub_copy": lambda _lang: Copy(support_ticket_not_found="Ticket not found", support_ticket_action_unsupported="Action not supported"),
         "get_support_ticket": lambda ticket_id, uid=None: reads.append((ticket_id, uid)) or ticket,
         "update_support_ticket": lambda ticket_id, **fields: writes.append((ticket_id, fields)) or {**ticket, **fields},
+        "resolve_support_ticket_once": resolve_owned_ticket_once,
     })
     for name in ("ticket_customer_origin_keyboard", "support_ticket_detail_keyboard", "support_flow_back_keyboard", "support_ticket_pending_key",
                  "set_support_ticket_pending", "clear_support_ticket_pending"):

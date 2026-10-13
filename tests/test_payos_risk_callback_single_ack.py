@@ -1,4 +1,3 @@
-import asyncio
 import re
 import unittest
 from pathlib import Path
@@ -90,6 +89,16 @@ def _registered_risk_route(handler):
     return app.handlers[0]
 
 
+def _run_no_io(coroutine):
+    try:
+        coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    finally:
+        coroutine.close()
+    raise AssertionError("risk callback fixture unexpectedly yielded I/O")
+
+
 class PayOSRiskCallbackSingleAckTests(unittest.TestCase):
     def test_emitted_report_button_matches_real_registered_risk_route(self):
         namespace = _load_functions("payos_risk_menu_keyboard", "handle_payos_risk_callback")
@@ -133,7 +142,7 @@ class PayOSRiskCallbackSingleAckTests(unittest.TestCase):
         self.assertRegex(callback, route.pattern)
 
         query = _Query(991122, callback)
-        asyncio.run(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+        _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
         self.assertEqual(
             query.answers,
@@ -162,7 +171,7 @@ class PayOSRiskCallbackSingleAckTests(unittest.TestCase):
         route = _registered_risk_route(namespace["handle_payos_risk_callback"])
         query = _Query(123, callback)
 
-        asyncio.run(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+        _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
 
         self.assertEqual(query.answers, [((), {})])
         self.assertEqual(len(query.edits), 1)
@@ -171,6 +180,44 @@ class PayOSRiskCallbackSingleAckTests(unittest.TestCase):
             query.edits[0][1]["reply_markup"].inline_keyboard[0][0].callback_data,
             "payrisk|review",
         )
+
+    def test_unsupported_or_malformed_admin_callback_gets_one_alert_ack(self):
+        namespace = _load_functions(
+            "handle_payos_risk_callback",
+            is_admin_user=lambda _uid: True,
+        )
+        route = _registered_risk_route(namespace["handle_payos_risk_callback"])
+
+        malformed_callbacks = (
+            "payrisk|obsolete",
+            "payrisk|unlocklock|not-a-number",
+            "payrisk|unlockuser",
+            "payrisk|keep|not-a-number",
+            "payrisk|cancel",
+            "payrisk|mark",
+        )
+        for callback_data in malformed_callbacks:
+            with self.subTest(callback_data=callback_data):
+                query = _Query(123, callback_data)
+                self.assertRegex(callback_data, route.pattern)
+
+                _run_no_io(
+                    route.callback(
+                        SimpleNamespace(callback_query=query),
+                        SimpleNamespace(),
+                    )
+                )
+
+                self.assertEqual(
+                    query.answers,
+                    [
+                        (
+                            ("Thao tác rủi ro PayOS chưa được hỗ trợ.",),
+                            {"show_alert": True},
+                        )
+                    ],
+                )
+                self.assertEqual(query.edits, [])
 
 
 if __name__ == "__main__":

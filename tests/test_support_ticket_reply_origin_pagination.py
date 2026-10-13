@@ -60,6 +60,15 @@ def _callbacks(markup):
     return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
+def _run_inert(coroutine):
+    try:
+        yielded = coroutine.send(None)
+    except StopIteration as completed:
+        return completed.value
+    coroutine.close()
+    raise AssertionError(f"No-I/O callback fixture unexpectedly yielded: {yielded!r}")
+
+
 def _fixture(language_lookup=None, query_holder=None, ticket_lookup=None):
     admin_id, ticket_id = 4242, 9006
     ticket = {
@@ -113,6 +122,18 @@ def _fixture(language_lookup=None, query_holder=None, ticket_lookup=None):
         "support_ticket_admin_text": lambda _ticket: "ticket detail",
         "safe_edit_or_send": safe_edit_or_send,
     }
+
+    def resolve_support_ticket_once(ticket_id, _user_id):
+        if int(ticket_id) != int(ticket["id"]):
+            return None
+        if str(ticket.get("status") or "").strip().lower() in {"resolved", "closed"}:
+            return dict(ticket)
+        updater = namespace.get("update_support_ticket")
+        if not callable(updater):
+            raise AssertionError("fixture Done route requires an inert update seam")
+        return updater(ticket_id, status="resolved") or dict(ticket)
+
+    namespace["resolve_support_ticket_once"] = resolve_support_ticket_once
     source = (Path(__file__).resolve().parents[1] / "bot.py").read_text(encoding="utf-8")
     for name in (
         "support_ticket_pending_key",
@@ -219,12 +240,12 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(preview_callback))
 
-        detail = asyncio.run(press(preview_callback))
+        detail = _run_inert(press(preview_callback))
         summary_callback = next(
             callback for callback in _callbacks(detail.reply_markups[-1])
             if callback == f"ticket|summary|{ticket_id}|feedback_result"
         )
-        summary = asyncio.run(press(summary_callback))
+        summary = _run_inert(press(summary_callback))
 
         self.assertEqual(language_ack_counts, [1, 1])
         self.assertEqual(ticket_ack_counts, [1, 1])
@@ -266,7 +287,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
 
         namespace["asyncio"] = SimpleNamespace(to_thread=to_thread)
 
-        result = asyncio.run(press(f"ticket|summary|{ticket_id}|feedback_result"))
+        result = _run_inert(press(f"ticket|summary|{ticket_id}|feedback_result"))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(ticket_ack_counts, [1])
@@ -329,7 +350,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         pending = namespace["get_support_ticket_pending"](admin_id)
         self.assertEqual(language_ack_counts, [1])
@@ -385,7 +406,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(ticket_ack_counts, [1])
@@ -446,7 +467,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         pending = namespace["get_support_ticket_pending"](admin_id)
         self.assertEqual(language_ack_counts, [1])
@@ -502,7 +523,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(ticket_ack_counts, [1])
@@ -569,7 +590,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(ticket_ack_counts, [1])
@@ -629,7 +650,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(ticket_ack_counts, [1])
@@ -690,7 +711,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         emitted = next(callback for callback in _callbacks(list_markup) if callback == f"ticket|pv|{ticket_id}")
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(lookup_ack_counts, [1])
@@ -744,7 +765,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         emitted = next(callback for callback in _callbacks(list_markup) if callback == f"ticket|pv|{ticket_id}")
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(language_ack_counts, [1])
         self.assertEqual(lookup_ack_counts, [1])
@@ -776,7 +797,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         self.assertIn("ticket|start", emitted)
         self.assertIsNotNone(handler.pattern.match("ticket|start"))
 
-        result = asyncio.run(press("ticket|start"))
+        result = _run_inert(press("ticket|start"))
 
         self.assertEqual(lookup_ack_counts, [1])
         self.assertEqual(result.answers, 1)
@@ -788,33 +809,33 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
 
         _list_text, list_markup = namespace["support_admin_list_payload"]("high", 6)
         detail_callback = next(cb for cb in _callbacks(list_markup) if cb.startswith(f"ticket|av|{ticket_id}|"))
-        detail = asyncio.run(press(detail_callback))
+        detail = _run_inert(press(detail_callback))
         self.assertEqual(detail.answers, 1)
         detail_markup = detail.reply_markups[-1]
         reply_callback = next(cb for cb in _callbacks(detail_markup) if cb.startswith(f"ticket|reply|{ticket_id}"))
         self.assertEqual(reply_callback, "ticket|reply|9006|high|6")
 
-        prompt = asyncio.run(press(reply_callback))
+        prompt = _run_inert(press(reply_callback))
         self.assertEqual(prompt.answers, 1)
         pending = namespace["get_support_ticket_pending"](4242)
         self.assertEqual((pending["source"], pending["list_offset"]), ("high", "6"))
         back_callback = next(cb for cb in _callbacks(prompt.reply_markups[-1]) if cb.startswith("ticket|av|9006|"))
         self.assertEqual(back_callback, "ticket|av|9006|high|6")
 
-        returned_detail = asyncio.run(press(back_callback))
+        returned_detail = _run_inert(press(back_callback))
         self.assertIsNone(namespace["get_support_ticket_pending"](4242))
         list_callback = next(cb for cb in _callbacks(returned_detail.reply_markups[-1]) if cb.startswith("ticket|al|"))
         self.assertEqual(list_callback, "ticket|al|high|6")
-        asyncio.run(press(list_callback))
+        _run_inert(press(list_callback))
         self.assertEqual(list_calls[-1], {"limit": 6, "offset": 6, "high_priority": True})
 
     def test_reply_preview_back_returns_to_the_same_filtered_page_without_sending(self):
         namespace, handler, press, list_calls, admin_id, ticket_id = _fixture()
         _list_text, list_markup = namespace["support_admin_list_payload"]("high", 6)
         detail_callback = next(cb for cb in _callbacks(list_markup) if cb.startswith(f"ticket|av|{ticket_id}|"))
-        detail = asyncio.run(press(detail_callback))
+        detail = _run_inert(press(detail_callback))
         reply_callback = next(cb for cb in _callbacks(detail.reply_markups[-1]) if cb.startswith(f"ticket|reply|{ticket_id}"))
-        prompt = asyncio.run(press(reply_callback))
+        prompt = _run_inert(press(reply_callback))
 
         replies = []
 
@@ -827,22 +848,22 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         send_attempts = []
         context = SimpleNamespace(bot=SimpleNamespace(send_message=lambda **kwargs: send_attempts.append(kwargs)))
-        handled = asyncio.run(namespace["handle_support_pending_input"](update, context))
+        handled = _run_inert(namespace["handle_support_pending_input"](update, context))
         self.assertTrue(handled)
         self.assertEqual(len(replies), 1)
         preview_markup = replies[-1][1]["reply_markup"]
         back_callback = next(cb for cb in _callbacks(preview_markup) if cb.startswith(f"ticket|av|{ticket_id}|"))
         self.assertEqual(back_callback, "ticket|av|9006|high|6")
 
-        returned_detail = asyncio.run(press(back_callback))
+        returned_detail = _run_inert(press(back_callback))
         self.assertIsNone(namespace["get_support_ticket_pending"](admin_id))
         list_callback = next(cb for cb in _callbacks(returned_detail.reply_markups[-1]) if cb.startswith("ticket|al|"))
         self.assertEqual(list_callback, "ticket|al|high|6")
-        asyncio.run(press(list_callback))
+        _run_inert(press(list_callback))
         self.assertEqual(list_calls[-1], {"limit": 6, "offset": 6, "high_priority": True})
         self.assertEqual(send_attempts, [])
 
-    def test_emitted_admin_ticket_detail_acks_before_lookup_and_restores_list(self):
+    def test_emitted_admin_ticket_detail_skips_language_lookup_and_restores_list(self):
         active_queries = []
         language_ack_counts = []
         ticket_ack_counts = []
@@ -882,9 +903,9 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
-        self.assertEqual(language_ack_counts, [1])
+        self.assertEqual(language_ack_counts, [])
         self.assertEqual(ticket_ack_counts, [1])
         self.assertEqual(result.answers, 1)
         self.assertIn("ticket|al|high|6", _callbacks(result.reply_markups[-1]))
@@ -927,9 +948,9 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
-        self.assertEqual(language_ack_counts, [1])
+        self.assertEqual(language_ack_counts, [])
         self.assertEqual(ticket_ack_counts, [1])
         self.assertEqual(result.answers, 1)
         self.assertEqual(result.reply_markups[-1].inline_keyboard[0][0].callback_data, "ticket|al|high|6")
@@ -951,7 +972,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         )
         self.assertIsNotNone(handler.pattern.match(emitted))
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(result.answers, 1)
         self.assertTrue(result.reply_markups == [])
@@ -983,7 +1004,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
         namespace["list_support_tickets"] = tracked_list_support_tickets
         namespace["asyncio"] = SimpleNamespace(to_thread=to_thread)
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(result.answers, 1)
         self.assertEqual(offloads, [("support_admin_list_payload", 1)])
@@ -1011,7 +1032,7 @@ class AdminTicketReplyOriginPaginationTest(unittest.TestCase):
 
         namespace["list_support_tickets"] = tracked_list_support_tickets
 
-        result = asyncio.run(press(emitted))
+        result = _run_inert(press(emitted))
 
         self.assertEqual(result.answers, 1)
         self.assertEqual(reads, [])

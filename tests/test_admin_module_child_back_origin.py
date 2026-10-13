@@ -205,10 +205,10 @@ class AdminModuleChildBackTests(unittest.TestCase):
 
     def test_provider_worker_route_info_control_matches_its_registered_destination(self):
         ns, route, _, reads = _runtime()
+        parent = _dispatch(route, "menu|admin_provider_worker")
         button = next(
             button
-            for row in ns["admin_module_keyboard"]("provider_worker").inline_keyboard
-            for button in row
+            for button in _controls(parent)
             if button.callback_data.startswith("menu|admin_provider_routes|")
         )
 
@@ -216,6 +216,10 @@ class AdminModuleChildBackTests(unittest.TestCase):
         opened = _dispatch(route, button.callback_data)
         self.assertEqual(["admin_provider_routes_text"], reads)
         self.assertIn("INERT DATA: admin_provider_routes_text", opened.edits[0][0])
+        backs = [(item.text, item.callback_data) for item in _controls(opened) if item.text.startswith("⬅")]
+        self.assertEqual([("⬅️ 🤖 Provider / Worker", "menu|admin_provider_worker")], backs)
+        self.assertIn("menu|main", [item.callback_data for item in _controls(opened)])
+        self.assertEqual([((), {})], opened.answers)
 
     def test_provider_worker_smoke_test_shortcut_is_labeled_as_guide(self):
         ns, route, _, _ = _runtime()
@@ -233,6 +237,156 @@ class AdminModuleChildBackTests(unittest.TestCase):
         guide_buttons = [b for b in _controls(opened) if b.callback_data.startswith("menu|smoke_")]
         self.assertTrue(guide_buttons)
         self.assertTrue(all(b.text.startswith("📘 Hướng dẫn") for b in guide_buttons))
+
+    def test_provider_worker_test_buttons_dispatch_to_registered_static_guide(self):
+        ns, menu_route, _, _ = _runtime()
+
+        def dispatch_no_io(route, callback):
+            if not route.pattern.match(callback):
+                raise AssertionError("emitted callback is not registered: " + callback)
+            query = fixture.Query(callback)
+            coroutine = route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+            try:
+                coroutine.send(None)
+            except StopIteration:
+                return query
+            coroutine.close()
+            raise AssertionError("guide callback unexpectedly yielded I/O")
+
+        parent = dispatch_no_io(menu_route, "menu|admin_provider_worker")
+        guide_labels = {
+            "📘 Hướng dẫn: TTS/Voice test",
+            "📘 Hướng dẫn: ASR/Sub/Dub test",
+            "📘 Hướng dẫn: Remote Worker Status",
+            "📘 Hướng dẫn: Test worker API",
+            "📘 Hướng dẫn: Remote Worker Canary",
+            "📘 Hướng dẫn: Canary status",
+        }
+        guide_buttons = [button for button in _controls(parent) if button.text in guide_labels]
+        self.assertEqual(guide_labels, {button.text for button in guide_buttons})
+        self.assertEqual({"admin_help|provider|admin_provider_worker"}, {button.callback_data for button in guide_buttons})
+
+        for name in (
+            "admin_handbook_section_text",
+            "admin_handbook_section_keyboard",
+            "handle_admin_help_callback",
+        ):
+            exec(compile("from __future__ import annotations\n" + fixture._function(name), "bot.py:" + name, "exec"), ns)
+        registrations = []
+        ns["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        ns["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in fixture.SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback," in line
+        )
+        exec(registration, ns)
+        help_route = next(route for route in registrations if route.callback is ns["handle_admin_help_callback"])
+
+        for button in guide_buttons:
+            with self.subTest(label=button.text):
+                query = dispatch_no_io(help_route, button.callback_data)
+                self.assertEqual([((), {})], query.answers)
+                self.assertIn("Smoke test thật có thể tốn cost", query.edits[0][0])
+                callbacks = [item.callback_data for row in query.edits[0][1]["reply_markup"].inline_keyboard for item in row]
+                self.assertIn("menu|admin_provider_worker", callbacks)
+                self.assertIn("menu|main", callbacks)
+
+    def test_admin_support_guide_button_returns_to_support_module(self):
+        ns, menu_route, _, _ = _runtime()
+
+        def dispatch_no_io(route, callback):
+            if not route.pattern.match(callback):
+                raise AssertionError("emitted callback is not registered: " + callback)
+            query = fixture.Query(callback)
+            coroutine = route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}))
+            try:
+                coroutine.send(None)
+            except StopIteration:
+                return query
+            coroutine.close()
+            raise AssertionError("support handbook callback unexpectedly yielded I/O")
+
+        support_page = dispatch_no_io(menu_route, "menu|admin_support")
+        button = next(button for button in _controls(support_page) if button.text == "📌 Hướng dẫn hỗ trợ")
+        self.assertEqual("admin_help|support|admin_support", button.callback_data)
+
+        for name in (
+            "admin_handbook_section_text",
+            "admin_handbook_section_keyboard",
+            "handle_admin_help_callback",
+        ):
+            exec(compile("from __future__ import annotations\n" + fixture._function(name), "bot.py:" + name, "exec"), ns)
+        registrations = []
+        ns["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        ns["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in fixture.SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback," in line
+        )
+        exec(registration, ns)
+        help_route = next(route for route in registrations if route.callback is ns["handle_admin_help_callback"])
+
+        opened = dispatch_no_io(help_route, button.callback_data)
+        self.assertEqual([((), {})], opened.answers)
+        self.assertIn("Mở Ticket admin", opened.edits[0][0])
+        callbacks = [item.callback_data for row in opened.edits[0][1]["reply_markup"].inline_keyboard for item in row]
+        self.assertIn("menu|admin_support", callbacks)
+        self.assertIn("menu|main", callbacks)
+
+    def test_every_admin_module_footer_guide_reaches_scoped_handbook(self):
+        ns, _, _, _ = _runtime()
+        for name in (
+            "admin_handbook_section_text",
+            "admin_handbook_section_keyboard",
+            "handle_admin_help_callback",
+        ):
+            exec(compile("from __future__ import annotations\n" + fixture._function(name), "bot.py:" + name, "exec"), ns)
+        registrations = []
+        ns["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        ns["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in fixture.SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_admin_help_callback," in line
+        )
+        exec(registration, ns)
+        help_route = next(route for route in registrations if route.callback is ns["handle_admin_help_callback"])
+
+        def dispatch_no_io(callback):
+            if not help_route.pattern.match(callback):
+                raise AssertionError("emitted callback is not registered: " + callback)
+            query = fixture.Query(callback)
+            coroutine = help_route.callback(SimpleNamespace(callback_query=query), SimpleNamespace())
+            try:
+                coroutine.send(None)
+            except StopIteration:
+                return query
+            coroutine.close()
+            raise AssertionError("static handbook callback unexpectedly yielded I/O")
+
+        module_keys = tuple(ns["ADMIN_CONTROL_MODULES"])
+        self.assertTrue(module_keys)
+        for module_key in module_keys:
+            with self.subTest(module=module_key):
+                markup = ns["admin_module_keyboard"](module_key)
+                guide = next(button for row in markup.inline_keyboard for button in row if button.text == "📘 Hướng dẫn")
+                parts = guide.callback_data.split("|")
+                self.assertEqual(["admin_help", ns["ADMIN_CONTROL_MODULES"][module_key].get("guide") or module_key, f"admin_{module_key}"], parts)
+
+                opened = dispatch_no_io(guide.callback_data)
+                self.assertEqual([((), {})], opened.answers)
+                self.assertEqual(ns["admin_handbook_section_text"](parts[1]), opened.edits[0][0])
+                callbacks = [button.callback_data for row in opened.edits[0][1]["reply_markup"].inline_keyboard for button in row]
+                self.assertIn(f"menu|admin_{module_key}", callbacks)
+                self.assertIn("menu|main", callbacks)
 
     def test_sales_ready_entries_are_labeled_as_guides(self):
         ns, route, _, _ = _runtime()

@@ -68,6 +68,7 @@ class SupportTicketNoteStaleGuardTests(unittest.TestCase):
             self.edits.append((text, reply_markup))
 
         self.namespace.update(
+            asyncio=asyncio,
             get_support_ticket=lambda _ticket_id: None,
             set_support_ticket_pending=lambda *args, **kwargs: self.pending.append((args, kwargs)),
             safe_edit_or_send=safe_edit,

@@ -10,6 +10,7 @@ All 25 test cases run strictly offline with 0 real provider calls.
 from __future__ import annotations
 
 from decimal import Decimal
+import hashlib
 import json
 import multiprocessing
 import os
@@ -6532,7 +6533,10 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
         first_row = kb.inline_keyboard[0]
         self.assertEqual(len(first_row), 1)
         self.assertIn("👑 Xác nhận kiểm thử trực tiếp (Owner)", first_row[0].text)
-        self.assertEqual(first_row[0].callback_data, "vproduct|owner_live_accept|auth_rcpt_12")
+        self.assertEqual(
+            first_row[0].callback_data,
+            f"vproduct|owner_live_accept|{hashlib.sha256(b'auth_rcpt_123456').hexdigest()[:12]}",
+        )
 
         kb_no = product_video_public_preflight_panel_keyboard(owner_receipt="")
         for row in kb_no.inline_keyboard:
@@ -6544,7 +6548,10 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
         from bot import build_product_video_owner_live_accept_keyboard
         kb = build_product_video_owner_live_accept_keyboard("auth_test_tok_99")
         btn = kb.inline_keyboard[0][0]
-        self.assertEqual(btn.callback_data, "vproduct|owner_live_accept|auth_test_to")
+        self.assertEqual(
+            btn.callback_data,
+            f"vproduct|owner_live_accept|{hashlib.sha256(b'auth_test_tok_99').hexdigest()[:12]}",
+        )
         self.assertIn("👑 Xác nhận kiểm thử trực tiếp (Owner)", btn.text)
 
         kb_empty = build_product_video_owner_live_accept_keyboard("")

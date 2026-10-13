@@ -95,6 +95,7 @@ def _run_finance_back_callback():
         "clear_memory_guided_pending",
         "clear_music_guided_pending",
         "clear_pending_admin_tool_test",
+        "_local_video_planning_clear_pending",
     ):
         namespace[helper] = lambda *_args, **_kwargs: None
 

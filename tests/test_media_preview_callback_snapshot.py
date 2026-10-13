@@ -238,6 +238,40 @@ class MediaPreviewCallbackSnapshotTests(unittest.TestCase):
         self.assertEqual(1, len(query.answers))
         self.assertTrue(query.answers[0][1].get("show_alert"))
 
+    def test_current_sfx_select_and_play_buttons_reach_the_registered_route(self):
+        namespace, calls, route, _ = _runtime()
+        item = {"title": "SFX fixture", "preview_url": "https://example.invalid/sfx.mp3"}
+        namespace["save_media_preview_results"]("sfx", 901, "first", [item])
+        token = namespace["LAST_SFX_RESULTS"][901]["callback_token"]
+        markup = _music_markup(namespace, [item], kind="sfx")
+
+        select_callback = _button(markup, "select_sfx|")
+        self.assertEqual(select_callback, f"select_sfx|{token}|1")
+        selected = _dispatch(route, select_callback)
+        self.assertEqual(selected.answers, [((), {})])
+        self.assertEqual(namespace["SELECTED_SFX"][901]["title"], "SFX fixture")
+        self.assertEqual(calls, [])
+
+        play_callback = _button(markup, "play_sfx|")
+        self.assertEqual(play_callback, f"play_sfx|{token}|1")
+        preview = _dispatch(route, play_callback)
+        self.assertEqual(preview.answers, [(('Đang gửi nghe thử...',), {})])
+        self.assertEqual(calls, [("music", "sfx", "1", token, "", item)])
+
+    def test_current_sfx_license_button_reaches_the_registered_helper(self):
+        namespace, calls, route, _ = _runtime()
+        item = {"title": "SFX fixture", "preview_url": "https://example.invalid/sfx.mp3"}
+        namespace["save_media_preview_results"]("sfx", 901, "first", [item])
+        token = namespace["LAST_SFX_RESULTS"][901]["callback_token"]
+        markup = _music_markup(namespace, [item], kind="sfx")
+
+        callback = _button(markup, "license_sfx|")
+        self.assertEqual(callback, f"license_sfx|{token}|1")
+        query = _dispatch(route, callback)
+
+        self.assertEqual(query.answers, [((), {})])
+        self.assertEqual(calls, [("music", "sfx", "1", token, "", item)])
+
     def test_current_music_button_reaches_registered_route_with_its_own_result(self):
         namespace, calls, route, _ = _runtime()
         item = {"title": "Track A", "preview_url": "https://example.invalid/a.mp3"}
@@ -335,6 +369,103 @@ class MediaPreviewCallbackSnapshotTests(unittest.TestCase):
         self.assertEqual([], calls)
         self.assertEqual("A", namespace["SELECTED_MEDIA"][901]["tags"])
         self.assertEqual(1, len(query.answers))
+
+    def test_current_pixabay_select_and_play_buttons_reach_registered_route(self):
+        namespace, calls, _, route = _runtime()
+        item = {"type": "image", "tags": "Pixabay fixture", "preview_url": "https://example.invalid/a.jpg", "source_url": "https://example.invalid/a"}
+        namespace["save_pixabay_media_results"](901, "first", [item])
+        token = namespace["LAST_MEDIA_RESULTS"][901]["callback_token"]
+        markup = _pixabay_markup(namespace, [item])
+
+        select_callback = _button(markup, "select_media|")
+        self.assertEqual(f"select_media|{token}|1", select_callback)
+        selected = _dispatch(route, select_callback)
+        self.assertEqual(1, len(selected.answers))
+        self.assertEqual(
+            item,
+            {key: namespace["SELECTED_MEDIA"][901][key] for key in item},
+        )
+        self.assertEqual([], calls)
+
+        play_callback = _button(markup, "play_media|")
+        self.assertEqual(f"play_media|{token}|1", play_callback)
+        preview = _dispatch(route, play_callback)
+        self.assertEqual(1, len(preview.answers))
+        self.assertEqual([("pixabay", "1", token, "", item)], calls)
+
+    def test_pixabay_find_more_button_opens_registered_media_guide(self):
+        namespace, _, _, _ = _runtime()
+        entered = []
+        replies = []
+
+        namespace["LEGACY_CANONICAL_CALLBACK_REDIRECTS"] = {}
+        namespace["parse_product_context_callback"] = lambda _value, default: ("music_quick", default, "media")
+        namespace["enter_product_context"] = lambda *args, **kwargs: entered.append((args, kwargs))
+        namespace["media_library_guide_text"] = lambda lang: f"guide:{lang}"
+        namespace["media_library_quick_keyboard"] = lambda lang, context: f"keyboard:{lang}:{context}"
+        namespace["send_media_library_results"] = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("provider/search seam must remain untouched"))
+        exec(compile("from __future__ import annotations\n" + _source("handle_music_quick_callback"), "bot.py:handle_music_quick_callback", "exec"), namespace)
+        route = _registered_route("handle_music_quick_callback", namespace)
+
+        item = {"type": "image", "preview_url": "https://example.invalid/a.jpg", "source_url": "https://example.invalid/a"}
+        callback = _button(_pixabay_markup(namespace, [item]), "music_quick|")
+        self.assertEqual("music_quick|media", callback)
+        query = Query(callback)
+
+        class Message:
+            async def reply_text(self, text, **kwargs):
+                replies.append((text, kwargs))
+
+        query.message = Message()
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=901),
+            effective_chat=SimpleNamespace(id=901),
+        )
+        asyncio.run(route.callback(update, SimpleNamespace()))
+
+        self.assertEqual(1, len(query.answers))
+        self.assertTrue(entered)
+        self.assertEqual(("guide:vi", {"parse_mode": "HTML", "reply_markup": "keyboard:vi:showroom"}), replies[0])
+
+    def test_media_library_back_button_returns_to_registered_audio_studio_hub(self):
+        namespace, _, _, _ = _runtime()
+        replies = []
+        cleared = []
+        namespace["_audio_topic"] = lambda _lang, key: f"topic:{key}"
+        namespace["_audio_label"] = lambda _lang, key: f"label:{key}"
+        namespace["parse_product_context_callback"] = lambda _value, default: ("music_quick", default, "music_hub")
+        namespace["LEGACY_CANONICAL_CALLBACK_REDIRECTS"] = {}
+        namespace["clear_music_guided_pending"] = lambda user_id: cleared.append(user_id)
+        namespace["enter_product_context"] = lambda *_args, **_kwargs: None
+        namespace["music_hub_text"] = lambda lang, context: f"hub:{lang}:{context}"
+        namespace["music_hub_keyboard"] = lambda lang, context: f"hub-keyboard:{lang}:{context}"
+        namespace["send_music_library_results"] = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("provider/search seam must remain untouched"))
+        exec(compile("from __future__ import annotations\n" + _source("media_library_quick_keyboard"), "bot.py:media_library_quick_keyboard", "exec"), namespace)
+        exec(compile("from __future__ import annotations\n" + _source("handle_music_quick_callback"), "bot.py:handle_music_quick_callback", "exec"), namespace)
+        route = _registered_route("handle_music_quick_callback", namespace)
+
+        markup = namespace["media_library_quick_keyboard"]("vi", "showroom")
+        callback = _button(markup, "music_quick|showroom|music_hub")
+        self.assertEqual("music_quick|showroom|music_hub", callback)
+        self.assertIsNotNone(route.pattern.match(callback))
+        query = Query(callback)
+
+        class Message:
+            async def reply_text(self, text, **kwargs):
+                replies.append((text, kwargs))
+
+        query.message = Message()
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=901),
+            effective_chat=SimpleNamespace(id=901),
+        )
+        asyncio.run(route.callback(update, SimpleNamespace()))
+
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual([901], cleared)
+        self.assertEqual(("hub:vi:showroom", {"parse_mode": "HTML", "reply_markup": "hub-keyboard:vi:showroom"}), replies[0])
 
     def test_valid_pixabay_preview_button_reaches_registered_helper_with_same_snapshot(self):
         namespace, calls, _, route = _runtime()

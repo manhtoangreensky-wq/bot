@@ -1,5 +1,27 @@
 # Nghiệp vụ vận hành Product Video
 
+## Bổ trợ Telegram UI — candidate ngày 13/10/2026
+
+GitHub API đã xác nhận main `e2b48f215f30a088156a1e29c1f402170274dcf0`.
+Batch UI mới đang được kiểm chứng trên đúng source này trong nhánh
+`audit/telegram-ui-integration-20261013`; chưa được triển khai.
+
+- Image hub → Chỉnh sửa AI → Back phục hồi Image hub cho ảnh gần nhất,
+  photo và file ảnh. Vòng chọn kiểu sửa → Back → Back giữ cùng menu cha.
+- Các callback thiếu task ID ở trạng thái Video trả một cảnh báo; các callback
+  nạp thủ công từ người không có quyền/chủ sở hữu chỉ trả một ACK cảnh báo.
+- Kiểm thử dùng keyboard và registration thật với fixture. Bộ liên quan đã
+  đạt `19 passed, 16 subtests passed in 30.23s`; đây là kết quả offline,
+  chưa chứng minh mọi nút trên Telegram đã mượt.
+- So sánh với main: provider, service, worker, config và workflow deploy không
+  có file thay đổi. Delta `bot.py` gồm 26 hàm UI, pending hoặc Support Ticket;
+  không đổi source các engine xử lý ảnh, voice, music, video hoặc SubDub.
+- Ledger và các gate còn mở nằm trong
+  [Telegram UI checklist](../docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md)
+  và [handover](../docs/reports/TELEGRAM_UI_BATCH_HANDOVER_20261011.md).
+
+Các snapshot sau đây giữ nguyên ngày và phạm vi gốc.
+
 ## Snapshot bổ trợ Telegram UI — 11/10/2026
 
 GitHub main và VPS bot hiện cùng `5c38bd31…`; bot/web/nginx active/running,

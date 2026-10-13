@@ -107,6 +107,7 @@ def _main_menu_dependencies(is_admin, effects):
         "clear_memory_guided_pending": record("memory_guided"),
         "clear_music_guided_pending": record("music_guided"),
         "clear_pending_admin_tool_test": record("admin_tool_test"),
+        "_local_video_planning_clear_pending": lambda _context: None,
         "safe_edit_query_message": safe_edit,
         "menu_text_main_guide_i18n": lambda _lang: "existing screen:main_guide",
         "main_guide_keyboard": lambda _lang: "existing keyboard:main_guide",
@@ -584,6 +585,137 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual("MAIN SCREEN", home_text)
         self.assertNotIn("provider", effects)
 
+    def test_subdub_menu_back_and_home_restore_translation_parent_and_clear_pending(self):
+        user_id = 991178
+        other_user_state_key = "video_dubbing:991179"
+        pending = {}
+        pending[other_user_state_key] = {"pending_action": "video_dubbing", "step": "other-user"}
+        labels = {
+            key: key
+            for key in (
+                "free_tools_label", "video_label", "image_label", "translation_label",
+                "audio_studio_label", "account_label", "topup_pricing_label", "autopost_label",
+                "chat_pro_label", "notes_docs_label", "support", "guide_label", "feedback_label",
+                "center", "change_language", "admin_label", "translation_title", "translation_body",
+                "translation_language", "translation_subtitle_dubbing", "translation_text",
+                "translation_file", "translation_audio", "translation_conversation",
+                "translation_two_way", "translation_auto", "translation_languages",
+                "translation_stop", "back", "main_menu",
+            )
+        }
+        subdub_copy = {
+            "menu": "SUBDUB MENU",
+            "menu_body": "Choose a read-only menu option",
+            "auto": "Auto subtitles",
+            "translate": "Translate subtitles",
+            "dub": "Dub video",
+            "combo": "Subtitle + dub",
+            "main": "Main menu",
+            "back": "Back",
+        }
+        dependencies = _main_menu_dependencies(False, [])
+        dependencies.update({
+            "public_hub_copy": lambda _lang: labels,
+            "public_subdub_deep_copy": lambda _lang: subdub_copy,
+            "PRODUCT_CONTEXT_SHOWROOM": "showroom",
+            "product_context_callback": lambda namespace, context, action: f"{namespace}|{context}|{action}",
+            "localized_start_menu_text": lambda *_args: "MAIN SCREEN",
+            "enter_product_context": lambda *_args, **_kwargs: None,
+            "set_video_dubbing_pending": lambda uid, step, **fields: pending.__setitem__(
+                f"video_dubbing:{uid}", {"pending_action": "video_dubbing", "step": step, **fields}
+            ),
+            "video_dubbing_pending_key": lambda uid: f"video_dubbing:{uid}",
+            "USER_PENDING": pending,
+            "VIDEO_TAIL9_TEXT_INPUT_KEY": "video_tail_pending",
+            "VIDEO_SUBTITLE_MODE_CREATE": "create",
+            "VIDEO_SUBTITLE_MODE_TRANSLATE": "translate",
+            "VIDEO_SUBTITLE_MODE_DUB": "dub",
+            "VIDEO_SUBTITLE_MODE_SUBTITLE_PLUS_DUB": "subtitle_plus_dub",
+            "time": SimpleNamespace(perf_counter=lambda: 1.0),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+        })
+        def no_clear(*_args, **_kwargs):
+            return False
+
+        clear_stubs = (
+            "clear_free_hub_pending", "clear_support_ticket_pending", "clear_quick_media_pending",
+            "clear_quick_image_flow", "clear_public_image_prompt_pending", "clear_public_video_prompt_pending",
+            "clear_media_aspect_pending", "clear_public_video_package_context", "clear_creative_motion_pending",
+            "clear_cinematic_ad_pending", "clear_trend_video_flow_pending", "clear_trend_workflow_confirm_pending",
+            "clear_feedback_pending", "clear_image_menu_pending", "clear_frame_video_state",
+            "clear_storyboard_state", "clear_developing_video_pending", "clear_product_context",
+            "clear_music_guided_pending", "clear_translation_menu_pending", "clear_video_editor_pending",
+            "clear_video_downloader_pending", "clear_video_finalization_state", "clear_video_addon_state",
+            "clear_marketing_pending", "clear_shopaikey_pending_confirmations_for_user",
+            "clear_finance_compliance_pending", "clear_internal_archive_pending", "clear_doc_tool_pending",
+            "clear_storage_addon_pending", "clear_memory_guided_pending", "clear_pending_admin_tool_test",
+        )
+        dependencies.update({name: no_clear for name in clear_stubs})
+        dependencies["video_ai_edit_state"] = SimpleNamespace(clear_draft=lambda _uid: False)
+        route_pattern = _registered_menu_pattern()
+        namespace = _load_functions(
+            "localized_main_menu_keyboard", "translation_menu_text", "translation_menu_keyboard",
+            "video_dubbing_menu_text", "video_dubbing_back_target", "video_dubbing_menu_keyboard",
+            "clear_video_dubbing_pending", "clear_media_creator_pending_states", "localized_menu_content",
+            "handle_menu_callback", **dependencies,
+        )
+
+        def press(callback):
+            self.assertRegex(callback, route_pattern)
+            query = _Query(user_id, callback)
+            _run_no_io(namespace["handle_menu_callback"](
+                SimpleNamespace(callback_query=query), SimpleNamespace(user_data={}),
+            ))
+            self.assertEqual([((), {})], query.answers)
+            self.assertEqual(1, len(query.edits))
+            return query.edits[0]
+
+        main_markup = namespace["localized_main_menu_keyboard"](False, "vi")
+        translate_entry = next(
+            button.callback_data for row in main_markup.inline_keyboard for button in row
+            if button.callback_data == "menu|translate"
+        )
+        translation_text, translation_options = press(translate_entry)
+        self.assertIn("Trung tâm dịch", translation_text)
+        translation_markup = translation_options["reply_markup"]
+        factory_entry = next(
+            button.callback_data for row in translation_markup.inline_keyboard for button in row
+            if button.callback_data == "menu|translation_video_factory"
+        )
+
+        subdub_text, subdub_options = press(factory_entry)
+        self.assertIn("SUBDUB MENU", subdub_text)
+        state_key = f"video_dubbing:{user_id}"
+        self.assertEqual("video_dubbing", pending[state_key]["pending_action"])
+        subdub_buttons = [
+            button for row in subdub_options["reply_markup"].inline_keyboard for button in row
+        ]
+        back_button = next(button for button in subdub_buttons if button.text.startswith("⬅️"))
+        home_button = next(button for button in subdub_buttons if button.callback_data == "menu|main")
+        self.assertEqual("menu|translate", back_button.callback_data)
+        self.assertFalse(
+            any(button.callback_data.startswith("videodub|") for button in (back_button, home_button))
+        )
+
+        back_text, back_options = press(back_button.callback_data)
+        self.assertIn("Trung tâm dịch", back_text)
+        self.assertIn(
+            "menu|translation_video_factory",
+            {button.callback_data for row in back_options["reply_markup"].inline_keyboard for button in row},
+        )
+        self.assertNotIn(state_key, pending)
+        self.assertEqual("other-user", pending[other_user_state_key]["step"])
+
+        press(factory_entry)
+        home_text, home_options = press(home_button.callback_data)
+        self.assertEqual("MAIN SCREEN", home_text)
+        self.assertIn(
+            "menu|translate",
+            {button.callback_data for row in home_options["reply_markup"].inline_keyboard for button in row},
+        )
+        self.assertNotIn(state_key, pending)
+        self.assertEqual("other-user", pending[other_user_state_key]["step"])
+
     def test_translation_text_and_file_picker_more_and_back_dispatch_registered_callback(self):
         edits = []
         replies = []
@@ -1041,6 +1173,90 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(len(edits), 8)
         self.assertEqual(contexts, ["context"] * 10)
 
+    def test_translation_transcribe_missing_audio_returns_emitted_recovery_keyboard(self):
+        copy = {
+            "translation_transcribe": "Bóc băng",
+            "translation_audio": "Dịch audio",
+            "translation_session_enable_voice": "Bật giọng nói",
+            "translation_picker_more": "Thêm ngôn ngữ",
+            "translation_recent_media_missing": "Gửi audio lại để tiếp tục",
+            "main_menu": "Menu chính",
+        }
+        provider_calls = []
+        replies = []
+        contexts = []
+
+        async def reply_text(text, **kwargs):
+            replies.append((text, kwargs))
+
+        def forbidden_transcribe(*_args, **_kwargs):
+            provider_calls.append("transcribe")
+            raise AssertionError("missing-audio recovery must stop before transcription")
+
+        namespace = _load_functions(
+            "voice_translation_action_keyboard",
+            "translation_voice_recovery_keyboard",
+            "handle_translation_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            public_hub_copy=lambda _lang: copy,
+            normalize_user_language=lambda lang: lang or "vi",
+            get_user_language=lambda _uid: "vi",
+            has_recent_audio_input=lambda _update: False,
+            enter_product_context=lambda *_args, **_kwargs: contexts.append("entered"),
+            PRODUCT_CONTEXT_SHOWROOM="showroom",
+            cmd_transcribe=forbidden_transcribe,
+        )
+        emitted_keyboard = namespace["voice_translation_action_keyboard"]("vi")
+        emitted = next(
+            button for row in emitted_keyboard.inline_keyboard for button in row
+            if button.text == "Bóc băng"
+        )
+        self.assertEqual("tr_transcribe", emitted.callback_data)
+
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback,
+            pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_translation_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_translation_callback"]
+        )
+        self.assertIsNotNone(route.pattern.match(emitted.callback_data))
+
+        query = _Query(991185, emitted.callback_data)
+        query.message = SimpleNamespace(reply_text=reply_text)
+        _run_no_io(route.callback(
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(),
+        ))
+
+        self.assertEqual(1, len(query.answers))
+        self.assertIn("Gửi audio lại", replies[0][0])
+        self.assertIn("reply_markup", replies[0][1])
+        recovery_callbacks = [
+            button.callback_data
+            for row in replies[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        emitted_callbacks = [
+            button.callback_data
+            for row in emitted_keyboard.inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(emitted_callbacks, recovery_callbacks)
+        self.assertIn("menu|main", recovery_callbacks)
+        self.assertEqual(["entered"], contexts)
+        self.assertEqual([], provider_calls)
+
     def test_free_tools_aichat_entry_requires_consent_and_back_returns_to_free_tools(self):
         user_id = 991180
         state = {"value": {}}
@@ -1491,7 +1707,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertRegex(back_button.callback_data, route_pattern)
 
         query = _Query(user_id, back_button.callback_data)
-        asyncio.run(namespace["handle_aichat_callback"](
+        _run_no_io(namespace["handle_aichat_callback"](
             SimpleNamespace(callback_query=query), SimpleNamespace(),
         ))
 
@@ -1508,7 +1724,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
                 "freehub|caption", "freehub|ideas", "freehub|prompts",
                 "freehub|library", "freehub|publish_package",
                 "menu|main_memory|freehub", "freehub|upload", "freehub|hook",
-                "freehub|lib_music", "freehub|open_translate", "vdownload|start|freehub",
+                "freehub|lib_music_root", "freehub|open_translate", "vdownload|start|freehub",
                 "menu|main",
             ],
         )
@@ -2645,11 +2861,14 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         )
         route_pattern = _registered_pattern("handle_memory_callback")
         context = SimpleNamespace(user_data={})
+        query_sequence = [0]
 
         def dispatch(callback_data):
             self.assertRegex(callback_data, route_pattern)
             query = _Query(user_id, callback_data)
-            asyncio.run(namespace["handle_memory_callback"](
+            query.id = f"memory-test-{query_sequence[0]}"
+            query_sequence[0] += 1
+            _run_no_io(namespace["handle_memory_callback"](
                 SimpleNamespace(callback_query=query), context,
             ))
             self.assertEqual([((), {})], query.answers)
@@ -2690,10 +2909,58 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual([], archive_updates)
         self.assertEqual([], recorded_events)
 
-        dispatch(fresh_confirm)
+        class _YieldAfterAck:
+            def __await__(self):
+                yield "ack-yield"
+                return None
+
+        concurrent_queries = []
+        concurrent_handlers = []
+        for _ in range(2):
+            query = _Query(user_id, fresh_confirm)
+            query.id = f"memory-concurrent-{query_sequence[0]}"
+            query_sequence[0] += 1
+
+            async def delayed_answer(*args, _query=query, **kwargs):
+                _query.answers.append((args, kwargs))
+                await _YieldAfterAck()
+
+            query.answer = delayed_answer
+            self.assertRegex(query.data, route_pattern)
+            concurrent_queries.append(query)
+            concurrent_handlers.append(namespace["handle_memory_callback"](
+                SimpleNamespace(callback_query=query), context,
+            ))
+
+        # Suspend both emitted confirmations at ACK, then resume each callback.
+        # This deterministic fixture scheduler avoids Windows asyncio startup/I/O.
+        for coroutine in concurrent_handlers:
+            self.assertEqual(coroutine.send(None), "ack-yield")
+        for coroutine in concurrent_handlers:
+            with self.assertRaises(StopIteration):
+                coroutine.send(None)
+
+        self.assertEqual([[((), {})], [((), {})]], [query.answers for query in concurrent_queries])
+        self.assertEqual(1, sum("✅ Đã xóa/ẩn" in query.edits[0][0] for query in concurrent_queries))
+        self.assertEqual(1, sum("hết hạn hoặc không còn hợp lệ" in query.edits[0][0] for query in concurrent_queries))
+        self.assertEqual("archived", notes[note["id"]]["status"])
+        self.assertEqual(1, len(archive_updates))
+        self.assertEqual(["recorded"], recorded_events)
+
+        confirmed_query = dispatch(fresh_confirm)
 
         self.assertEqual("archived", notes[note["id"]]["status"])
         self.assertEqual(1, notes[note["id"]]["is_archived"])
+        self.assertEqual(1, len(archive_updates))
+        self.assertEqual(["recorded"], recorded_events)
+
+        duplicate_query = dispatch(fresh_confirm)
+        self.assertIsNot(confirmed_query, duplicate_query)
+        self.assertNotEqual(confirmed_query.id, duplicate_query.id)
+        self.assertEqual(
+            "⚠️ Xác nhận xóa đã hết hạn hoặc không còn hợp lệ. Vui lòng chọn lại.",
+            duplicate_query.edits[0][0],
+        )
         self.assertEqual(1, len(archive_updates))
         self.assertEqual(["recorded"], recorded_events)
 
@@ -3076,7 +3343,8 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         hub = _load_functions(
             "build_2col_keyboard", "free_hub_main_keyboard", "free_hub_library_text",
             "free_hub_library_keyboard", "free_hub_library_category_label", "free_hub_library_item_keyboard",
-            "free_hub_library_suggestions_text", "free_hub_library_suggestions_keyboard",
+            "free_hub_library_item_keyboard_for_parent", "free_hub_library_suggestions_text",
+            "free_hub_library_suggestions_keyboard", "free_hub_library_suggestions_keyboard_for_parent",
             "free_hub_prompt_result_text", "free_hub_result_keyboard",
             "handle_free_hub_callback",
             InlineKeyboardButton=_Button, InlineKeyboardMarkup=_Markup, html=html,
@@ -3088,7 +3356,10 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
                 format_exchange_rate_overview=lambda _lang: "Exchange overview fixture",
                 fetch_weather_report=weather_report,
             ),
-            FREE_HUB_LIBRARY_CATEGORIES={"video": ("video_prompt", "Prompt video")},
+            FREE_HUB_LIBRARY_CATEGORIES={
+                "video": ("video_prompt", "Prompt video"),
+                "music": ("music_sfx", "Nhạc/SFX"),
+            },
             FREE_HUB_LIBRARY_INDUSTRY_FILTERS={}, get_user_language=lambda _uid: "vi",
             clear_video_downloader_pending=lambda _uid: None,
             clear_free_hub_pending=clear_pending,
@@ -3098,7 +3369,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             prompt_library_suggestions=suggestions,
             prompt_library_item=lambda _library, item_id: (
                 {"id": item_id, "title": item_id, "prompt": f"Text {item_id}"}
-                if item_id == "fixture-1" else None
+                if item_id else None
             ),
             safe_edit_or_send=render, time=SimpleNamespace(time=lambda: 1.0),
         )
@@ -3108,7 +3379,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         def dispatch(callback_data):
             self.assertRegex(callback_data, hub_pattern)
             query = _Query(user_id, callback_data)
-            asyncio.run(hub["handle_free_hub_callback"](
+            _run_no_io(hub["handle_free_hub_callback"](
                 SimpleNamespace(callback_query=query), context,
             ))
             self.assertEqual([((), {})], query.answers)
@@ -3272,6 +3543,85 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         utilities_back = returned_utilities.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
         returned_hub = dispatch(utilities_back.callback_data)
         self.assertEqual("Free Tools root fixture", returned_hub.edits[0][0])
+        self.assertNotIn(user_id, pending)
+        self.assertEqual({"step": "unrelated"}, pending[other_user_id])
+
+        music_entry = next(
+            button.callback_data
+            for row in returned_hub.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|lib_music_root"
+        )
+        music_suggestions = dispatch(music_entry)
+        self.assertIn('"music": ("music_sfx",', BOT_SOURCE)
+        self.assertIn("Nhạc/SFX", music_suggestions.edits[0][0])
+        self.assertEqual(2, len(suggestion_calls))
+        self.assertEqual("music_sfx", pending[user_id]["library_category"])
+        self.assertEqual("Nhạc/SFX", pending[user_id]["library_label"])
+        music_back = music_suggestions.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
+        self.assertEqual("freehub|main", music_back.callback_data)
+        self.assertIn("freehub|lib_more_root", {
+            button.callback_data
+            for row in music_suggestions.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        })
+        music_pick = next(
+            button.callback_data
+            for row in music_suggestions.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|lib_pick1_root"
+        )
+        music_item = dispatch(music_pick)
+        self.assertIn("Text fixture-2", music_item.edits[0][0])
+        music_copy_control = next(
+            button.callback_data
+            for row in music_item.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|copy"
+        )
+        music_copy = dispatch(music_copy_control)
+        self.assertIn("Chạm giữ", music_copy.edits[0][0])
+        item_back = music_copy.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
+        self.assertEqual("freehub|lib_back_root", item_back.callback_data)
+        restored_music = dispatch(item_back.callback_data)
+        restored_back = restored_music.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
+        self.assertEqual("freehub|main", restored_back.callback_data)
+        returned_hub = dispatch(restored_back.callback_data)
+        self.assertEqual("Free Tools root fixture", returned_hub.edits[0][0])
+        self.assertNotIn(user_id, pending)
+        self.assertEqual({"step": "unrelated"}, pending[other_user_id])
+
+        music_suggestions = dispatch(music_entry)
+        more_control = next(
+            button.callback_data
+            for row in music_suggestions.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|lib_more_root"
+        )
+        more_music = dispatch(more_control)
+        more_back = more_music.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
+        self.assertEqual("freehub|main", more_back.callback_data)
+        self.assertEqual("Free Tools root fixture", dispatch(more_back.callback_data).edits[0][0])
+        clear_pending(user_id)
+        expired_more = dispatch(more_control)
+        self.assertEqual("Free Tools root fixture", expired_more.edits[0][0])
+        self.assertEqual({"step": "unrelated"}, pending[other_user_id])
+
+        library_screen = dispatch("freehub|library")
+        library_music = next(
+            button.callback_data
+            for row in library_screen.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|lib_music"
+        )
+        generic_music = dispatch(library_music)
+        generic_back = generic_music.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
+        self.assertEqual("freehub|library", generic_back.callback_data)
+        self.assertIn("freehub|lib_music", {
+            button.callback_data
+            for row in dispatch(generic_back.callback_data).edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        })
         self.assertNotIn(user_id, pending)
         self.assertEqual({"step": "unrelated"}, pending[other_user_id])
 
@@ -3494,8 +3844,232 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertNotIn(user_id, pending)
         self.assertEqual({"pending_action": "free_hub", "task_type": "other-user"}, pending[other_user_id])
 
+    def test_freehub_empty_publish_package_routes_to_guidance_without_publish_action(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991143
+        copy = public_hub_copy("vi")
+        pending_reads = []
+        pending_clears = []
+        rendered = []
+
+        def build_2col_keyboard(items, *, nav_back=None, nav_main=False, lang="vi", main_label="Main"):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        async def render(query, text, **kwargs):
+            rendered.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        forbidden = lambda *_args, **_kwargs: self.fail("empty package guide must not invoke publish/provider helpers")
+        namespace = _load_functions(
+            "free_hub_main_keyboard", "handle_free_hub_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            build_2col_keyboard=build_2col_keyboard,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=public_hub_copy,
+            FREE_HUB_ENABLED=True,
+            get_user_language=lambda _uid: "vi",
+            clear_video_downloader_pending=lambda _uid: None,
+            clear_free_hub_pending=lambda uid: pending_clears.append(uid),
+            get_free_hub_pending=lambda uid: pending_reads.append(uid) or {},
+            free_hub_publish_package_text=forbidden,
+            free_hub_publish_package_keyboard=forbidden,
+            free_hub_main_text=lambda _lang: "Free Tools root",
+            safe_edit_or_send=render,
+        )
+
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(item for item in registrations if item.callback is namespace["handle_free_hub_callback"])
+
+        root = namespace["free_hub_main_keyboard"]("vi")
+        emitted = next(
+            button.callback_data
+            for row in root.inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|publish_package"
+        )
+        self.assertIsNotNone(route.pattern.match(emitted))
+        query = _Query(user_id, emitted)
+        _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual([user_id], pending_reads)
+        self.assertEqual([], pending_clears)
+        self.assertEqual(1, len(rendered))
+        for text in (copy["freehub_publish_title"], copy["freehub_prompts_body"], copy["freehub_input_free"]):
+            self.assertIn(text, rendered[0][0])
+        returned_callbacks = [
+            button.callback_data
+            for row in rendered[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            [button.callback_data for row in root.inline_keyboard for button in row],
+            returned_callbacks,
+        )
+
+    def test_freehub_result_package_back_restores_same_result_context(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991144
+        other_user_id = user_id + 1
+        result = {
+            "title": "Fixture result",
+            "topic": "Fixture topic",
+            "caption": "Caption fixture",
+            "hashtags": ["#fixture"],
+            "cta": "CTA fixture",
+        }
+        pending = {
+            user_id: {
+                "pending_action": "free_hub",
+                "step": "result",
+                "task_type": "caption_hashtag",
+                "user_input": "Fixture topic",
+                "result": result,
+                "provider": "local_prompt_library",
+            },
+            other_user_id: {"pending_action": "free_hub", "step": "other-user"},
+        }
+        original_state = dict(pending[user_id])
+        other_state = dict(pending[other_user_id])
+        clears = []
+        rendered = []
+
+        def build_2col_keyboard(items, *, nav_back=None, nav_main=False, lang="vi", main_label="Main"):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        async def render(query, text, **kwargs):
+            rendered.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        def clear_free_hub(uid):
+            pending.pop(uid, None)
+            clears.append(uid)
+
+        namespace = _load_functions(
+            "free_hub_main_keyboard",
+            "free_hub_publish_package_text",
+            "free_hub_publish_package_keyboard",
+            "free_hub_prompt_result_text",
+            "free_hub_result_keyboard",
+            "handle_free_hub_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            build_2col_keyboard=build_2col_keyboard,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=public_hub_copy,
+            html=html,
+            FREE_HUB_ENABLED=True,
+            get_user_language=lambda _uid: "vi",
+            get_free_hub_pending=lambda uid: dict(pending.get(uid, {})),
+            clear_free_hub_pending=clear_free_hub,
+            clear_video_downloader_pending=lambda _uid: None,
+            free_hub_main_text=lambda _lang: "Free Tools root fixture",
+            safe_edit_or_send=render,
+        )
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(item for item in registrations if item.callback is namespace["handle_free_hub_callback"])
+
+        result_keyboard = namespace["free_hub_result_keyboard"]("vi", "caption_hashtag")
+        package_callback = next(
+            button.callback_data
+            for row in result_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data == "freehub|publish_package"
+        )
+
+        def dispatch(callback):
+            self.assertIsNotNone(route.pattern.match(callback))
+            query = _Query(user_id, callback)
+            _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+            self.assertEqual([((), {})], query.answers)
+            return query
+
+        package_page = dispatch(package_callback)
+        package_text = package_page.edits[0][0]
+        self.assertIn("Fixture topic", package_text)
+        self.assertIn("Caption fixture", package_text)
+        self.assertIn("chưa tự đăng", package_text)
+        self.assertIn("chưa gọi provider", package_text)
+        package_callbacks = [
+            button.callback_data
+            for row in package_page.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("freehub|prompt_back", package_callbacks)
+        self.assertIn("freehub|copy", package_callbacks)
+        self.assertIn("freehub|save", package_callbacks)
+
+        returned = dispatch("freehub|prompt_back")
+        self.assertIn("Fixture result", returned.edits[0][0])
+        self.assertIn("Fixture topic", returned.edits[0][0])
+        returned_callbacks = [
+            button.callback_data
+            for row in returned.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(
+            [button.callback_data for row in result_keyboard.inline_keyboard for button in row],
+            returned_callbacks,
+        )
+        copy_callback = next(callback for callback in returned_callbacks if callback == "freehub|copy")
+        copied = dispatch(copy_callback)
+        self.assertIn("Chạm giữ đoạn văn bản phía trên", copied.edits[0][0])
+        self.assertEqual(original_state, pending[user_id])
+        self.assertEqual(
+            returned_callbacks,
+            [button.callback_data for row in copied.edits[0][1]["reply_markup"].inline_keyboard for button in row],
+        )
+        self.assertEqual(original_state, pending[user_id])
+        self.assertEqual(other_state, pending[other_user_id])
+        self.assertEqual([], clears)
+        self.assertEqual(3, len(rendered))
+
+        hub_back = next(button.callback_data for row in copied.edits[0][1]["reply_markup"].inline_keyboard for button in row if button.callback_data == "freehub|main")
+        hub = dispatch(hub_back)
+        self.assertEqual("Free Tools root fixture", hub.edits[0][0])
+        self.assertNotIn(user_id, pending)
+        self.assertEqual(other_state, pending[other_user_id])
+        self.assertEqual([user_id], clears)
+        self.assertIn("menu|main", [button.callback_data for row in hub.edits[0][1]["reply_markup"].inline_keyboard for button in row])
+
     def test_free_tools_translation_prompt_back_clears_only_its_pending_state(self):
         user_id = 991137
+        other_user_id = user_id + 1
         labels = {
             "freehub_enable_ai_chatbot": "Chatbot", "freehub_utilities": "Tiện ích",
             "freehub_meta": "Meta", "freehub_caption": "Caption", "freehub_ideas": "Ý tưởng",
@@ -3518,12 +4092,15 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             button.callback_data for row in main_keyboard.inline_keyboard for button in row
             if button.callback_data == "freehub|open_translate"
         )
-        self.assertRegex(translate_entry, _registered_pattern("handle_free_hub_callback"))
-
-        pending = {}
+        pending = {other_user_id: {"pending_action": "free_hub", "step": "other-user"}}
+        other_state = dict(pending[other_user_id])
+        cleared = []
 
         def clear_pending(owner_id):
-            return pending.pop(owner_id, None) is not None
+            existed = pending.pop(owner_id, None) is not None
+            if existed:
+                cleared.append(owner_id)
+            return existed
 
         def set_pending(owner_id, step, **fields):
             pending[owner_id] = {"pending_action": "free_hub", "step": step, **fields}
@@ -3545,15 +4122,25 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             free_hub_main_keyboard=builders["free_hub_main_keyboard"],
             safe_edit_or_send=render,
         )
-        route_pattern = _registered_pattern("handle_free_hub_callback")
+        registrations = []
+        handler["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        handler["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback," in line
+        )
+        exec(registration, handler)
+        route = next(item for item in registrations if item.callback is handler["handle_free_hub_callback"])
+        self.assertTrue(route.pattern.match(translate_entry))
         context = SimpleNamespace(user_data={})
 
         def dispatch(callback_data):
-            self.assertRegex(callback_data, route_pattern)
+            self.assertTrue(route.pattern.match(callback_data))
             query = _Query(user_id, callback_data)
-            asyncio.run(handler["handle_free_hub_callback"](
-                SimpleNamespace(callback_query=query), context,
-            ))
+            _run_no_io(route.callback(SimpleNamespace(callback_query=query), context))
             self.assertEqual([((), {})], query.answers)
             return query
 
@@ -3561,10 +4148,316 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         back = prompt.edits[0][1]["reply_markup"].inline_keyboard[-1][0]
         self.assertEqual("freehub|main", back.callback_data)
         self.assertEqual("open_translate", pending[user_id]["task_type"])
+        self.assertEqual(other_state, pending[other_user_id])
 
         returned = dispatch(back.callback_data)
         self.assertEqual("Free Tools root fixture", returned.edits[0][0])
         self.assertNotIn(user_id, pending)
+        self.assertEqual(other_state, pending[other_user_id])
+        self.assertEqual([user_id], cleared)
+
+    def test_freehub_legacy_byok_callback_stays_disabled_and_returns_to_hub(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991147
+        other_user_id = user_id + 1
+        copy = public_hub_copy("vi")
+        pending = {
+            user_id: {"pending_action": "free_hub", "step": "old-input"},
+            other_user_id: {"pending_action": "free_hub", "step": "other-user"},
+        }
+        other_state = dict(pending[other_user_id])
+        cleared = []
+        rendered = []
+
+        def build_2col_keyboard(items, *, nav_back=None, nav_main=False, lang="vi", main_label="Main"):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        async def render(query, text, **kwargs):
+            rendered.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        def clear_actor(uid):
+            pending.pop(uid, None)
+            cleared.append(uid)
+
+        namespace = _load_functions(
+            "free_hub_main_keyboard",
+            "free_hub_byok_text",
+            "handle_free_hub_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            build_2col_keyboard=build_2col_keyboard,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=public_hub_copy,
+            FREE_HUB_ENABLED=True,
+            FREE_HUB_BYOK_ENABLED=False,
+            get_user_language=lambda _uid: "vi",
+            clear_free_hub_pending=clear_actor,
+            clear_video_downloader_pending=lambda _uid: None,
+            free_hub_main_text=lambda _lang: "Free Tools root fixture",
+            safe_edit_or_send=render,
+        )
+        english_warning = namespace["free_hub_byok_text"]("en")
+        self.assertIn("Private API connection is not available", english_warning)
+        self.assertIn("not accepting API keys", english_warning)
+        self.assertIn("do not send an API key", english_warning)
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(item for item in registrations if item.callback is namespace["handle_free_hub_callback"])
+
+        root = namespace["free_hub_main_keyboard"]("vi")
+        root_callbacks = [button.callback_data for row in root.inline_keyboard for button in row]
+        self.assertNotIn("freehub|byok", root_callbacks)
+        self.assertIsNotNone(route.pattern.match("freehub|byok"), "legacy callback remains safely handled")
+
+        query = _Query(user_id, "freehub|byok")
+        _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+
+        self.assertEqual([((), {})], query.answers)
+        self.assertIn("Kết nối API riêng chưa mở", rendered[0][0])
+        self.assertIn("chưa nhận API key", rendered[0][0])
+        self.assertEqual([user_id], cleared)
+        self.assertNotIn(user_id, pending)
+        self.assertEqual(other_state, pending[other_user_id])
+        self.assertEqual(
+            root_callbacks,
+            [button.callback_data for row in rendered[0][1]["reply_markup"].inline_keyboard for button in row],
+        )
+
+    def test_freehub_docs_guidance_back_restores_uploaded_docs_tools_screen(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991145
+        copy = public_hub_copy("vi")
+        renders = []
+
+        def build_2col_keyboard(items, *, nav_back=None, nav_main=False, lang="vi", main_label="Main"):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        async def render(query, text, **kwargs):
+            renders.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        namespace = _load_functions(
+            "free_hub_docs_text",
+            "free_hub_docs_keyboard",
+            "handle_free_hub_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            build_2col_keyboard=build_2col_keyboard,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=public_hub_copy,
+            FREE_HUB_ENABLED=True,
+            get_user_language=lambda _uid: "vi",
+            clear_video_downloader_pending=lambda _uid: None,
+            clear_free_hub_pending=lambda _uid: None,
+            menu_text_main_memory_i18n=lambda _lang: "Memory/Docs landing fixture",
+            main_memory_keyboard=lambda *_args: _Markup([[_Button("Memory", "menu|main_memory")]]),
+            safe_edit_or_send=render,
+        )
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_free_hub_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(item for item in registrations if item.callback is namespace["handle_free_hub_callback"])
+
+        docs_keyboard = namespace["free_hub_docs_keyboard"]("vi")
+        docs_text = namespace["free_hub_docs_text"]("vi")
+        docs_callbacks = [button.callback_data for row in docs_keyboard.inline_keyboard for button in row]
+        mismatches = []
+
+        def dispatch(callback):
+            self.assertIsNotNone(route.pattern.match(callback))
+            query = _Query(user_id, callback)
+            _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+            self.assertEqual([((), {})], query.answers)
+            return query
+
+        for entry in ("freehub|docs_split_merge", "freehub|docs_summary_guard"):
+            with self.subTest(entry=entry):
+                self.assertIn(entry, docs_callbacks)
+                guide = dispatch(entry)
+                back = next(button for row in guide.edits[0][1]["reply_markup"].inline_keyboard for button in row if button.callback_data == "freehub|docs")
+                returned = dispatch(back.callback_data)
+                actual_callbacks = [button.callback_data for row in returned.edits[0][1]["reply_markup"].inline_keyboard for button in row]
+                if (
+                    returned.edits[0][0] != docs_text
+                    or actual_callbacks != docs_callbacks
+                    or returned.edits[0][1].get("parse_mode") != "HTML"
+                ):
+                    mismatches.append((entry, returned.edits[0][0], actual_callbacks, returned.edits[0][1].get("parse_mode")))
+
+        self.assertFalse(
+            mismatches,
+            f"FreeHub docs Back must restore the emitter screen, not another landing: {mismatches}",
+        )
+        legacy_notes = dispatch("freehub|notes")
+        self.assertEqual("Memory/Docs landing fixture", legacy_notes.edits[0][0])
+        self.assertEqual(
+            ["menu|main_memory"],
+            [button.callback_data for row in legacy_notes.edits[0][1]["reply_markup"].inline_keyboard for button in row],
+        )
+
+    def test_freehub_image_pdf_and_compress_hints_keep_docs_origin(self):
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991146
+        copy = public_hub_copy("vi")
+        effects = []
+
+        def build_2col_keyboard(items, *, nav_back=None, nav_main=False, lang="vi", main_label="Main"):
+            flat = [_Button(label, callback) for label, callback in items]
+            rows = [flat[index:index + 2] for index in range(0, len(flat), 2)]
+            if nav_back:
+                rows.append([_Button(nav_back[0], nav_back[1])])
+            if nav_main:
+                rows.append([_Button(main_label, "menu|main")])
+            return _Markup(rows)
+
+        async def edit_menu(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+
+        async def edit_freehub(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+
+        dependencies = _main_menu_dependencies(False, effects)
+        dependencies.update({
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "ADMIN_MENU_PAGE_HANDLERS": {},
+            "normalize_user_language": lambda lang: lang or "vi",
+            "public_hub_copy": public_hub_copy,
+            "build_2col_keyboard": build_2col_keyboard,
+            "public_command_exists": lambda _name: True,
+            "time": SimpleNamespace(perf_counter=lambda: 1.0),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            "safe_edit_query_message": edit_menu,
+            "safe_edit_or_send": edit_freehub,
+            "FREE_HUB_ENABLED": True,
+            "get_user_language": lambda _uid: "vi",
+            "clear_free_hub_pending": lambda _uid: None,
+            "clear_video_downloader_pending": lambda _uid: None,
+            "free_hub_main_text": lambda _lang: "Free Tools root fixture",
+            "menu_text_main_memory_i18n": lambda _lang: "Memory/Docs landing fixture",
+            "main_memory_keyboard": lambda *_args: _Markup([[_Button("Memory", "menu|main_memory")]]),
+        })
+        namespace = _load_functions(
+            "menu_parent_action", "menu_nav_keyboard_i18n", "menu_hint_text", "menu_hint_text_i18n",
+            "main_docs_keyboard", "menu_text_main_docs", "menu_text_main_docs_i18n",
+            "localized_menu_content", "handle_menu_callback",
+            "free_hub_docs_text", "free_hub_docs_keyboard", "handle_free_hub_callback",
+            **dependencies,
+        )
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern)
+        )
+        for handler_name in ("handle_menu_callback", "handle_free_hub_callback"):
+            registration = next(
+                line.strip()
+                for line in BOT_SOURCE.splitlines()
+                if f"tg_app.add_handler(CallbackQueryHandler({handler_name}," in line
+            )
+            exec(registration, namespace)
+        routes = {route.callback.__name__: route for route in registrations}
+
+        def dispatch(callback):
+            handler_name = "handle_free_hub_callback" if callback.startswith("freehub|") else "handle_menu_callback"
+            route = routes[handler_name]
+            self.assertIsNotNone(route.pattern.match(callback))
+            query = _Query(user_id, callback)
+            _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})))
+            self.assertEqual([((), {})], query.answers)
+            return query
+
+        docs_keyboard = namespace["free_hub_docs_keyboard"]("vi")
+        docs_text = namespace["free_hub_docs_text"]("vi")
+        expected = {
+            "image": "freehub|docs_image_to_pdf",
+            "compress": "freehub|docs_compress_pdf",
+        }
+        mismatches = []
+        for kind, expected_callback in expected.items():
+            icon = "🖼" if kind == "image" else "🗜"
+            button = next(button for row in docs_keyboard.inline_keyboard for button in row if button.text.startswith(icon))
+            guide_action = "hint_doc_image_to_pdf" if kind == "image" else "hint_doc_compress_pdf"
+            guide = dispatch(button.callback_data)
+            expected_guide = namespace["menu_hint_text_i18n"](guide_action, "vi")[1]
+            backs = [item for row in guide.edits[0][1]["reply_markup"].inline_keyboard for item in row if item.callback_data]
+            back = next(item for item in backs if item.text.startswith("⬅"))
+            returned = dispatch(back.callback_data)
+            callbacks = [item.callback_data for row in returned.edits[0][1]["reply_markup"].inline_keyboard for item in row]
+            actual = (button.callback_data, back.callback_data, guide.edits[0][0], returned.edits[0][0], callbacks)
+            wanted = (expected_callback, "freehub|docs", expected_guide, docs_text,
+                      [item.callback_data for row in docs_keyboard.inline_keyboard for item in row])
+            if actual != wanted:
+                mismatches.append((kind, actual, wanted))
+
+        self.assertFalse(mismatches, f"FreeHub Docs inline hint lost its parent: {mismatches}")
+
+        main_docs_keyboard = namespace["main_docs_keyboard"]("vi")
+        generic_callbacks = [
+            button.callback_data
+            for row in main_docs_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data and button.callback_data.startswith("menu|hint_doc_")
+        ]
+        self.assertEqual({
+            "menu|hint_doc_pdf_to_word", "menu|hint_doc_image_to_pdf",
+            "menu|hint_doc_compress_pdf", "menu|hint_doc_split_pdf", "menu|hint_doc_merge_pdf",
+        }, set(generic_callbacks))
+        main_docs_text = namespace["menu_text_main_docs_i18n"]("vi")
+        main_docs_callbacks = [
+            button.callback_data for row in main_docs_keyboard.inline_keyboard for button in row
+        ]
+        for callback in generic_callbacks:
+            with self.subTest(generic_docs_hint=callback):
+                guide = dispatch(callback)
+                expected_guide = namespace["menu_hint_text_i18n"](callback.split("|", 1)[1], "vi")[1]
+                self.assertEqual(expected_guide, guide.edits[0][0])
+                back = next(
+                    button
+                    for row in guide.edits[0][1]["reply_markup"].inline_keyboard
+                    for button in row
+                    if button.text.startswith("⬅")
+                )
+                self.assertEqual("menu|main_docs", back.callback_data)
+                generic_docs_return = dispatch(back.callback_data)
+                self.assertEqual(main_docs_text, generic_docs_return.edits[0][0])
+                self.assertEqual(
+                    main_docs_callbacks,
+                    [button.callback_data for row in generic_docs_return.edits[0][1]["reply_markup"].inline_keyboard for button in row],
+                )
 
     def test_customer_guide_landing_renders_through_registered_handler_and_returns_home(self):
         dependencies = _main_menu_dependencies(False, [])
@@ -4123,6 +5016,79 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertEqual(6, len(sent["reply_markup"].inline_keyboard))
         self.assertEqual({"en"}, set(locale_inputs))
 
+        callback_dependencies = _main_menu_dependencies(False, [])
+        callback_dependencies.update({
+            "time": SimpleNamespace(perf_counter=lambda: 1.0),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            "get_user_language": lambda _uid: "en",
+            "public_hub_copy": copy_for_locale,
+            "main_profile_keyboard": namespace["main_profile_keyboard"],
+            "user_package_summary_text": lambda _uid, lang="vi": "Packages: command fixture",
+            "menu_text_main_profile_i18n": lambda *_args: "Account screen from /profile",
+            "localized_start_menu_text": lambda *_args: "Main screen from /profile",
+            "localized_main_menu_keyboard": lambda *_args: _Markup([]),
+        })
+        callback_namespace = _load_functions(
+            "profile_child_keyboard", "localized_menu_content", "handle_menu_callback",
+            **callback_dependencies,
+        )
+        menu_registrations = []
+        callback_namespace.update({
+            "tg_app": SimpleNamespace(add_handler=menu_registrations.append),
+            "CallbackQueryHandler": lambda callback, pattern: SimpleNamespace(
+                callback=callback,
+                pattern=re.compile(pattern),
+            ),
+        })
+        menu_registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_menu_callback," in line
+        )
+        exec(menu_registration, callback_namespace)
+        menu_route = next(
+            item for item in menu_registrations
+            if item.callback is callback_namespace["handle_menu_callback"]
+        )
+        context = SimpleNamespace(user_data={})
+
+        def dispatch_command_keyboard(callback_data):
+            self.assertIsNotNone(menu_route.pattern.match(callback_data))
+            query = _Query(987654321, callback_data)
+            _run_no_io(menu_route.callback(
+                SimpleNamespace(callback_query=query),
+                context,
+            ))
+            self.assertEqual([((), {})], query.answers)
+            self.assertEqual(1, len(query.edits))
+            return query
+
+        packages_callback = next(
+            button.callback_data
+            for row in sent["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "menu|profile_packages"
+        )
+        packages = dispatch_command_keyboard(packages_callback)
+        self.assertEqual("Packages: command fixture", packages.edits[0][0])
+        child_callbacks = [
+            button.callback_data
+            for row in packages.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertEqual(["menu|main_profile", "menu|main"], child_callbacks)
+
+        account = dispatch_command_keyboard(child_callbacks[0])
+        self.assertEqual("Account screen from /profile", account.edits[0][0])
+        self.assertEqual(
+            [[button.callback_data for button in row]
+             for row in sent["reply_markup"].inline_keyboard],
+            [[button.callback_data for button in row]
+             for row in account.edits[0][1]["reply_markup"].inline_keyboard],
+        )
+        home = dispatch_command_keyboard(child_callbacks[1])
+        self.assertEqual("Main screen from /profile", home.edits[0][0])
+
     def test_customer_feedback_root_button_dispatches_to_registered_feedback_handler(self):
         effects = []
         dependencies = _main_menu_dependencies(False, effects)
@@ -4328,6 +5294,683 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
         self.assertIn("vault|assets|audio", labels_by_callback)
         self.assertIn("vault|review", labels_by_callback)
         self.assertIn("menu|main", labels_by_callback)
+
+    def test_knowledge_vault_import_and_search_guides_dispatch_without_vault_operations(self):
+        keyboard_namespace = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        keyboard = keyboard_namespace["vault_admin_keyboard"]()
+        expected_guides = {
+            "vault|import": (
+                "📥 <b>Import học liệu</b>\n\n"
+                "• <code>/vault_import_folder</code> dùng thư mục import mặc định.\n"
+                "• <code>/vault_import_video_refs</code> nhập Kho Video tham khảo.\n"
+                "• Reply video/ảnh/audio/file rồi gửi <code>/vault_import_file</code>.\n"
+                "• Prompt text: <code>/vault_import_file Video prompt: ...</code>\n"
+                "• Online refs: <code>/vault_import_online_sources &lt;url1&gt; &lt;url2&gt;</code>\n"
+                "• Sync/backup: <code>/vault_sync_index</code>, <code>/vault_backup</code>"
+            ),
+            "vault|search": (
+                "🔎 Dùng <code>/kho_prompt &lt;từ khóa&gt;</code> để tìm prompt public/admin, "
+                "hoặc <code>/vault_prompt_debug &lt;id&gt;</code> để xem chi tiết admin."
+            ),
+        }
+
+        for callback_data, expected_text in expected_guides.items():
+            with self.subTest(callback_data=callback_data):
+                button = next(
+                    button
+                    for row in keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data == callback_data
+                )
+                self.assertTrue(button.text.startswith("📘 Hướng dẫn"))
+                self.assertRegex(
+                    callback_data,
+                    _registered_pattern("handle_knowledge_vault_callback"),
+                )
+
+                effects = []
+                query = _Query(123, callback_data)
+
+                async def edit_message_text(text, **kwargs):
+                    effects.append(("edit", text, kwargs))
+
+                query.edit_message_text = edit_message_text
+                namespace = _load_functions(
+                    "handle_knowledge_vault_callback",
+                    is_admin_user=lambda user_id: user_id == 123,
+                    toan_knowledge_vault=lambda: effects.append("vault_factory") or object(),
+                    toan_vault_importer=lambda: self.fail("guide callback must not access importer"),
+                    vault_admin_keyboard=lambda: keyboard,
+                )
+
+                _run_no_io(namespace["handle_knowledge_vault_callback"](
+                    SimpleNamespace(callback_query=query), SimpleNamespace(),
+                ))
+
+                self.assertEqual(query.answers, [((), {})])
+                self.assertEqual(effects, [
+                    "vault_factory",
+                    ("edit", expected_text, {"parse_mode": "HTML", "reply_markup": keyboard}),
+                ])
+
+    def test_knowledge_vault_nonempty_prompt_and_review_lists_retain_back_and_home(self):
+        keyboard_namespace = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )
+        root_keyboard = keyboard_namespace["vault_admin_keyboard"]()
+        fixture_prompts = {
+            "vault|prompts": [{"id": 71, "prompt_text": "fixture prompt", "status": "approved"}],
+            "vault|review": [{"id": 72, "prompt_text": "fixture draft", "status": "pending"}],
+        }
+
+        for emitted_action, prompts in fixture_prompts.items():
+            with self.subTest(emitted_action=emitted_action):
+                action_button = next(
+                    button
+                    for row in root_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data == emitted_action
+                )
+                self.assertRegex(
+                    action_button.callback_data,
+                    _registered_pattern("handle_knowledge_vault_callback"),
+                )
+                effects = []
+
+                class _VaultFixture:
+                    def search_prompt(self, **kwargs):
+                        effects.append(("search_prompt", kwargs))
+                        return prompts
+
+                query = _Query(123, action_button.callback_data)
+
+                async def edit_message_text(text, **kwargs):
+                    effects.append(("edit", text, kwargs))
+
+                query.edit_message_text = edit_message_text
+                namespace = _load_functions(
+                    "handle_knowledge_vault_callback",
+                    is_admin_user=lambda user_id: user_id == 123,
+                    toan_knowledge_vault=lambda: effects.append("vault_factory") or _VaultFixture(),
+                    vault_prompt_list_text=lambda items, title="fixture list": f"{title}:{len(items)}",
+                    InlineKeyboardButton=_Button,
+                    InlineKeyboardMarkup=_Markup,
+                    vault_admin_keyboard=lambda: root_keyboard,
+                )
+
+                _run_no_io(namespace["handle_knowledge_vault_callback"](
+                    SimpleNamespace(callback_query=query), SimpleNamespace(),
+                ))
+
+                self.assertEqual(query.answers, [((), {})])
+                self.assertEqual(effects[0], "vault_factory")
+                list_keyboard = effects[-1][2]["reply_markup"]
+                emitted_callbacks = [
+                    button.callback_data
+                    for row in list_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data
+                ]
+                self.assertTrue(
+                    any(value.startswith("vault|use|") for value in emitted_callbacks)
+                    or any(value.startswith("vault|approve_prompt|") for value in emitted_callbacks)
+                )
+                self.assertIn("vault|status", emitted_callbacks)
+                self.assertIn("menu|main", emitted_callbacks)
+                back_button = next(
+                    button
+                    for row in list_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data == "vault|status"
+                )
+                home_button = next(
+                    button
+                    for row in list_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data == "menu|main"
+                )
+                self.assertIn("Quay lại", back_button.text)
+                self.assertRegex(
+                    back_button.callback_data,
+                    _registered_pattern("handle_knowledge_vault_callback"),
+                )
+                self.assertRegex(home_button.callback_data, _registered_menu_pattern())
+
+                back_query = _Query(123, back_button.callback_data)
+                back_edits = []
+
+                async def edit_vault_root(text, **kwargs):
+                    back_edits.append((text, kwargs))
+
+                back_query.edit_message_text = edit_vault_root
+
+                class _ImporterFixture:
+                    def debug_status(self):
+                        return {"status": "fixture"}
+
+                back_namespace = _load_functions(
+                    "handle_knowledge_vault_callback",
+                    is_admin_user=lambda user_id: user_id == 123,
+                    toan_knowledge_vault=object,
+                    toan_vault_importer=_ImporterFixture,
+                    vault_json_block=lambda payload: f"<status>{payload!r}</status>",
+                    vault_admin_keyboard=lambda: root_keyboard,
+                )
+                _run_no_io(back_namespace["handle_knowledge_vault_callback"](
+                    SimpleNamespace(callback_query=back_query), SimpleNamespace(),
+                ))
+                self.assertEqual(back_query.answers, [((), {})])
+                self.assertEqual(back_edits[-1][1]["reply_markup"], root_keyboard)
+                self.assertIn("Kho học liệu TOAN AAS", back_edits[-1][0])
+
+                home_dependencies = _main_menu_dependencies(True, [])
+                home_dependencies["time"] = SimpleNamespace(perf_counter=lambda: 0.0)
+                home_dependencies["logger"] = SimpleNamespace(info=lambda *_args, **_kwargs: None)
+                home_namespace = _load_functions("handle_menu_callback", **home_dependencies)
+                home_query = _Query(123, home_button.callback_data)
+                _run_no_io(home_namespace["handle_menu_callback"](
+                    SimpleNamespace(callback_query=home_query), SimpleNamespace(user_data={}),
+                ))
+                self.assertEqual(home_query.answers, [((), {})])
+                self.assertEqual(home_query.edits, [
+                    ("existing screen:main", {"reply_markup": "existing keyboard:main"}),
+                ])
+
+    def test_knowledge_vault_asset_category_buttons_dispatch_to_matching_read_only_lists(self):
+        root_keyboard = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["vault_admin_keyboard"]()
+        category_fixtures = {
+            "vault|assets|video": ("video", "Video fixture", "🎬 Kho Video"),
+            "vault|assets|image": ("image", "Image fixture", "🖼 Kho Ảnh"),
+            "vault|assets|audio": ("audio", "Audio fixture", "🎵 Kho Nhạc/SFX"),
+        }
+
+        for callback_data, (category, title, expected_button_text) in category_fixtures.items():
+            with self.subTest(callback_data=callback_data):
+                button = next(
+                    button
+                    for row in root_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data == callback_data
+                )
+                self.assertEqual(button.text, expected_button_text)
+                self.assertRegex(
+                    button.callback_data,
+                    _registered_pattern("handle_knowledge_vault_callback"),
+                )
+                list_calls = []
+                rendered = []
+
+                class _VaultFixture:
+                    def list_assets(self, **kwargs):
+                        list_calls.append(kwargs)
+                        return [{"type": kwargs["asset_type"]}]
+
+                query = _Query(123, button.callback_data)
+
+                async def edit_message_text(text, **kwargs):
+                    rendered.append((text, kwargs))
+
+                query.edit_message_text = edit_message_text
+                namespace = _load_functions(
+                    "handle_knowledge_vault_callback",
+                    is_admin_user=lambda user_id: user_id == 123,
+                    toan_knowledge_vault=_VaultFixture,
+                    vault_asset_list_text=lambda assets, title: f"{title}:{len(assets)}",
+                    VAULT_ASSET_LABELS={
+                        "video": "Video fixture",
+                        "image": "Image fixture",
+                        "audio": "Audio fixture",
+                    },
+                    vault_admin_keyboard=lambda: root_keyboard,
+                )
+
+                _run_no_io(namespace["handle_knowledge_vault_callback"](
+                    SimpleNamespace(callback_query=query), SimpleNamespace(),
+                ))
+
+                self.assertEqual(query.answers, [((), {})])
+                if category == "audio":
+                    self.assertEqual(
+                        [call["asset_type"] for call in list_calls],
+                        ["music", "sfx", "voice", "audio"],
+                    )
+                    self.assertTrue(all(call["public_only"] is False and call["limit"] == 8 for call in list_calls))
+                    expected_count = 4
+                else:
+                    self.assertEqual(list_calls, [{
+                        "asset_type": category,
+                        "public_only": False,
+                        "limit": 12,
+                    }])
+                    expected_count = 1
+                self.assertEqual(rendered, [(
+                    f"{title}:{expected_count}",
+                    {"parse_mode": "HTML", "reply_markup": root_keyboard},
+                )])
+                navigation_callbacks = {
+                    button.callback_data
+                    for row in root_keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data
+                }
+                self.assertIn("vault|status", navigation_callbacks)
+                self.assertIn("menu|main", navigation_callbacks)
+
+    def test_admin_vault_review_command_emits_registered_back_and_home(self):
+        self.assertIn(
+            'CommandHandler("vault_review", admin_internal_command(cmd_vault_review))',
+            BOT_SOURCE,
+        )
+        root_keyboard = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["vault_admin_keyboard"]()
+        fixture_drafts = [{"id": 91, "prompt_text": "fixture draft", "status": "pending"}]
+        command_effects = []
+
+        class _VaultFixture:
+            def search_prompt(self, **kwargs):
+                command_effects.append(("search_prompt", kwargs))
+                return fixture_drafts
+
+        async def reply_text(text, **kwargs):
+            command_effects.append(("reply", text, kwargs))
+
+        command_namespace = _load_functions(
+            "cmd_vault_review",
+            toan_knowledge_vault=lambda: _VaultFixture(),
+            vault_prompt_list_text=lambda items, title: f"{title}:{len(items)}",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            vault_admin_keyboard=lambda: root_keyboard,
+        )
+        wrapper_namespace = _load_functions(
+            "admin_internal_command",
+            is_admin_user=lambda user_id: user_id == 123,
+            record_anomaly=lambda *_args, **_kwargs: self.fail("authorized admin must not be denied"),
+            extract_command_name=lambda _update: "vault_review",
+            reply_internal_customer_feature=lambda *_args: self.fail("admin wrapper must reach command"),
+        )
+        wrapped_command = wrapper_namespace["admin_internal_command"](
+            command_namespace["cmd_vault_review"]
+        )
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=123, username="admin", first_name="Admin"),
+            message=SimpleNamespace(reply_text=reply_text),
+        )
+        _run_no_io(wrapped_command(update, SimpleNamespace()))
+
+        self.assertEqual(command_effects[0], (
+            "search_prompt",
+            {"public_only": False, "limit": 12},
+        ))
+        self.assertEqual(len(command_effects), 2)
+        self.assertEqual(command_effects[1][1], "🧾 Nháp cần duyệt:1")
+        list_keyboard = command_effects[1][2]["reply_markup"]
+        emitted_callbacks = [
+            button.callback_data
+            for row in list_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        self.assertIn("vault|approve_prompt|91", emitted_callbacks)
+        self.assertIn("vault|status", emitted_callbacks)
+        self.assertIn("menu|main", emitted_callbacks)
+        self.assertRegex(
+            "vault|approve_prompt|91",
+            _registered_pattern("handle_knowledge_vault_callback"),
+        )
+        self.assertRegex(
+            "vault|status",
+            _registered_pattern("handle_knowledge_vault_callback"),
+        )
+        self.assertRegex("menu|main", _registered_menu_pattern())
+
+        back_query = _Query(123, "vault|status")
+        back_edits = []
+
+        async def edit_vault_root(text, **kwargs):
+            back_edits.append((text, kwargs))
+
+        back_query.edit_message_text = edit_vault_root
+
+        class _ImporterFixture:
+            def debug_status(self):
+                return {"status": "fixture"}
+
+        back_namespace = _load_functions(
+            "handle_knowledge_vault_callback",
+            is_admin_user=lambda user_id: user_id == 123,
+            toan_knowledge_vault=object,
+            toan_vault_importer=_ImporterFixture,
+            vault_json_block=lambda payload: f"<status>{payload!r}</status>",
+            vault_admin_keyboard=lambda: root_keyboard,
+        )
+        _run_no_io(back_namespace["handle_knowledge_vault_callback"](
+            SimpleNamespace(callback_query=back_query), SimpleNamespace(),
+        ))
+        self.assertEqual(back_query.answers, [((), {})])
+        self.assertEqual(back_edits[-1][1]["reply_markup"], root_keyboard)
+        self.assertIn("Kho học liệu TOAN AAS", back_edits[-1][0])
+
+        home_dependencies = _main_menu_dependencies(True, [])
+        home_dependencies["time"] = SimpleNamespace(perf_counter=lambda: 0.0)
+        home_dependencies["logger"] = SimpleNamespace(info=lambda *_args, **_kwargs: None)
+        home_namespace = _load_functions("handle_menu_callback", **home_dependencies)
+        home_query = _Query(123, "menu|main")
+        _run_no_io(home_namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=home_query), SimpleNamespace(user_data={}),
+        ))
+        self.assertEqual(home_query.answers, [((), {})])
+        self.assertEqual(home_query.edits, [
+            ("existing screen:main", {"reply_markup": "existing keyboard:main"}),
+        ])
+
+    def test_vault_prompt_commands_keep_role_appropriate_exit_controls(self):
+        self.assertIn('CommandHandler("kho_prompt", cmd_vault_prompt_library)', BOT_SOURCE)
+        self.assertIn('CommandHandler("vault_prompt", cmd_vault_prompt_library)', BOT_SOURCE)
+        root_keyboard = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["vault_admin_keyboard"]()
+        scenarios = (
+            (123, True, [{"id": 92, "prompt_text": "fixture prompt"}]),
+            (123, True, []),
+            (999, False, [{"id": 93, "prompt_text": "public fixture"}]),
+            (999, False, []),
+        )
+
+        for user_id, is_admin, prompts in scenarios:
+            with self.subTest(user_id=user_id, has_prompts=bool(prompts)):
+                effects = []
+
+                class _VaultFixture:
+                    def search_prompt(self, **kwargs):
+                        effects.append(("search_prompt", kwargs))
+                        return prompts
+
+                async def reply_text(text, **kwargs):
+                    effects.append(("reply", text, kwargs))
+
+                namespace = _load_functions(
+                    "cmd_vault_prompt_library",
+                    is_admin_user=lambda candidate: candidate == user_id and is_admin,
+                    toan_knowledge_vault=lambda: _VaultFixture(),
+                    vault_prompt_list_text=lambda items, title: f"{title}:{len(items)}",
+                    InlineKeyboardButton=_Button,
+                    InlineKeyboardMarkup=_Markup,
+                    vault_admin_keyboard=lambda: root_keyboard,
+                )
+                update = SimpleNamespace(
+                    effective_user=SimpleNamespace(id=user_id),
+                    message=SimpleNamespace(reply_text=reply_text),
+                )
+                context = SimpleNamespace(args=[])
+                _run_no_io(namespace["cmd_vault_prompt_library"](update, context))
+
+                self.assertEqual(effects[0], (
+                    "search_prompt",
+                    {"query": "", "public_only": not is_admin, "limit": 10},
+                ))
+                self.assertEqual(len(effects), 2)
+                markup = effects[1][2]["reply_markup"]
+                self.assertIsNotNone(markup)
+                emitted_callbacks = [
+                    button.callback_data
+                    for row in markup.inline_keyboard
+                    for button in row
+                    if button.callback_data
+                ]
+                if prompts:
+                    prompt_id = prompts[0]["id"]
+                    self.assertIn(f"vault|use|{prompt_id}", emitted_callbacks)
+                    self.assertRegex(
+                        f"vault|use|{prompt_id}",
+                        _registered_pattern("handle_knowledge_vault_callback"),
+                    )
+                if is_admin:
+                    self.assertIn("vault|status", emitted_callbacks)
+                    self.assertRegex(
+                        "vault|status",
+                        _registered_pattern("handle_knowledge_vault_callback"),
+                    )
+                self.assertIn("menu|main", emitted_callbacks)
+                self.assertRegex("menu|main", _registered_menu_pattern())
+
+                if is_admin:
+                    back_query = _Query(user_id, "vault|status")
+                    back_edits = []
+
+                    async def edit_vault_root(text, **kwargs):
+                        back_edits.append((text, kwargs))
+
+                    back_query.edit_message_text = edit_vault_root
+
+                    class _ImporterFixture:
+                        def debug_status(self):
+                            return {"status": "fixture"}
+
+                    back_namespace = _load_functions(
+                        "handle_knowledge_vault_callback",
+                        is_admin_user=lambda candidate: candidate == user_id,
+                        toan_knowledge_vault=object,
+                        toan_vault_importer=_ImporterFixture,
+                        vault_json_block=lambda payload: f"<status>{payload!r}</status>",
+                        vault_admin_keyboard=lambda: root_keyboard,
+                    )
+                    _run_no_io(back_namespace["handle_knowledge_vault_callback"](
+                        SimpleNamespace(callback_query=back_query), SimpleNamespace(),
+                    ))
+                    self.assertEqual(back_query.answers, [((), {})])
+                    self.assertIn("Kho học liệu TOAN AAS", back_edits[-1][0])
+
+                home_dependencies = _main_menu_dependencies(is_admin, [])
+                home_dependencies["time"] = SimpleNamespace(perf_counter=lambda: 0.0)
+                home_dependencies["logger"] = SimpleNamespace(info=lambda *_args, **_kwargs: None)
+                home_namespace = _load_functions("handle_menu_callback", **home_dependencies)
+                home_query = _Query(user_id, "menu|main")
+                _run_no_io(home_namespace["handle_menu_callback"](
+                    SimpleNamespace(callback_query=home_query), SimpleNamespace(user_data={}),
+                ))
+                self.assertEqual(home_query.answers, [((), {})])
+                self.assertEqual(home_query.edits, [
+                    ("existing screen:main", {"reply_markup": "existing keyboard:main"}),
+                ])
+
+    def test_vault_review_emitted_approve_callback_is_admin_only_and_acknowledged(self):
+        self.assertIn(
+            'CommandHandler("vault_review", admin_internal_command(cmd_vault_review))',
+            BOT_SOURCE,
+        )
+        self.assertRegex("vault|approve_prompt|91", _registered_pattern("handle_knowledge_vault_callback"))
+        root_keyboard = _load_functions(
+            "vault_admin_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+        )["vault_admin_keyboard"]()
+        drafts = [{"id": 91, "prompt_text": "fixture pending", "status": "pending"}]
+
+        class _CommandVault:
+            def search_prompt(self, **kwargs):
+                self.assert_search = kwargs
+                return drafts
+
+        command_outputs = []
+
+        async def reply_text(text, **kwargs):
+            command_outputs.append((text, kwargs))
+
+        command_ns = _load_functions(
+            "cmd_vault_review",
+            toan_knowledge_vault=lambda: _CommandVault(),
+            vault_prompt_list_text=lambda items, title: f"{title}:{len(items)}",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            vault_admin_keyboard=lambda: root_keyboard,
+        )
+        wrapper_ns = _load_functions(
+            "admin_internal_command",
+            is_admin_user=lambda user_id: user_id == 123,
+            record_anomaly=lambda *_args, **_kwargs: self.fail("admin command unexpectedly denied"),
+            extract_command_name=lambda _update: "vault_review",
+            reply_internal_customer_feature=lambda *_args: self.fail("admin wrapper did not call command"),
+        )
+        command_update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=123, username="admin", first_name="Admin"),
+            message=SimpleNamespace(reply_text=reply_text),
+        )
+        _run_no_io(wrapper_ns["admin_internal_command"](command_ns["cmd_vault_review"])(
+            command_update, SimpleNamespace(),
+        ))
+        emitted = next(
+            button.callback_data
+            for row in command_outputs[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data and button.callback_data.startswith("vault|approve_prompt|")
+        )
+        self.assertEqual(emitted, "vault|approve_prompt|91")
+
+        admin_calls = []
+
+        class _AdminVault:
+            def approve_prompt(self, prompt_id, *, approved_by):
+                admin_calls.append((prompt_id, approved_by))
+                return {"id": prompt_id, "status": "approved"}
+
+        async def admin_edit(text, **kwargs):
+            admin_edits.append((text, kwargs))
+
+        admin_query = _Query(123, emitted)
+        admin_edits = []
+        admin_query.edit_message_text = admin_edit
+        admin_ns = _load_functions(
+            "handle_knowledge_vault_callback",
+            is_admin_user=lambda user_id: user_id == 123,
+            toan_knowledge_vault=lambda: _AdminVault(),
+            vault_json_block=lambda payload: f"<fixture>{payload!r}</fixture>",
+            vault_admin_keyboard=lambda: root_keyboard,
+        )
+        _run_no_io(admin_ns["handle_knowledge_vault_callback"](
+            SimpleNamespace(callback_query=admin_query), SimpleNamespace(),
+        ))
+        self.assertEqual(admin_query.answers, [((), {})])
+        self.assertEqual(admin_calls, [(91, 123)])
+        self.assertIn("✅ Đã duyệt prompt.", admin_edits[0][0])
+        self.assertEqual(admin_edits[0][1]["reply_markup"], root_keyboard)
+
+        public_calls = []
+
+        class _PublicVault:
+            def search_prompt(self, **kwargs):
+                public_calls.append(("search_prompt", kwargs))
+                return [{"id": 92, "prompt_text": "fixture public"}]
+
+            def approve_prompt(self, *_args, **_kwargs):
+                raise AssertionError("public user must not approve prompts")
+
+        async def public_edit(text, **kwargs):
+            public_edits.append((text, kwargs))
+
+        public_query = _Query(999, emitted)
+        public_edits = []
+        public_query.edit_message_text = public_edit
+        public_ns = _load_functions(
+            "handle_knowledge_vault_callback",
+            is_admin_user=lambda user_id: False,
+            toan_knowledge_vault=lambda: _PublicVault(),
+            vault_prompt_list_text=lambda items, title="public fixture": f"{title}:{len(items)}",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            vault_admin_keyboard=lambda: root_keyboard,
+        )
+        _run_no_io(public_ns["handle_knowledge_vault_callback"](
+            SimpleNamespace(callback_query=public_query), SimpleNamespace(),
+        ))
+        self.assertEqual(public_query.answers, [((), {})])
+        self.assertEqual(public_calls, [
+            ("search_prompt", {"public_only": True, "limit": 10}),
+        ])
+        self.assertEqual(public_edits[0][0], "📚 Kho Prompt TOAN AAS:1")
+
+    def test_vault_prompt_use_button_displays_fixture_prompt_by_visibility(self):
+        self.assertIn('CommandHandler("kho_prompt", cmd_vault_prompt_library)', BOT_SOURCE)
+        self.assertIn('CommandHandler("vault_prompt", cmd_vault_prompt_library)', BOT_SOURCE)
+        for user_id, is_admin, prompt_id, expected_public in (
+            (123, True, 92, False),
+            (999, False, 93, True),
+        ):
+            with self.subTest(user_id=user_id, is_admin=is_admin):
+                namespace = _load_functions(
+                    "cmd_vault_prompt_library",
+                    is_admin_user=lambda candidate: candidate == user_id and is_admin,
+                    toan_knowledge_vault=lambda: SimpleNamespace(search_prompt=lambda **_kwargs: [
+                        {"id": prompt_id, "prompt_text": "<fixture prompt>"},
+                    ]),
+                    vault_prompt_list_text=lambda items, title: f"{title}:{len(items)}",
+                    InlineKeyboardButton=_Button,
+                    InlineKeyboardMarkup=_Markup,
+                    vault_admin_keyboard=lambda: _Markup([]),
+                )
+                command_outputs = []
+
+                async def reply_text(text, **kwargs):
+                    command_outputs.append((text, kwargs))
+
+                update = SimpleNamespace(
+                    effective_user=SimpleNamespace(id=user_id),
+                    message=SimpleNamespace(reply_text=reply_text),
+                )
+                _run_no_io(namespace["cmd_vault_prompt_library"](update, SimpleNamespace(args=[])))
+                emitted = next(
+                    button.callback_data
+                    for row in command_outputs[0][1]["reply_markup"].inline_keyboard
+                    for button in row
+                    if button.callback_data and button.callback_data.startswith("vault|use|")
+                )
+                self.assertEqual(emitted, f"vault|use|{prompt_id}")
+                self.assertRegex(emitted, _registered_pattern("handle_knowledge_vault_callback"))
+
+                lookups = []
+                replies = []
+
+                class _VaultFixture:
+                    def get_prompt(self, selected_id, *, public):
+                        lookups.append((selected_id, public))
+                        return {"id": selected_id, "prompt_text": "<fixture prompt>"}
+
+                async def reply_prompt(text, **kwargs):
+                    replies.append((text, kwargs))
+
+                query = _Query(user_id, emitted)
+                query.message = SimpleNamespace(reply_text=reply_prompt)
+                handler = _load_functions(
+                    "handle_knowledge_vault_callback",
+                    is_admin_user=lambda candidate: candidate == user_id and is_admin,
+                    toan_knowledge_vault=lambda: _VaultFixture(),
+                    html=html,
+                )
+                _run_no_io(handler["handle_knowledge_vault_callback"](
+                    SimpleNamespace(callback_query=query), SimpleNamespace(),
+                ))
+
+                self.assertEqual(query.answers, [((), {})])
+                self.assertEqual(lookups, [(prompt_id, expected_public)])
+                self.assertEqual(replies, [(
+                    "📋 <b>Prompt sẵn sàng dùng</b>\n\n<pre>&lt;fixture prompt&gt;</pre>",
+                    {"parse_mode": "HTML"},
+                )])
 
     def test_public_audio_studio_landing_back_and_home_return_to_main_via_registered_handlers(self):
         showroom = "showroom"
@@ -4765,6 +6408,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             normalize_user_language=lambda _lang: "vi",
             get_user_language=lambda _uid: "vi",
             public_hub_copy=lambda _lang: Copy(support_ticket_prompt_body="Describe the issue"),
+            is_admin_user=lambda _uid: False,
             html=html,
             time=SimpleNamespace(time=lambda: 1_000.0),
             USER_PENDING={},
@@ -4869,6 +6513,902 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             [("🧪 Render thật đang admin-test. Khách dùng /image_story để lấy shot pack/prompt trước. Bot chưa trừ Xu.", {})],
         )
         self.assertEqual(media_jobs, [])
+
+    def test_media_library_home_button_returns_to_registered_main_menu(self):
+        effects = []
+        dependencies = _main_menu_dependencies(False, effects)
+        dependencies.update({
+            "normalize_product_context": lambda context: context,
+            "product_context_callback": lambda namespace, context, action: f"{namespace}|{context}|{action}",
+            "music_ui_lang": lambda *_args, **_kwargs: "vi",
+            "_audio_topic": lambda _lang, key: key,
+            "_audio_label": lambda _lang, key: key,
+            "time": SimpleNamespace(perf_counter=lambda: 1.0),
+            "logger": SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            "localized_start_menu_text": lambda *_args: "MAIN SCREEN",
+            "localized_main_menu_keyboard": lambda *_args: _Markup([]),
+            "PRODUCT_CONTEXT_VIDEO_ADDON": "video_addon",
+        })
+        namespace = _load_functions("media_library_quick_keyboard", "handle_menu_callback", **dependencies)
+        media_keyboard = namespace["media_library_quick_keyboard"]("vi", "showroom")
+        callback = next(
+            button.callback_data
+            for row in media_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data == "menu|main"
+        )
+        self.assertRegex(callback, _registered_menu_pattern())
+
+        query = _Query(991177, callback)
+        _run_no_io(namespace["handle_menu_callback"](
+            SimpleNamespace(callback_query=query),
+            SimpleNamespace(user_data={}),
+        ))
+
+        self.assertEqual([((), {})], query.answers)
+        self.assertEqual(
+            [("existing screen:main", {"reply_markup": "existing keyboard:main"})],
+            query.edits,
+        )
+
+    def test_product_progress_update_button_dispatches_registered_read_only_handler(self):
+        from services import product_progress_status
+        from services.pricing_guide_content import public_hub_copy
+
+        user_id = 991178
+        job_id = "job123"
+        job_reads = []
+        refresh_registrations = []
+        renders = []
+        job_record = {
+            "internal_job_id": job_id,
+            "job_id": job_id,
+            "user_id": str(user_id),
+            "product_type": "video_ai_real",
+            "status": "processing",
+            "progress_percent": 42,
+        }
+
+        def get_job(selected_job_id):
+            job_reads.append(selected_job_id)
+            return dict(job_record)
+
+        async def render(query, text, **kwargs):
+            renders.append((text, kwargs))
+            query.edits.append((text, kwargs))
+
+        def forbidden(*_args, **_kwargs):
+            self.fail("video progress refresh must not deliver or reprocess an artifact")
+
+        namespace = _load_functions(
+            "product_progress_status_keyboard",
+            "product_progress_state_from_job",
+            "product_progress_status_from_job_text",
+            "handle_product_progress_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            product_progress_status=product_progress_status,
+            public_hub_copy=public_hub_copy,
+            resolve_progress_product_type=lambda _job_id, product_type, _job: product_type,
+            progress_product_type_is_music=lambda *_args: False,
+            product_progress_status_text=product_progress_status.render_product_progress_panel,
+            user_ui_lang=lambda _uid: "vi",
+            is_admin_user=lambda _uid: False,
+            get_engine_async_job=get_job,
+            safe_edit_or_send=render,
+            progress_auto_refresh_register_message=lambda *args, **kwargs: refresh_registrations.append((args, kwargs)),
+            execute_engine=forbidden,
+            maybe_deliver_music_progress_job=forbidden,
+            subdub_recover_existing_mp4_delivery=forbidden,
+            subdub_finalize_delivered_panel=forbidden,
+            subdub_send_success_receipt_once=forbidden,
+        )
+
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_product_progress_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_product_progress_callback"]
+        )
+
+        keyboard = namespace["product_progress_status_keyboard"]("video_ai_real", job_id, "vi")
+        refresh_button = next(
+            button for row in keyboard.inline_keyboard for button in row
+            if button.text == "🔄 Cập nhật trạng thái"
+        )
+        self.assertEqual("progress|status|video_ai_real|job123", refresh_button.callback_data)
+        self.assertIsNotNone(route.pattern.match(refresh_button.callback_data))
+
+        for _ in range(2):
+            query = _Query(user_id, refresh_button.callback_data)
+            query.message = SimpleNamespace(chat_id=user_id, message_id=44)
+            _run_no_io(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+            self.assertEqual([((), {})], query.answers)
+            self.assertEqual(1, len(query.edits))
+            panel_text, panel_options = query.edits[0]
+            self.assertIn("Tiến độ:", panel_text)
+            returned_callbacks = [
+                button.callback_data
+                for row in panel_options["reply_markup"].inline_keyboard
+                for button in row
+                if button.callback_data
+            ]
+            self.assertIn(refresh_button.callback_data, returned_callbacks)
+            self.assertIn("menu|main_video", returned_callbacks)
+            self.assertIn("menu|main", returned_callbacks)
+            for navigation_callback in ("menu|main_video", "menu|main"):
+                self.assertRegex(navigation_callback, _registered_menu_pattern())
+
+        self.assertEqual([job_id, job_id], job_reads)
+        self.assertEqual(2, len(refresh_registrations))
+        self.assertEqual(2, len(renders))
+
+        job_record.clear()
+        stale_query = _Query(user_id, refresh_button.callback_data)
+        stale_query.message = SimpleNamespace(chat_id=user_id, message_id=44)
+        _run_no_io(route.callback(SimpleNamespace(callback_query=stale_query), SimpleNamespace()))
+        self.assertEqual([((), {})], stale_query.answers)
+        stale_text, stale_options = stale_query.edits[0]
+        copy = public_hub_copy("vi")
+        self.assertIn(copy["common_failed"], stale_text)
+        self.assertIn(copy["common_retry"], stale_text)
+        self.assertNotIn("Tiến độ: 0%", stale_text)
+        self.assertNotIn(job_id, stale_text)
+        self.assertEqual(
+            {"menu|main_video", "menu|main"},
+            {
+                button.callback_data
+                for row in stale_options["reply_markup"].inline_keyboard
+                for button in row
+            },
+        )
+        self.assertEqual([job_id, job_id, job_id], job_reads)
+        self.assertEqual(2, len(refresh_registrations), "missing job must not register a refresh loop")
+        self.assertEqual(3, len(renders))
+
+        latest_keyboard = namespace["product_progress_status_keyboard"]("video_ai_real", "latest", "vi")
+        latest_callback = next(
+            button.callback_data
+            for row in latest_keyboard.inline_keyboard
+            for button in row
+            if button.text == "🔄 Cập nhật trạng thái"
+        )
+        latest_query = _Query(user_id, latest_callback)
+        latest_query.message = SimpleNamespace(chat_id=user_id, message_id=44)
+        _run_no_io(route.callback(SimpleNamespace(callback_query=latest_query), SimpleNamespace()))
+        self.assertEqual([((), {})], latest_query.answers)
+        latest_text, latest_options = latest_query.edits[0]
+        self.assertIn(copy["common_failed"], latest_text)
+        self.assertNotIn("Tiến độ: 0%", latest_text)
+        self.assertNotIn(job_id, latest_text)
+        self.assertEqual(
+            {"menu|main_video", "menu|main"},
+            {
+                button.callback_data
+                for row in latest_options["reply_markup"].inline_keyboard
+                for button in row
+            },
+        )
+        self.assertEqual([job_id, job_id, job_id], job_reads, "latest must not invent a job lookup")
+        self.assertEqual(2, len(refresh_registrations))
+
+        job_record.update({
+            "internal_job_id": job_id,
+            "job_id": job_id,
+            "user_id": str(user_id + 1),
+            "product_type": "video_ai_real",
+            "status": "processing",
+            "progress_percent": 42,
+        })
+        foreign_query = _Query(user_id, refresh_button.callback_data)
+        foreign_query.message = SimpleNamespace(chat_id=user_id, message_id=44)
+        _run_no_io(route.callback(SimpleNamespace(callback_query=foreign_query), SimpleNamespace()))
+        self.assertEqual([((), {})], foreign_query.answers)
+        foreign_text, foreign_options = foreign_query.edits[0]
+        self.assertIn(copy["common_failed"], foreign_text)
+        self.assertNotIn(job_id, foreign_text)
+        self.assertEqual(
+            {"menu|main_video", "menu|main"},
+            {
+                button.callback_data
+                for row in foreign_options["reply_markup"].inline_keyboard
+                for button in row
+            },
+        )
+        self.assertEqual([job_id, job_id, job_id, job_id], job_reads)
+        self.assertEqual(2, len(refresh_registrations), "foreign job must not register a refresh loop")
+        self.assertEqual(5, len(renders))
+
+    def test_local_video_studio_preview_emitted_callbacks_use_registered_admin_handler(self):
+        from services import local_video_studio_preview
+
+        admin_id = 991179
+        context = SimpleNamespace(user_data={})
+        command_replies = []
+
+        class _Message:
+            async def reply_text(self, text, **kwargs):
+                record = {"text": text, **kwargs}
+                command_replies.append(record)
+                return record
+
+        namespace = _load_functions(
+            "local_video_studio_preview_keyboard",
+            "cmd_local_video_studio_preview",
+            "handle_local_video_studio_preview_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            local_video_studio_preview=local_video_studio_preview,
+            is_admin_user=lambda candidate: int(candidate) == admin_id,
+        )
+        command_update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=admin_id),
+            effective_message=_Message(),
+        )
+        _run_no_io(namespace["cmd_local_video_studio_preview"](command_update, context))
+        self.assertEqual("home", context.user_data[local_video_studio_preview.STATE_KEY]["screen"])
+        root_markup = command_replies[0]["reply_markup"]
+        open_callback = next(
+            button.callback_data
+            for row in root_markup.inline_keyboard
+            for button in row
+            if button.callback_data == "lvs27a|open|create"
+        )
+
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_preview_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_local_video_studio_preview_callback"]
+        )
+        self.assertIsNotNone(route.pattern.match(open_callback))
+
+        async def edit(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+
+        open_query = _Query(admin_id, open_callback)
+        open_query.edit_message_text = lambda text, **kwargs: edit(open_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=open_query),
+            context,
+        ))
+        self.assertEqual(1, len(open_query.answers))
+        self.assertEqual(1, len(open_query.edits))
+        self.assertEqual("create_goal", context.user_data[local_video_studio_preview.STATE_KEY]["screen"])
+        self.assertIn("Mục tiêu video mới", open_query.edits[0][0])
+
+        back_callback = next(
+            button.callback_data
+            for row in open_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "lvs27a|back"
+        )
+        self.assertIsNotNone(route.pattern.match(back_callback))
+        back_query = _Query(admin_id, back_callback)
+        back_query.edit_message_text = lambda text, **kwargs: edit(back_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=back_query),
+            context,
+        ))
+        self.assertEqual(1, len(back_query.answers))
+        self.assertEqual("home", context.user_data[local_video_studio_preview.STATE_KEY]["screen"])
+        self.assertIn("LOCAL VIDEO STUDIO — PREVIEW 27A", back_query.edits[0][0])
+
+        reopen_query = _Query(admin_id, open_callback)
+        reopen_query.edit_message_text = lambda text, **kwargs: edit(reopen_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=reopen_query),
+            context,
+        ))
+        home_callback = next(
+            button.callback_data
+            for row in reopen_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "lvs27a|home"
+        )
+        home_query = _Query(admin_id, home_callback)
+        home_query.edit_message_text = lambda text, **kwargs: edit(home_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=home_query),
+            context,
+        ))
+        self.assertEqual(1, len(home_query.answers))
+        self.assertEqual("home", context.user_data[local_video_studio_preview.STATE_KEY]["screen"])
+
+        close_callback = next(
+            button.callback_data
+            for row in home_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "lvs27a|close"
+        )
+        close_query = _Query(admin_id, close_callback)
+        close_query.edit_message_text = lambda text, **kwargs: edit(close_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=close_query),
+            context,
+        ))
+        self.assertEqual(1, len(close_query.answers))
+        self.assertIn("Đã đóng Local Video Studio Preview", close_query.edits[0][0])
+        self.assertNotIn(local_video_studio_preview.STATE_KEY, context.user_data)
+
+        stale_query = _Query(admin_id, back_callback)
+        stale_query.edit_message_text = lambda text, **kwargs: edit(stale_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id), callback_query=stale_query),
+            context,
+        ))
+        self.assertEqual(1, len(stale_query.answers))
+        self.assertTrue(stale_query.answers[0][1].get("show_alert"))
+        self.assertEqual([], stale_query.edits)
+        self.assertNotIn(local_video_studio_preview.STATE_KEY, context.user_data)
+
+        unauth_context = SimpleNamespace(user_data={local_video_studio_preview.STATE_KEY: {"owner_state": "keep"}})
+        before = dict(unauth_context.user_data)
+        unauth_query = _Query(admin_id + 1, open_callback)
+        _run_no_io(route.callback(
+            SimpleNamespace(effective_user=SimpleNamespace(id=admin_id + 1), callback_query=unauth_query),
+            unauth_context,
+        ))
+        self.assertEqual(1, len(unauth_query.answers))
+        self.assertTrue(unauth_query.answers[0][1].get("show_alert"))
+        self.assertEqual(before, unauth_context.user_data)
+
+    def test_local_video_public_planner_entry_dispatches_registered_and_back_expires(self):
+        from services import video_planning_assistant as planning_service
+        from services import video_uifreeze1
+        from services.pricing_guide_content import public_hub_copy
+
+        route_start = BOT_SOURCE.index("VIDEO_PUBLIC_ROUTE_MATRIX = {")
+        route_end = BOT_SOURCE.index("def video_public_route_for_tool", route_start)
+        route_assignment = ast.parse(BOT_SOURCE[route_start:route_end]).body[0]
+        route_matrix = ast.literal_eval(route_assignment.value)
+        service_names = (
+            "PLAN_SCHEMA_VERSION", "STATE_KEY", "SESSION_TTL_SECONDS",
+            "PreviewActionError", "PreviewDataError", "PublicSessionExpired",
+            "serialize_plan", "parse_callback", "open_transaction_lock",
+            "session_transaction_lock", "new_store", "store_has_callback_id",
+            "new_session", "apply_callback", "render_view", "commit_callback_id",
+            "put_session", "delete_session", "get_session", "deliver_then_commit",
+        )
+        service = SimpleNamespace(**{
+            name: getattr(planning_service, name)
+            for name in service_names
+        })
+
+        class _ImmediateLock:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        service.open_transaction_lock = lambda *_args: _ImmediateLock()
+        service.session_transaction_lock = lambda *_args: _ImmediateLock()
+        menu_namespace = _load_functions(
+            "video_public_visible_menu_rows",
+            "video_public_route_for_tool",
+            "video_public_menu_label",
+            "main_video_keyboard",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            normalize_user_language=lambda lang: lang or "vi",
+            public_hub_copy=public_hub_copy,
+            public_video_menu_label=lambda *_args: "",
+            local_video_studio_public_enabled=lambda: True,
+            VIDEO_PUBLIC_MENU_ROWS=video_uifreeze1.PUBLIC_MENU_ROWS,
+            VIDEO_PUBLIC_ROUTE_MATRIX=route_matrix,
+        )
+        video_menu = menu_namespace["main_video_keyboard"]("vi")
+        entry = next(
+            button
+            for row in video_menu.inline_keyboard
+            for button in row
+            if button.callback_data == "lvs27b|open"
+        )
+        self.assertIn("Lên kế hoạch", entry.text)
+        self.assertIn('"entry_callback": "lvs27b|open"', BOT_SOURCE)
+
+        namespace = _load_functions(
+            "local_video_studio_public_keyboard",
+            "_local_video_studio_is_option_c",
+            "_local_video_studio_public_store",
+            "_local_video_studio_public_cleanup_store",
+            "_local_video_studio_public_identity",
+            "_local_video_planning_user_data",
+            "_local_video_planning_clear_pending",
+            "_local_video_studio_public_deliver",
+            "_handle_option_c_video_planning_callback",
+            "handle_local_video_studio_public_callback",
+            InlineKeyboardButton=_Button,
+            InlineKeyboardMarkup=_Markup,
+            local_video_studio_public=service,
+            local_video_planning_store=SimpleNamespace(PlanStoreError=RuntimeError),
+            local_video_studio_public_enabled=lambda: True,
+            normalize_user_language=lambda lang: lang or "vi",
+            get_user_language=lambda _uid: "vi",
+            menu_text_main_video_i18n=lambda _lang: "MAIN VIDEO MENU FIXTURE",
+            main_video_keyboard=menu_namespace["main_video_keyboard"],
+            VIDEO_PUBLIC_MENU_ROWS=video_uifreeze1.PUBLIC_MENU_ROWS,
+            VIDEO_PUBLIC_ROUTE_MATRIX=route_matrix,
+            video_public_visible_menu_rows=menu_namespace["video_public_visible_menu_rows"],
+            video_public_route_for_tool=menu_namespace["video_public_route_for_tool"],
+            video_public_menu_label=menu_namespace["video_public_menu_label"],
+            public_video_menu_label=lambda *_args: "",
+            public_hub_copy=public_hub_copy,
+            local_video_planning_store_version=1,
+            _LOCAL_VIDEO_PLANNING_PENDING_KEY="local_video_planning_pending_brief",
+            time=SimpleNamespace(time=lambda: 1_800_000_000),
+        )
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_local_video_studio_public_callback"]
+        )
+        self.assertIsNotNone(route.pattern.match(entry.callback_data))
+
+        async def edit(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            return True
+
+        user_id, chat_id = 7, 70
+        context = SimpleNamespace(user_data={"video_edit_sentinel": {"unchanged": True}})
+        open_query = _Query(user_id, entry.callback_data)
+        open_query.id = "lvs27b-open-1"
+        open_query.message = SimpleNamespace(chat_id=chat_id, message_id=91)
+        open_query.edit_message_text = lambda text, **kwargs: edit(open_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(
+                callback_query=open_query,
+                effective_user=SimpleNamespace(id=user_id),
+                effective_chat=SimpleNamespace(id=chat_id),
+            ),
+            context,
+        ))
+        self.assertEqual(1, len(open_query.answers))
+        self.assertIn("LÊN KẾ HOẠCH", open_query.edits[0][0])
+        goal_back = next(
+            button.callback_data
+            for row in open_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data.endswith("|back")
+        )
+        self.assertIsNotNone(route.pattern.match(goal_back))
+        self.assertTrue(context.user_data.get(service.STATE_KEY))
+
+        back_query = _Query(user_id, goal_back)
+        back_query.id = "lvs27b-back-1"
+        back_query.message = SimpleNamespace(chat_id=chat_id, message_id=91)
+        back_query.edit_message_text = lambda text, **kwargs: edit(back_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(
+                callback_query=back_query,
+                effective_user=SimpleNamespace(id=user_id),
+                effective_chat=SimpleNamespace(id=chat_id),
+            ),
+            context,
+        ))
+        self.assertEqual(1, len(back_query.answers))
+        self.assertEqual("MAIN VIDEO MENU FIXTURE", back_query.edits[0][0])
+        back_callbacks = {
+            button.callback_data
+            for row in back_query.edits[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertIn("lvs27b|open", back_callbacks)
+        self.assertIn("menu|main", back_callbacks)
+        self.assertNotIn(service.STATE_KEY, context.user_data)
+        self.assertEqual({"unchanged": True}, context.user_data["video_edit_sentinel"])
+
+        stale_query = _Query(user_id, goal_back)
+        stale_query.id = "lvs27b-back-stale"
+        stale_query.message = SimpleNamespace(chat_id=chat_id, message_id=91)
+        stale_query.edit_message_text = lambda text, **kwargs: edit(stale_query, text, **kwargs)
+        _run_no_io(route.callback(
+            SimpleNamespace(
+                callback_query=stale_query,
+                effective_user=SimpleNamespace(id=user_id),
+                effective_chat=SimpleNamespace(id=chat_id),
+            ),
+            context,
+        ))
+        self.assertEqual(1, len(stale_query.answers))
+        self.assertTrue(stale_query.answers[0][1].get("show_alert"))
+        self.assertEqual([], stale_query.edits)
+        self.assertNotIn(service.STATE_KEY, context.user_data)
+
+    def test_local_video_public_plan_save_button_uses_registered_handler_idempotently(self):
+        import copy
+        import html
+        import sqlite3
+        import time
+        import uuid
+
+        from services import local_video_planning_store
+        from services import video_planning_assistant as planning_service
+
+        user_id, chat_id, session_id = 7, 70, "lvsave01"
+        state = planning_service.new_session(session_id, now=int(time.time()))
+
+        def choose(current, verb, *args):
+            return planning_service.apply_callback(
+                current,
+                planning_service.callback_data(current["session_id"], verb, *args),
+            )["session"]
+
+        state = choose(state, "goal", "cut_pacing")
+        state = planning_service.apply_text_input(
+            state,
+            "Video bán hàng cần nhanh, sáng, rõ lời nói và logo không che sản phẩm.",
+        )["session"]
+        state = choose(state, "platform", "tiktok_9x16")
+        state = choose(state, "source", "60_120")
+        state = choose(state, "target", "30")
+        state = choose(state, "asset", "video")
+        state = choose(state, "asset", "logo")
+        state = choose(state, "assets_done")
+        state = choose(state, "priority", "pace")
+        state = choose(state, "priority", "product_focus")
+        state = choose(state, "priorities_done")
+        state = choose(state, "operations_done")
+        state = choose(state, "safety_done")
+        self.assertEqual("summary", state["screen"])
+
+        memory_uri = f"file:lvs27b_plans_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        anchor = sqlite3.connect(memory_uri, uri=True)
+        anchor.row_factory = sqlite3.Row
+        self.addCleanup(anchor.close)
+
+        def db_connect():
+            return sqlite3.connect(memory_uri, uri=True)
+
+        class _ImmediateLock:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        public_adapter = SimpleNamespace(**{
+            name: getattr(planning_service, name)
+            for name in vars(planning_service)
+            if not name.startswith("__")
+        })
+        public_adapter.open_transaction_lock = lambda *_args: _ImmediateLock()
+        public_adapter.session_transaction_lock = lambda *_args: _ImmediateLock()
+        start = BOT_SOURCE.index("# --- LOCAL VIDEO STUDIO 27B PUBLIC ---")
+        end = BOT_SOURCE.index("# --- END LOCAL VIDEO STUDIO 27B PUBLIC ---", start)
+        namespace = {
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "Update": object,
+            "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+            "local_video_studio_public": public_adapter,
+            "local_video_planning_store": local_video_planning_store,
+            "local_video_studio_public_enabled": lambda: True,
+            "menu_text_main_video_i18n": lambda _lang: "MAIN VIDEO MENU",
+            "main_video_keyboard": lambda _lang: _Markup([]),
+            "video_edit_hub_text": lambda _lang: "VIDEO EDIT HUB",
+            "video_edit_hub_keyboard": lambda _lang: _Markup([]),
+            "get_user_language": lambda _uid: "vi",
+            "normalize_user_language": lambda lang: lang or "vi",
+            "db_connect": db_connect,
+            "copy": copy,
+            "html": html,
+            "sqlite3": sqlite3,
+            "time": time,
+        }
+        source = "from __future__ import annotations\n\n" + BOT_SOURCE[start:end]
+        exec(compile(source, "bot.py:lvs27b-persist-route", "exec"), namespace)
+
+        store = planning_service.new_store()
+        planning_service.put_session(store, str(user_id), str(chat_id), state)
+        context = SimpleNamespace(user_data={
+            planning_service.STATE_KEY: store,
+            "video_edit_sentinel": {"unchanged": True},
+        })
+        view = planning_service.render_view(state)
+        summary_keyboard = namespace["local_video_studio_public_keyboard"](view)
+        persist_callback = next(
+            button.callback_data
+            for row in summary_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data.endswith("|persist")
+        )
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback, pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_local_video_studio_public_callback"]
+        )
+        self.assertIsNotNone(route.pattern.match(persist_callback))
+
+        async def edit(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            return True
+
+        def dispatch(callback_id):
+            query = _Query(user_id, persist_callback)
+            query.id = callback_id
+            query.message = SimpleNamespace(chat_id=chat_id, message_id=91)
+            query.edit_message_text = lambda text, **kwargs: edit(query, text, **kwargs)
+            _run_no_io(route.callback(
+                SimpleNamespace(
+                    callback_query=query,
+                    effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
+                ),
+                context,
+            ))
+            return query
+
+        first = dispatch("persist-callback-1")
+        self.assertEqual(1, len(first.answers))
+        self.assertIn("Đã lưu kế hoạch", first.edits[0][0])
+        row = anchor.execute(
+            "SELECT plan_key, version FROM local_video_plans WHERE owner_id=? AND chat_id=? AND deleted_at=''",
+            (str(user_id), str(chat_id)),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(1, anchor.execute(
+            "SELECT COUNT(*) FROM local_video_plans WHERE owner_id=? AND chat_id=? AND deleted_at=''",
+            (str(user_id), str(chat_id)),
+        ).fetchone()[0])
+        original_version = int(row["version"])
+
+        same_callback_replay = dispatch("persist-callback-1")
+        self.assertEqual(1, len(same_callback_replay.answers))
+        self.assertFalse(same_callback_replay.edits)
+
+        distinct_tap = dispatch("persist-callback-2")
+        self.assertEqual(1, len(distinct_tap.answers))
+        self.assertIn("Đã lưu kế hoạch", distinct_tap.edits[0][0])
+        self.assertEqual(1, anchor.execute(
+            "SELECT COUNT(*) FROM local_video_plans WHERE owner_id=? AND chat_id=? AND deleted_at=''",
+            (str(user_id), str(chat_id)),
+        ).fetchone()[0])
+        stored = anchor.execute(
+            "SELECT version FROM local_video_plans WHERE owner_id=? AND chat_id=? AND plan_key=? AND deleted_at=''",
+            (str(user_id), str(chat_id), row["plan_key"]),
+        ).fetchone()
+        self.assertEqual(original_version, int(stored["version"]))
+        self.assertEqual({"unchanged": True}, context.user_data["video_edit_sentinel"])
+
+    def test_local_video_public_saved_plan_list_detail_back_uses_registered_route(self):
+        import copy
+        import html
+        import sqlite3
+        import time
+        import uuid
+
+        from services import local_video_planning_store
+        from services import video_planning_assistant as planning_service
+
+        user_id, chat_id, session_id = 7, 70, "lvlist01"
+        state = planning_service.new_session(session_id, now=int(time.time()))
+
+        def choose(current, verb, *args):
+            return planning_service.apply_callback(
+                current,
+                planning_service.callback_data(current["session_id"], verb, *args),
+            )["session"]
+
+        state = choose(state, "goal", "cut_pacing")
+        state = planning_service.apply_text_input(
+            state,
+            "Kế hoạch fixture: cắt nhịp gọn, giữ rõ sản phẩm.",
+        )["session"]
+        state = choose(state, "platform", "tiktok_9x16")
+        state = choose(state, "source", "60_120")
+        state = choose(state, "target", "30")
+        state = choose(state, "asset", "video")
+        state = choose(state, "assets_done")
+        state = choose(state, "priority", "pace")
+        state = choose(state, "priorities_done")
+        state = choose(state, "operations_done")
+        state = choose(state, "safety_done")
+        self.assertEqual("summary", state["screen"])
+
+        memory_uri = f"file:lvs27b_library_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        anchor = sqlite3.connect(memory_uri, uri=True)
+        anchor.row_factory = sqlite3.Row
+        self.addCleanup(anchor.close)
+        with anchor:
+            local_video_planning_store.ensure_schema(anchor)
+            saved = local_video_planning_store.save_plan_from_session(
+                anchor,
+                owner_id=str(user_id),
+                chat_id=str(chat_id),
+                source_session_id=state["session_id"],
+                plan=planning_service.serialize_plan(state),
+                summary_text=planning_service.planning_summary_text(state),
+            )
+            foreign_owner = local_video_planning_store.save_plan_from_session(
+                anchor,
+                owner_id="8",
+                chat_id=str(chat_id),
+                source_session_id="lvforeign1",
+                plan=planning_service.serialize_plan(state),
+                summary_text="FOREIGN OWNER PLAN",
+            )
+            foreign_chat = local_video_planning_store.save_plan_from_session(
+                anchor,
+                owner_id=str(user_id),
+                chat_id="71",
+                source_session_id="lvforeign2",
+                plan=planning_service.serialize_plan(state),
+                summary_text="FOREIGN CHAT PLAN",
+            )
+
+        class _ImmediateLock:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+        service = SimpleNamespace(**{
+            name: getattr(planning_service, name)
+            for name in vars(planning_service)
+            if not name.startswith("__")
+        })
+        service.open_transaction_lock = lambda *_args: _ImmediateLock()
+        service.session_transaction_lock = lambda *_args: _ImmediateLock()
+
+        start = BOT_SOURCE.index("# --- LOCAL VIDEO STUDIO 27B PUBLIC ---")
+        end = BOT_SOURCE.index("# --- END LOCAL VIDEO STUDIO 27B PUBLIC ---", start)
+        namespace = {
+            "InlineKeyboardButton": _Button,
+            "InlineKeyboardMarkup": _Markup,
+            "Update": object,
+            "ContextTypes": SimpleNamespace(DEFAULT_TYPE=object),
+            "local_video_studio_public": service,
+            "local_video_planning_store": local_video_planning_store,
+            "local_video_studio_public_enabled": lambda: True,
+            "menu_text_main_video_i18n": lambda _lang: "MAIN VIDEO MENU",
+            "main_video_keyboard": lambda _lang: _Markup([]),
+            "video_edit_hub_text": lambda _lang: "VIDEO EDIT HUB",
+            "video_edit_hub_keyboard": lambda _lang: _Markup([]),
+            "get_user_language": lambda _uid: "vi",
+            "normalize_user_language": lambda lang: lang or "vi",
+            "db_connect": lambda: sqlite3.connect(memory_uri, uri=True),
+            "copy": copy,
+            "html": html,
+            "sqlite3": sqlite3,
+            "time": time,
+        }
+        source = "from __future__ import annotations\n\n" + BOT_SOURCE[start:end]
+        exec(compile(source, "bot.py:lvs27b-saved-plan-list-route", "exec"), namespace)
+
+        registrations = []
+        namespace["tg_app"] = SimpleNamespace(add_handler=registrations.append)
+        namespace["CallbackQueryHandler"] = lambda callback, pattern: SimpleNamespace(
+            callback=callback,
+            pattern=re.compile(pattern),
+        )
+        registration = next(
+            line.strip()
+            for line in BOT_SOURCE.splitlines()
+            if "tg_app.add_handler(CallbackQueryHandler(handle_local_video_studio_public_callback," in line
+        )
+        exec(registration, namespace)
+        route = next(
+            item for item in registrations
+            if item.callback is namespace["handle_local_video_studio_public_callback"]
+        )
+
+        store = service.new_store()
+        service.put_session(store, str(user_id), str(chat_id), state)
+        context = SimpleNamespace(user_data={
+            service.STATE_KEY: store,
+            "video_edit_sentinel": {"unchanged": True},
+        })
+
+        async def edit(query, text, **kwargs):
+            query.edits.append((text, kwargs))
+            return True
+
+        def dispatch(callback_data, callback_id):
+            self.assertIsNotNone(route.pattern.match(callback_data))
+            query = _Query(user_id, callback_data)
+            query.id = callback_id
+            query.message = SimpleNamespace(chat_id=chat_id, message_id=92)
+            query.edit_message_text = lambda text, **kwargs: edit(query, text, **kwargs)
+            _run_no_io(route.callback(
+                SimpleNamespace(
+                    callback_query=query,
+                    effective_user=SimpleNamespace(id=user_id),
+                    effective_chat=SimpleNamespace(id=chat_id),
+                ),
+                context,
+            ))
+            self.assertEqual(1, len(query.answers))
+            self.assertEqual(1, len(query.edits))
+            return query
+
+        summary_keyboard = namespace["local_video_studio_public_keyboard"](
+            service.render_view(state)
+        )
+        plans_callback = next(
+            button.callback_data
+            for row in summary_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data.endswith("|plans")
+        )
+        list_query = dispatch(plans_callback, "library-list-1")
+        list_text, list_kwargs = list_query.edits[-1]
+        listed_callbacks = [
+            button.callback_data
+            for row in list_kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        detail_callback = service.callback_data(session_id, "view", saved["plan_key"])
+        self.assertIn(detail_callback, listed_callbacks)
+        self.assertNotIn(foreign_owner["plan_key"], " ".join(listed_callbacks))
+        self.assertNotIn(foreign_chat["plan_key"], " ".join(listed_callbacks))
+        self.assertIn("KẾ HOẠCH CỦA TÔI", list_text)
+
+        detail_query = dispatch(detail_callback, "library-detail-1")
+        detail_text, detail_kwargs = detail_query.edits[-1]
+        detail_callbacks = [
+            button.callback_data
+            for row in detail_kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        back_to_list = service.callback_data(session_id, "library")
+        self.assertIn("Kế hoạch đã lưu", detail_text)
+        self.assertIn(back_to_list, detail_callbacks)
+
+        back_query = dispatch(back_to_list, "library-back-1")
+        back_text, back_kwargs = back_query.edits[-1]
+        back_callbacks = [
+            button.callback_data
+            for row in back_kwargs["reply_markup"].inline_keyboard
+            for button in row
+        ]
+        self.assertIn("KẾ HOẠCH CỦA TÔI", back_text)
+        self.assertIn(detail_callback, back_callbacks)
+        self.assertEqual(3, anchor.execute(
+            "SELECT COUNT(*) FROM local_video_plans WHERE deleted_at=''"
+        ).fetchone()[0])
+        self.assertEqual({"unchanged": True}, context.user_data["video_edit_sentinel"])
 
     async def _record_safe_edit(self, query, text, **kwargs):
         query.edits.append((text, kwargs))
