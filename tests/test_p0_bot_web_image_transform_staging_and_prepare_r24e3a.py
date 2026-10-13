@@ -985,3 +985,106 @@ def test_15_o2_prepare_runtime_truth_key4u_public_state(monkeypatch):
     assert data["key4u_public_enabled"] is False
     assert data["provider_execution_allowed"] is False
 
+
+def test_16_upload_staging_idempotent_replay():
+    """Verify durable actor-bound idempotency on SQLite: replay returns exact upload_id without duplicate file."""
+    client = TestClient(bot.fastapi_app)
+    actor = "20001"
+    idem_key = "test-idem-key-stage-001"
+
+    payload = {
+        "file_name": "original.png",
+        "content_type": "image/png",
+        "content_base64": base64.b64encode(SAMPLE_PNG_BYTES).decode("ascii"),
+        "idempotency_key": idem_key,
+    }
+    raw_bytes = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", raw_bytes, actor_id=actor)
+
+    # First request
+    resp1 = client.post("/internal/v1/uploads", content=raw_bytes, headers=headers)
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    upload_id_1 = data1["upload_id"]
+    assert upload_id_1.startswith("upl_")
+
+    # Second exact request (replay)
+    resp2 = client.post("/internal/v1/uploads", content=raw_bytes, headers=headers)
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    upload_id_2 = data2["upload_id"]
+
+    assert upload_id_1 == upload_id_2
+    assert data1["sha256"] == data2["sha256"]
+
+
+def test_17_upload_staging_idempotency_conflict_mismatched_payload():
+    """Verify mismatched payload on existing idempotency key fails with 409 Conflict."""
+    client = TestClient(bot.fastapi_app)
+    actor = "20002"
+    idem_key = "test-idem-conflict-key-002"
+
+    payload_png = {
+        "file_name": "first.png",
+        "content_type": "image/png",
+        "content_base64": base64.b64encode(SAMPLE_PNG_BYTES).decode("ascii"),
+        "idempotency_key": idem_key,
+    }
+    raw_png = json.dumps(payload_png).encode("utf-8")
+    headers_png = make_auth_headers("POST", "/internal/v1/uploads", raw_png, actor_id=actor)
+
+    resp1 = client.post("/internal/v1/uploads", content=raw_png, headers=headers_png)
+    assert resp1.status_code == 200
+
+    # Mismatched payload with same idempotency key (different bytes, name, mime)
+    payload_jpg = {
+        "file_name": "second.jpg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(SAMPLE_JPEG_BYTES).decode("ascii"),
+        "idempotency_key": idem_key,
+    }
+    raw_jpg = json.dumps(payload_jpg).encode("utf-8")
+    headers_jpg = make_auth_headers("POST", "/internal/v1/uploads", raw_jpg, actor_id=actor)
+
+    resp2 = client.post("/internal/v1/uploads", content=raw_jpg, headers=headers_jpg)
+    assert resp2.status_code == 409
+    data2 = resp2.json()
+    assert data2["ok"] is False
+    assert data2["error_code"] == "IDEMPOTENCY_CONFLICT"
+
+
+def test_18_upload_staging_cross_actor_idempotency_isolation():
+    """Verify cross-actor replay is blocked: different actors with same key produce isolated uploads."""
+    client = TestClient(bot.fastapi_app)
+    actor_a = "20003"
+    actor_b = "20004"
+    shared_key = "shared-idem-key-003"
+
+    payload = {
+        "file_name": "image.webp",
+        "content_type": "image/webp",
+        "content_base64": base64.b64encode(SAMPLE_WEBP_BYTES).decode("ascii"),
+        "idempotency_key": shared_key,
+    }
+    raw = json.dumps(payload).encode("utf-8")
+
+    # Actor A upload
+    headers_a = make_auth_headers("POST", "/internal/v1/uploads", raw, actor_id=actor_a)
+    resp_a = client.post("/internal/v1/uploads", content=raw, headers=headers_a)
+    assert resp_a.status_code == 200
+    upl_a = resp_a.json()["upload_id"]
+
+    # Actor B upload with same key
+    headers_b = make_auth_headers("POST", "/internal/v1/uploads", raw, actor_id=actor_b)
+    resp_b = client.post("/internal/v1/uploads", content=raw, headers=headers_b)
+    assert resp_b.status_code == 200
+    upl_b = resp_b.json()["upload_id"]
+
+    # Must be distinct uploads
+    assert upl_a != upl_b
+
+    # Actor B cannot access upl_a (403 cross-owner)
+    headers_consume = make_auth_headers("GET", f"/internal/v1/uploads/{upl_a}", b"", actor_id=actor_b)
+    resp_consume = client.get(f"/internal/v1/uploads/{upl_a}", headers=headers_consume)
+    assert resp_consume.status_code == 403
+

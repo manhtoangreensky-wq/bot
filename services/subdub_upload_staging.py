@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sqlite3
 from typing import Any
 
 logger = logging.getLogger("subdub_upload_staging")
@@ -285,6 +286,40 @@ def validate_media_content(extension: str, content: bytes, mime_type: str = "") 
     return True, "OK"
 
 
+def ensure_staged_upload_idempotency_schema(conn: sqlite3.Connection | None = None) -> None:
+    """Ensure the staged_upload_idempotency table exists in SQLite database."""
+    should_close = False
+    if conn is None:
+        try:
+            import bot
+            conn = bot.db_connect()
+            should_close = True
+        except Exception as exc:
+            logger.warning(f"Failed to connect to db for idempotency schema: {exc}")
+            return
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS staged_upload_idempotency (
+                actor_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                upload_id TEXT NOT NULL,
+                sha256 TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (actor_id, idempotency_key)
+            )
+            """
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning(f"Failed to ensure staged_upload_idempotency schema: {exc}")
+    finally:
+        if should_close and conn:
+            conn.close()
+
+
 def create_staged_upload(
     file_bytes: bytes,
     file_name: str,
@@ -333,6 +368,39 @@ def create_staged_upload(
     if supplied_sha and supplied_sha != actual_sha:
         return False, "SHA256_MISMATCH", 400, {}
 
+    clean_idemp = str(idempotency_key or "").strip()
+
+    # Check durable actor-bound idempotency BEFORE writing a new physical upload
+    if clean_idemp:
+        try:
+            import bot
+            ensure_staged_upload_idempotency_schema()
+            conn = bot.db_connect()
+            try:
+                row = conn.execute(
+                    "SELECT upload_id, sha256, file_name, content_type FROM staged_upload_idempotency WHERE actor_id = ? AND idempotency_key = ?",
+                    (clean_actor, clean_idemp),
+                ).fetchone()
+            finally:
+                conn.close()
+
+            if row:
+                ex_upload_id, ex_sha, ex_name, ex_mime = row
+                # Mismatched payload on same idempotency key fails with 409 Conflict
+                if (
+                    str(ex_sha).lower() != actual_sha
+                    or str(ex_name) != safe_name
+                    or str(ex_mime).lower() != clean_mime
+                ):
+                    return False, "IDEMPOTENCY_CONFLICT", 409, {"message": "Idempotency key already exists with mismatched payload"}
+
+                # Replay returns exact existing upload_id without creating a second physical upload
+                ok_exist, reason_exist, code_exist, staged_record = get_staged_upload(ex_upload_id, actor_id=clean_actor)
+                if ok_exist:
+                    return True, "OK", 200, to_public_metadata(staged_record)
+        except Exception as exc:
+            logger.warning(f"Error checking existing idempotency record: {exc}")
+
     # Generate server-controlled opaque upload_id
     upload_id = f"upl_{secrets.token_hex(16)}"
 
@@ -354,7 +422,6 @@ def create_staged_upload(
         logger.error(f"Failed to write staged upload bytes: {exc}")
         return False, f"STORAGE_WRITE_FAILED:{type(exc).__name__}", 500, {}
 
-    sha256_hash = hashlib.sha256(file_bytes).hexdigest()
     now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     record = {
@@ -363,16 +430,54 @@ def create_staged_upload(
         "file_name": safe_name,
         "content_type": clean_mime,
         "size_bytes": len(file_bytes),
-        "sha256": sha256_hash,
+        "sha256": actual_sha,
         "local_path": str(dest_file),
-        "idempotency_key": str(idempotency_key or "").strip(),
+        "idempotency_key": clean_idemp,
         "created_at": now_utc,
         "status": "staged",
     }
 
-    # Persist record in existing system_settings SQLite table
+    # Persist record in existing system_settings SQLite table and staged_upload_idempotency
     try:
         import bot
+        if clean_idemp:
+            conn = bot.db_connect()
+            try:
+                ensure_staged_upload_idempotency_schema(conn)
+                conn.execute(
+                    """
+                    INSERT INTO staged_upload_idempotency
+                    (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (clean_actor, clean_idemp, upload_id, actual_sha, safe_name, clean_mime, now_utc),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                # Concurrent race won by another request with identical (actor_id, clean_idemp)
+                try:
+                    dest_file.unlink(missing_ok=True)
+                    job_dir.rmdir()
+                except Exception:
+                    pass
+                row = conn.execute(
+                    "SELECT upload_id, sha256, file_name, content_type FROM staged_upload_idempotency WHERE actor_id = ? AND idempotency_key = ?",
+                    (clean_actor, clean_idemp),
+                ).fetchone()
+                if row:
+                    ex_upload_id, ex_sha, ex_name, ex_mime = row
+                    if (
+                        str(ex_sha).lower() != actual_sha
+                        or str(ex_name) != safe_name
+                        or str(ex_mime).lower() != clean_mime
+                    ):
+                        return False, "IDEMPOTENCY_CONFLICT", 409, {"message": "Idempotency key already exists with mismatched payload"}
+                    ok_exist, reason_exist, code_exist, staged_record = get_staged_upload(ex_upload_id, actor_id=clean_actor)
+                    if ok_exist:
+                        return True, "OK", 200, to_public_metadata(staged_record)
+            finally:
+                conn.close()
+
         setting_key = f"subdub_upload:{upload_id}"
         bot.set_system_setting(
             key=setting_key,
@@ -380,8 +485,15 @@ def create_staged_upload(
             note=f"SubDub staged upload owner:{clean_actor}",
             updated_by="subdub_upload_staging",
         )
+        if clean_idemp:
+            bot.set_system_setting(
+                key=f"subdub_upload_idem:{clean_actor}:{clean_idemp}",
+                value=json.dumps({"upload_id": upload_id, "sha256": actual_sha, "file_name": safe_name, "content_type": clean_mime}, ensure_ascii=False),
+                note=f"SubDub upload idempotency owner:{clean_actor}",
+                updated_by="subdub_upload_staging",
+            )
     except Exception as exc:
-        logger.error(f"Failed to persist staged upload to system_settings: {exc}")
+        logger.error(f"Failed to persist staged upload to system_settings / idempotency: {exc}")
         try:
             dest_file.unlink(missing_ok=True)
             job_dir.rmdir()

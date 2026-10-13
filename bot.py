@@ -283309,7 +283309,7 @@ async def api_internal_subdub_upload_create(request: Request):
     file_bytes = b""
     file_name = "media.bin"
     detected_mime = "application/octet-stream"
-    idempotency_key = str(request.headers.get("idempotency-key") or "").strip()
+    idempotency_key = str(request.headers.get("idempotency-key") or request.headers.get("x-idempotency-key") or "").strip()
     client_meta = {}
 
     if "application/json" in content_type_header:
