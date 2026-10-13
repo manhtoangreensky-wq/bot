@@ -1,6 +1,6 @@
 # Telegram UI integration — 13/10/2026
 
-## Latest follow-up — S12.35.403/.404
+## Latest follow-up — S12.35.403–.405
 
 Full Linux CI #38350432275 and source compile #38350432301 passed on HEAD
 `ab2eb614f6473d2a9e93af008bb7a5faedb9ee0a`. After that CI, a missing dedicated
@@ -167,7 +167,31 @@ fixture are GREEN (`Ran 4 tests in 1.368s — OK`); the two new assertions were
 first observed RED on the prior source for the exact mismatch and paid-gate call.
 Test-module `py_compile`, state/CI YAML parsing, and `git diff --check` passed.
 Local `bot.py` `py_compile` stalled without output for more than 60 seconds and
-was interrupted, so it is not counted as verification. Fresh
-Linux source compile and complete CI for the new head remain pending. This spec
-is not locked until those gates pass; PR #1426 remains draft/unmerged and no
-deployment or live Telegram/provider test was performed.
+was interrupted, so it is not counted as verification. Exact pushed head
+`669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` then passed source-compile run
+`38361311908` and full CI `38361311896`; the callback guard step and all 23
+workflow steps succeeded. This spec is locked in draft PR #1426; PR is unmerged,
+not live, and no deployment or live Telegram/provider test was performed.
+
+## Lock confirmation — S12.35.319 PayOS foreign-owner single ACK
+
+The previously approved ACK-only fix is now closed on the same exact PR head:
+foreign-owner package clicks receive one denial alert; the real owner's callback
+keeps one early ACK before expiry cleanup; malformed data retains one ACK. The
+registered emitted-button regression is selected in the CI navigation step.
+PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI run
+`38361311896`, including complete-source compilation and all 23 workflow steps.
+This locks the fix on draft PR #1426 only; it is not merged or live. No order,
+provider, payment, wallet, production DB, or Telegram action was exercised.
+
+## Additional exact-head locks — S12.35.399–.402
+
+The same successful full CI run closes four previously focused-GREEN items:
+Admin manual-bill denial ACK ordering (.399), foreign-owner top-up ACK ordering
+(.400), malformed public Video-status callback ACK (.401), and Image AI-entry
+Back origin (.402). Their regression modules were in the explicit navigation
+test step. Exact head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed run
+`38361311896` with complete-source compilation. These fixes are locked on draft
+PR #1426 only; no live bill, payment, wallet, job, provider, or image-processing
+action was exercised. A3/A5/A6 breadth, A7 client-latency evidence, exact-main/
+protected-source final gate, and one-batch merge/deploy remain open.

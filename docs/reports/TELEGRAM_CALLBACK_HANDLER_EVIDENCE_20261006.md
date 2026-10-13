@@ -173,7 +173,7 @@ downstream audio/media processing is established.
 | `handle_provider_choice` — bot.py:273668 | `^prov\\|`; group `0` | `test_provider_choice_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_payos_alert_callback` — bot.py:273669 | `^payosalert\\|`; group `0` | `test_p0_14_admin_ux_provider_cleanup.py`; `test_p0_pricing_manual_callback_locale_regression.py` (+1 candidates) | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_manual_package_choice` — bot.py:273670 | `^manual\\|`; group `0` | `test_core.py`; `test_p0_17c3_payos_admin_risk_lock_review.py`; `test_profile_topup_back_origin.py`; `test_manual_package_callback_single_ack.py`; `test_manual_foreign_owner_callback_single_ack.py` | PARTIAL: S12.35.301 dispatches the emitted customer Top-up entry through the registered handler and verifies one ACK + manual menu. S12.35.399 reproduces the Admin approval-denial double ACK and fixes only ACK order: a non-admin gets exactly one alert without DB access; authorized Admin still ACKs before a fixture read-only lookup (`Ran 2 tests in 0.514s — OK`). S12.35.400 emits ten owner-bound controls from manual top-up and PayOS-recovery keyboards; pre-change audit HEAD yielded two ACKs for all ten foreign-owner clicks, while the current source returns one denial alert (`Ran 3 tests in 1.843s — OK` with the related manual-package suite). Real bill/payment/wallet actions, expiry/replay, Admin approval terminal, whole-handler coverage and live latency remain unverified. Consolidated CI and source compile are pending. |
-| handle_package_choice — bot.py:273671 | ^(payos_pkg|pkg)\\|; group 0 | test_p0_17c2_payos_auto_topup_limits.py; test_p0_global_pricing_i18n_locale_expansion.py; test_package_choice_callback_ack_order.py | PARTIAL: S12.35.300 confirms ACK before expiry cleanup. S12.35.303 builds the actual `main_topup_keyboard()` and dispatches all six emitted PayOS amount callbacks through the registered production handler; each ACKs once before inert expiry cleanup and stops before package/payment logic. S12.35.319 reproduced the foreign-owner double ACK on the emitted/registered callback; owner-approved ACK-only fix now gives the foreign user one denial alert, the authorized owner one early ACK, and malformed-length data one normal ACK, with expiry cleanup retained after each ACK. Fresh focused regression rerun: 3 pytest cases passed in 2.46s and is included in CI's explicit safe-navigation selection. Fixture-only, no production DB/payment/order/provider/wallet effects. Payment/order/provider branches and client timing remain unverified; full source compile/consolidated CI and batch delivery are pending. |
+| handle_package_choice — bot.py:273671 | ^(payos_pkg|pkg)\\|; group 0 | test_p0_17c2_payos_auto_topup_limits.py; test_p0_global_pricing_i18n_locale_expansion.py; test_package_choice_callback_ack_order.py | PARTIAL: S12.35.300 confirms ACK before expiry cleanup. S12.35.303 builds the actual `main_topup_keyboard()` and dispatches all six emitted PayOS amount callbacks through the registered production handler; each ACKs once before inert expiry cleanup and stops before package/payment logic. S12.35.319 reproduced the foreign-owner double ACK on the emitted/registered callback; owner-approved ACK-only fix now gives the foreign user one denial alert, the authorized owner one early ACK, and malformed-length data one normal ACK, with expiry cleanup retained after each ACK. Fresh focused regression rerun: 3 pytest cases passed in 2.46s; exact PR head `669b5c1f` passed full CI run `38361311896`, including complete-source compile and the explicit safe-navigation test step, so the ACK fix is locked on draft PR #1426, not live. Fixture-only, no production DB/payment/order/provider/wallet effects. Payment/order/provider branches and client timing remain unverified; exact-main comparison and one-batch delivery remain open. |
 | `handle_video_job_callback` — bot.py:273672 | `^job\\|`; group `0` | `test_video_job_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_pipeline_callback` — bot.py:273673 | `^pipe\\|`; group `0` | `test_pipeline_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
 | `handle_trend_callback` — bot.py:273674 | `^trend\\|`; group `0` | `test_trend_callback_single_ack.py` | PARTIAL: offline ACK/permission/stale or valid branches were executed in S12.28; remaining emitted values, full Back/expiry/repeat paths and client/runtime timing stay open. |
@@ -1440,6 +1440,29 @@ passed; the broad origin/page regression is recorded `NOT_VERIFIED` because it
 stalled locally. Full `bot.py` compile currently has a no-result local process
 pending, so no full-source or CI pass is claimed. Fixture-only; no production
 Ticket, payment, wallet, provider, engine, AutoPost or Telegram action occurred.
+
+## S12.35.405 — Owner live-accept callback receipt binding — exact-head lock
+
+Both actual Owner live-accept keyboard builders now emit the 12-character
+receipt token consumed by the dedicated registered callback route. The route
+rejects missing or stale receipt tokens with one expiry response before the
+existing paid-test gate. RED reproduced the keyboard-token mismatch and showed
+that a stale button could otherwise reach that gate. Exact PR head
+`669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed source compile
+`38361311908` and full CI `38361311896` (all 23 steps). This is locked on draft
+PR #1426 only; it is not merged or live. No Telegram event, paid job, provider,
+invoice, wallet, production data, or Product Video engine path was exercised.
+
+## Exact-head verification update — 2026-10-13
+
+Superseding earlier “CI pending” or “not proven” notes for the specific
+S12.35.319 and S12.35.399–.402 slices: PR head
+`669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI run `38361311896`,
+including complete-source compilation and the explicit navigation test step.
+That CI locks only the already-described ACK-order, malformed Video-status ACK,
+and Image Back-origin fixes on draft PR #1426. The handler families remain
+PARTIAL where their other terminals, production actions, or live client behavior
+were not exercised; this does not claim those routes are fully verified or live.
 
 ### S12.35.404 — Product Video Owner live-accept callback registration
 

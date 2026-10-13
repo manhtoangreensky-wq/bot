@@ -21,12 +21,15 @@ current_spec_contract: >-
   Preserve Product Video engine/provider paths; close only after fresh source
   compile and full PR CI pass.
 next_action: >-
-  Run the focused source-extracted Owner callback regressions (RED observed on
-  prior behavior; GREEN after patch), review the exact diff and compile/CI gates.
-  Local full-source py_compile has stalled without output before; do not count
-  that as pass. Update the existing draft PR #1426 only after local scope checks,
-  then require fresh Linux source compile and full workflow before locking this
-  spec. Keep remaining audit and release gates open; do not merge or deploy here.
+  S12.35.405 is locked on exact head 669b5c1f: source compile 38361311908 and
+  full CI 38361311896 both passed. Follow the next open ordered checklist spec
+  for Admin/customer UI/callbacks. The checklist and callback evidence now record
+  the .404/.405 exact-head lock. For each next spec, require a reproduced defect,
+  a minimal fix, and its focused regression before moving on; do not revisit a
+  locked defect absent new evidence.
+  S12.35.319 and S12.35.399–.402 are also locked by the same exact-head full CI;
+  do not reopen those defects absent new evidence.
+  Keep remaining audit, A7 and one-batch release gates open; do not merge/deploy.
 latest_spec_result_S12_35_387: >-
   The actual emitted `memory|delete_yes|445|fixture-delete-token` matched the
   exact registered `^memory\|` handler. A shared in-memory fixture seam proved
@@ -10034,7 +10037,7 @@ S12_35_318_payos_duplicate_callback_cooldown:
     merge, deploy or restart.
 
 S12_35_319_payos_foreign_owner_single_ack:
-  status: owner_approved_local_fixture_green_bot_compile_not_verified
+  status: verified_full_ci_locked_on_pr_head_669b5c1
   contract: >-
     Build the actual emitted `payos_pkg|10k|123` button and dispatch through the
     registered `handle_package_choice` as user 456. Require exactly one
@@ -10062,16 +10065,19 @@ S12_35_319_payos_foreign_owner_single_ack:
     `python scripts/check_bot_source_compile.py` also produced no output for
     four minutes and was interrupted; NOT_VERIFIED, not a syntax failure. Do not
     repeat the same local whole-file compile without a changed runner/source.
-    The focused test is already included in the CI safe-navigation selection;
-    CI remains authoritative for full-source syntax verification.
+    The focused test is included in the CI safe-navigation selection. Exact PR
+    head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` completed full CI run
+    `38361311896`: `Compile Complete Bot Source` and all 23 workflow steps,
+    including `Small Navigation and UI Closure Regressions`, succeeded. This
+    closes and locks the defect on the unmerged draft PR; it is not live.
   implemented_minimal_fix: >-
     Select the owner-denial response before the normal early ACK so the
     unauthorized callback gets exactly one alert ACK; keep the valid owner
     callback at one early ACK before expiry cleanup. Preserve expiry cleanup
     after either single ACK and retain malformed-length ACK/cleanup behavior.
     No package, order, limit, settlement, Xu or wallet logic change. The fix is
-    locally verified; exact-main comparator and consolidated CI are still open
-    batch delivery gates.
+    locally verified and locked by exact-head CI. Exact-main comparator and
+    consolidated final-batch delivery remain separate open gates.
   side_effects: >-
     Fixture-only emitted keyboard, registered handler, intercepted ACKs and
     expiry marker. Provider calls=0; wallet/payment mutations=0; production DB
@@ -11350,7 +11356,12 @@ S12_35_398_bounded_root_menu_regression_recheck:
     merge, deploy or restart.
 
 S12_35_399_manual_bill_admin_denial_single_ack:
-  status: locally_fixed_focused_registered_handler_verified_ci_pending
+  status: verified_full_ci_locked_on_pr_head_669b5c1
+  post_verification: >-
+    Exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI
+    `38361311896`, including complete-source compilation and the explicit
+    small-navigation test step containing this regression. Locked on draft PR
+    #1426, not live; no real bill/payment/wallet action ran.
   contract: >-
     Dispatch the real Admin manual-bill approval button through the exact
     registered `^manual\\|` handler. A non-admin receives exactly one denial
@@ -11390,7 +11401,12 @@ S12_35_399_manual_bill_admin_denial_single_ack:
     Telegram, GitHub write, merge, deploy or restart.
 
 S12_35_400_manual_customer_foreign_owner_single_ack:
-  status: locally_fixed_registered_route_verified_ci_selected
+  status: verified_full_ci_locked_on_pr_head_669b5c1
+  post_verification: >-
+    Exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI
+    `38361311896`, including complete-source compilation and the explicit
+    small-navigation test step containing this regression. Locked on draft PR
+    #1426, not live; no payment/order/wallet action ran.
   contract: >-
     Dispatch each owner-bound customer control emitted by the real manual
     top-up and PayOS-recovery keyboards through the exact registered
@@ -11425,7 +11441,12 @@ S12_35_400_manual_customer_foreign_owner_single_ack:
     GitHub write, merge, deploy or restart.
 
 S12_35_401_public_video_status_malformed_single_ack:
-  status: locally_fixed_focused_registered_route_verified_ci_selected
+  status: verified_full_ci_locked_on_pr_head_669b5c1
+  post_verification: >-
+    Exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI
+    `38361311896`, including complete-source compilation and the explicit
+    small-navigation test step containing this regression. Locked on draft PR
+    #1426, not live; valid job/provider processing was not exercised.
   contract: >-
     Dispatch a malformed/stale instance of the actual emitted public-video
     status callback through its exact registered handler. It must return exactly
@@ -11463,7 +11484,12 @@ latest_runner_attempt_payos_risk_20261013:
     no-I/O harness if this route is selected again.
 
 S12_35_402_image_ai_entry_back_origin:
-  status: locally_fixed_registered_routes_verified_ci_selected
+  status: verified_full_ci_locked_on_pr_head_669b5c1
+  post_verification: >-
+    Exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed full CI
+    `38361311896`, including complete-source compilation and the explicit
+    small-navigation test step containing this regression. Locked on draft PR
+    #1426, not live; no image was uploaded or processed.
   contract: >-
     AI edit entered from the Image hub returns to that hub for recent image,
     photo upload and image document intake. Option Back then parent Back keeps
@@ -11626,7 +11652,7 @@ S12_35_404_owner_live_accept_callback_registration:
     current-main/runtime reconciliation and one-batch delivery remain open.
 
 S12_35_405_owner_live_accept_receipt_binding:
-  status: local_green_ci_pending
+  status: verified_full_ci_locked
   pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
   contract: >-
     Both Owner live-accept keyboards must emit a callback token accepted by the
@@ -11650,15 +11676,16 @@ S12_35_405_owner_live_accept_receipt_binding:
     includes both actual keyboard builders, registered route matching, stale
     receipt rejection and exactly-one ACK. RED was observed first with two
     expected failures. Test-module py_compile, state/CI YAML safe_load and
-    `git diff --check` exited 0. Local bot.py py_compile
-    produced no output after 60 seconds and was interrupted; it is NOT_VERIFIED.
-    Fresh Linux source-compile and full CI are pending for the updated head.
+    `git diff --check` exited 0. Local bot.py py_compile stalled without output
+    and was interrupted; it is not counted as pass. Exact pushed head
+    `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed source-compile run
+    `38361311908` and full CI `38361311896`; the Product Callback Replay Guard
+    Boundary step and all workflow steps succeeded.
   safety: >-
     No real Telegram event, provider, paid job, invoice, wallet, database,
     production data, AutoPost, merge, deploy or restart. The paid confirmation
     function is guarded by a fail-on-call fixture for the stale-token case.
   delivery: >-
-    Current changes are local WIP in the existing draft PR worktree. This spec
-    is not locked until fresh Linux source compile and full CI pass; PR is not
-    merged or live. All remaining whole-goal, A7 and one-batch release gates
-    remain open.
+    Commit `669b5c1f` is pushed to existing draft PR #1426 and this spec is
+    locked by exact-head CI evidence. PR remains open/draft, not merged or live.
+    All remaining whole-goal, A7 and one-batch release gates remain open.

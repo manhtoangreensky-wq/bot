@@ -6125,6 +6125,30 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   or restart. Whole-source CI/compile, remaining A3/A5/A6, A7, exact-main and
   protected-source reconciliation, and one-batch delivery remain open.
 
+### Closure addendum — S12.35.319 PayOS foreign-owner single ACK — 2026-10-13
+
+- The approved narrow fix is locked on exact PR head
+  `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7`: full CI run `38361311896`
+  passed complete-source compilation and all 23 workflow steps, including the
+  selected `tests/test_package_choice_callback_ack_order.py` navigation test.
+- The foreign-owner path returns one alert ACK, the authorized owner keeps one
+  early ACK before expiry cleanup, and malformed data keeps one ACK. This closes
+  only the duplicate-ACK defect; payment/order/provider behavior is untested.
+- State: locked on unmerged draft PR #1426, not live. Keep final exact-main and
+  protected-source comparison plus one-batch delivery open; do not revisit this
+  fix without new evidence.
+
+### Exact-head closure addendum — S12.35.399–.402 — 2026-10-13
+
+- Full CI `38361311896` on exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7`
+  passed complete-source compilation and the explicit navigation test step for
+  all four regressions: Admin manual-bill denial ACK (.399), foreign-owner
+  top-up ACK (.400), malformed public Video-status ACK (.401), and Image AI
+  Back-origin restoration (.402).
+- Each is locked on open draft PR #1426, not live. No production payment, wallet,
+  job/provider or image-processing action was used. Broader A3/A5/A6, A7 and the
+  final one-batch release gate remain open.
+
 ### S12.35.402 — Image hub AI choice Back preserves its entry origin — 2026-10-13
 
 - Contract: Image hub → AI edit → Back must return to the same Image hub for
@@ -6172,3 +6196,19 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Main's protected #1424 delta is not live. Merge/deploy and whole-goal gates
   remain open, as do client visuals and A7 all-button timing.
 - Complete details: [integration report](TELEGRAM_UI_INTEGRATION_20261013.md).
+
+### Exact-head lock — S12.35.404–.405 — 2026-10-13
+
+- The emitted Product Video Owner live-accept callback now has its dedicated
+  registered route before the generic `vproduct|` handler. Both keyboards emit
+  the same 12-character receipt token format accepted by that route.
+- The route binds the callback token to the currently active receipt and fails
+  closed on missing, malformed, or stale tokens before the existing paid-test
+  confirmation gate. Product Video engine/provider, invoice, wallet, job, and
+  delivery behavior were not changed or exercised.
+- Exact PR head `669b5c1ff36a0a099be6f6bcbdeaf01ba32d8ce7` passed source-compile
+  run `38361311908` and full CI run `38361311896`; all 23 workflow steps passed.
+  This locks `.404/.405` on open draft PR #1426 only—not merged or live.
+- Do not reopen without new evidence. Continue the next still-open ordered
+  Admin/customer spec; keep A3/A5/A6 manual/dynamic coverage, A7 client timing,
+  exact-main/runtime reconciliation, and the one-batch release gate open.
