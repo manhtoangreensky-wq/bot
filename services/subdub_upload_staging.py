@@ -36,19 +36,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_STAGING_DIR = REPO_ROOT / "data" / "uploads" / "staging"
 UPLOAD_ID_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
-# MIME and extension allowlists for SubDub media
+# MIME and extension allowlists for SubDub and Image media
 ALLOWED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 ALLOWED_SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".txt"}
-ALLOWED_EXTENSIONS = ALLOWED_VIDEO_EXTENSIONS | ALLOWED_AUDIO_EXTENSIONS | ALLOWED_SUBTITLE_EXTENSIONS
+ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+ALLOWED_EXTENSIONS = (
+    ALLOWED_VIDEO_EXTENSIONS
+    | ALLOWED_AUDIO_EXTENSIONS
+    | ALLOWED_SUBTITLE_EXTENSIONS
+    | ALLOWED_IMAGE_EXTENSIONS
+)
 
-ALLOWED_MIME_TYPES = {
-    # Video
+ALLOWED_VIDEO_MIME_TYPES = {
     "video/mp4",
     "video/quicktime",
     "video/x-matroska",
     "video/webm",
-    # Audio
+}
+ALLOWED_AUDIO_MIME_TYPES = {
     "audio/mpeg",
     "audio/mp3",
     "audio/wav",
@@ -59,11 +65,24 @@ ALLOWED_MIME_TYPES = {
     "audio/aac",
     "audio/ogg",
     "audio/flac",
-    # Subtitles / Text
+}
+ALLOWED_SUBTITLE_MIME_TYPES = {
     "text/plain",
     "text/vtt",
     "application/x-subrip",
 }
+ALLOWED_IMAGE_MIME_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+}
+ALLOWED_MIME_TYPES = (
+    ALLOWED_VIDEO_MIME_TYPES
+    | ALLOWED_AUDIO_MIME_TYPES
+    | ALLOWED_SUBTITLE_MIME_TYPES
+    | ALLOWED_IMAGE_MIME_TYPES
+)
+IMAGE_UPLOAD_MAX_MB = 20
 
 FORBIDDEN_AUTHORITY_KEYS = {
     "local_path",
@@ -94,6 +113,24 @@ def get_max_upload_bytes() -> int:
     return bounded_mb * 1024 * 1024
 
 
+def get_max_upload_bytes_for_extension(extension: str) -> int:
+    """Resolve maximum upload bytes depending on media kind.
+
+    Images are strictly bounded to max 20MB (or bounded IMAGE_UPLOAD_MAX_MB).
+    Video/Audio retain existing SUBDUB_UPLOAD_MAX_MB (default 50MB, cap 500MB).
+    """
+    clean_ext = str(extension or "").lower()
+    if clean_ext in ALLOWED_IMAGE_EXTENSIONS:
+        raw_mb = os.getenv("IMAGE_UPLOAD_MAX_MB", "20").strip()
+        try:
+            val_mb = int(raw_mb)
+        except (TypeError, ValueError):
+            val_mb = 20
+        bounded_mb = max(1, min(50, val_mb))
+        return bounded_mb * 1024 * 1024
+    return get_max_upload_bytes()
+
+
 def sanitize_filename(filename: str, fallback: str = "media.bin") -> tuple[str, str]:
     """Extract and sanitize filename and lowercase extension."""
     clean = Path(str(filename or "").replace("\\", "/")).name
@@ -119,6 +156,15 @@ def validate_media_content(extension: str, content: bytes, mime_type: str = "") 
     # MIME allowlist check (if mime provided)
     if clean_mime and clean_mime not in ALLOWED_MIME_TYPES and clean_mime != "application/octet-stream":
         return False, f"UNSUPPORTED_MIME_TYPE:{clean_mime}"
+
+    # Extension and MIME consistency check for images
+    if clean_ext in ALLOWED_IMAGE_EXTENSIONS and clean_mime and clean_mime != "application/octet-stream":
+        if clean_ext == ".png" and clean_mime != "image/png":
+            return False, f"MIME_EXTENSION_MISMATCH:{clean_mime}_VS_{clean_ext}"
+        if clean_ext in {".jpg", ".jpeg"} and clean_mime != "image/jpeg":
+            return False, f"MIME_EXTENSION_MISMATCH:{clean_mime}_VS_{clean_ext}"
+        if clean_ext == ".webp" and clean_mime != "image/webp":
+            return False, f"MIME_EXTENSION_MISMATCH:{clean_mime}_VS_{clean_ext}"
 
     # Content signature checks
     if clean_ext in {".mp4", ".mov", ".m4a"}:
@@ -158,6 +204,15 @@ def validate_media_content(extension: str, content: bytes, mime_type: str = "") 
                 return False, "INVALID_TEXT_CONTAINS_NULL"
         except UnicodeDecodeError:
             return False, "INVALID_TEXT_ENCODING"
+    elif clean_ext == ".png":
+        if len(content) < 8 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return False, "INVALID_PNG_SIGNATURE"
+    elif clean_ext in {".jpg", ".jpeg"}:
+        if len(content) < 4 or not content.startswith(b"\xff\xd8\xff"):
+            return False, "INVALID_JPEG_SIGNATURE"
+    elif clean_ext == ".webp":
+        if len(content) < 12 or not content.startswith(b"RIFF") or content[8:12] != b"WEBP":
+            return False, "INVALID_WEBP_SIGNATURE"
 
     return True, "OK"
 
@@ -187,18 +242,28 @@ def create_staged_upload(
     if not file_bytes:
         return False, "EMPTY_PAYLOAD", 400, {}
 
-    # Validate size
-    max_bytes = get_max_upload_bytes()
-    if len(file_bytes) > max_bytes:
-        return False, f"FILE_TOO_LARGE_MAX_{max_bytes // (1024*1024)}MB", 413, {}
-
     safe_name, ext = sanitize_filename(file_name)
     clean_mime = str(content_type or "application/octet-stream").split(";", 1)[0].strip().lower()
+
+    # Validate size against media-specific limit
+    max_bytes = get_max_upload_bytes_for_extension(ext)
+    if len(file_bytes) > max_bytes:
+        return False, f"FILE_TOO_LARGE_MAX_{max_bytes // (1024*1024)}MB", 413, {}
 
     # Validate MIME and signature
     valid, reason = validate_media_content(ext, file_bytes, clean_mime)
     if not valid:
         return False, f"INVALID_MIME_OR_CONTENT:{reason}", 400, {}
+
+    # Validate SHA256 integrity if caller provided expected sha256
+    supplied_sha = str(
+        meta.get("sha256")
+        or meta.get("expected_sha256")
+        or ""
+    ).strip().lower()
+    actual_sha = hashlib.sha256(file_bytes).hexdigest().lower()
+    if supplied_sha and supplied_sha != actual_sha:
+        return False, "SHA256_MISMATCH", 400, {}
 
     # Generate server-controlled opaque upload_id
     upload_id = f"upl_{secrets.token_hex(16)}"

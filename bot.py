@@ -283354,6 +283354,20 @@ async def api_internal_subdub_upload_create(request: Request):
         else:
             file_bytes = b""
 
+        supplied_sha = str(
+            data.get("sha256")
+            or data.get("expected_sha256")
+            or request.headers.get("x-toan-aas-content-sha256")
+            or ""
+        ).strip().lower()
+        if supplied_sha and file_bytes:
+            actual_sha = hashlib.sha256(file_bytes).hexdigest().lower()
+            if supplied_sha != actual_sha:
+                return JSONResponse(
+                    status_code=400,
+                    content={"ok": False, "error_code": "SHA256_MISMATCH", "message": "Content SHA256 does not match supplied hash"},
+                )
+
         client_meta = data
     else:
         return JSONResponse(
@@ -286151,6 +286165,188 @@ async def api_internal_web_image_jobs_artifact(job_id: str, request: Request):
     img_bytes = Path(artifact_path).read_bytes()
     media_type = "image/png" if artifact_path.endswith(".png") else "image/jpeg"
     return Response(content=img_bytes, media_type=media_type)
+
+
+# ─── CANONICAL WEB IMAGE TRANSFORM PREPARE SEAM (BOT-R24E3A) ─────────────────
+
+FORBIDDEN_IMAGE_TRANSFORM_AUTHORITY_KEYS = frozenset({
+    "amount", "amountvnd", "amountxu", "price", "cost", "currency", "paymentid", "ordercode",
+    "checkouturl", "webhook", "provider", "providername", "providerid", "providertaskid",
+    "providerjobid", "providervoiceid", "providerfileid", "providerroute", "model", "modelname",
+    "tier", "qualitytier", "quotexu", "chargedxu", "xu", "xucost", "xucharge", "fee", "credits",
+    "wallet", "walletid", "walletbalance", "balance", "apikey", "apitoken", "token", "secret",
+    "jobid", "jobstatus", "status", "statusreason", "output", "outputurl", "assetid", "downloadurl",
+    "role", "filepath", "localpath", "previewaudiopath", "accountid", "userid", "canonicaluserid",
+    "actorid", "telegramuserid", "profileid", "canonicalprofileid", "ispaidjob", "confirmpaid",
+    "task_id", "output_url", "paid",
+})
+
+
+def _contains_forbidden_image_transform_authority(payload: Any) -> tuple[bool, str]:
+    if isinstance(payload, dict):
+        for k, v in payload.items():
+            norm = "".join(ch for ch in str(k or "").lower() if ch.isalnum())
+            if norm in FORBIDDEN_IMAGE_TRANSFORM_AUTHORITY_KEYS:
+                return True, str(k)
+            sub_forbidden, sub_key = _contains_forbidden_image_transform_authority(v)
+            if sub_forbidden:
+                return True, sub_key
+    elif isinstance(payload, (list, tuple)):
+        for item in payload:
+            sub_forbidden, sub_key = _contains_forbidden_image_transform_authority(item)
+            if sub_forbidden:
+                return True, sub_key
+    return False, ""
+
+
+@fastapi_app.post("/internal/v1/web-image-transform/prepare")
+async def api_internal_web_image_transform_prepare(request: Request):
+    """Canonical Bot Core private provider-free admission/prepare endpoint for Web Image Transform (R24E3A).
+
+    Invariants:
+    1. Authenticates canonical Core Bridge HMAC signature and actor binding.
+    2. Enforces same-owner binding against staged upload.
+    3. Rejects non-image staged media.
+    4. Validates transform instruction.
+    5. Rejects authority injection (provider, model, price, status, output).
+    6. References existing Key4U executor without executing provider network calls.
+    7. Returns PREPARED_PROVIDER_DISABLED status with zero provider/paid spend.
+    """
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.subdub_upload_staging import get_staged_upload, ALLOWED_IMAGE_EXTENSIONS, ALLOWED_IMAGE_MIME_TYPES
+    from providers.key4u_provider import Key4UProvider
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    clean_actor = normalize_target_user_id(header_actor) if header_actor else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/web-image-transform/prepare",
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    try:
+        data = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_JSON", "message": "Invalid JSON payload"},
+        )
+    if not isinstance(data, dict):
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_PAYLOAD", "message": "Expected JSON object"},
+        )
+
+    # Authority injection check
+    forbidden, field_name = _contains_forbidden_image_transform_authority(data)
+    if forbidden:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "AUTHORITY_INJECTION_REJECTED", "message": f"Authority field injection rejected: {field_name}"},
+        )
+
+    # Upload ID validation
+    upload_id = str(data.get("upload_id") or "").strip()
+    if not upload_id:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "UPLOAD_ID_REQUIRED", "message": "upload_id is required"},
+        )
+
+    # Lookup staged upload and verify same-owner binding
+    ok, reason, status_code, record = get_staged_upload(upload_id, actor_id=clean_actor)
+    if not ok:
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error_code": reason, "message": f"Upload lookup failed: {reason}"},
+        )
+
+    # Validate that staged media is an approved image
+    file_name = str(record.get("file_name") or "")
+    content_type = str(record.get("content_type") or "")
+    ext = Path(file_name).suffix.lower()
+    if ext not in ALLOWED_IMAGE_EXTENSIONS or content_type not in ALLOWED_IMAGE_MIME_TYPES:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "ok": False,
+                "error_code": "NON_IMAGE_UPLOAD_REJECTED",
+                "message": f"Staged upload media is not an approved image: {ext} / {content_type}",
+            },
+        )
+
+    # Validate transform instruction
+    instruction = str(
+        data.get("transform_instruction")
+        or data.get("instruction")
+        or data.get("prompt")
+        or ""
+    ).strip()
+    if not instruction:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "TRANSFORM_INSTRUCTION_REQUIRED", "message": "transform_instruction is required"},
+        )
+    if len(instruction) > 1000:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "TRANSFORM_INSTRUCTION_TOO_LONG", "message": "transform_instruction exceeds 1000 characters"},
+        )
+
+    # Aspect ratio validation (optional, must be in canonical supported formats)
+    aspect_ratio = str(data.get("aspect_ratio") or data.get("format") or "1:1").strip()
+    supported_aspect_ratios = {"1:1", "4:5", "16:9", "9:16"}
+    if aspect_ratio not in supported_aspect_ratios:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error_code": "INVALID_ASPECT_RATIO", "message": f"aspect_ratio must be one of {sorted(supported_aspect_ratios)}"},
+        )
+
+    # Resolve Key4U executor existence without calling it
+    key4u_executor_present = hasattr(Key4UProvider, "image_edit")
+
+    prepare_response = {
+        "ok": True,
+        "status": "PREPARED_PROVIDER_DISABLED",
+        "status_reason": "AWAITING_OWNER_AUTHORIZED_VISIBLE_LIVE_ACCEPTANCE",
+        "upload_id": upload_id,
+        "owner_id": clean_actor,
+        "capability": "image_transform",
+        "executor_owner": "bot",
+        "provider_family": "key4u",
+        "provider_executor_implemented": bool(key4u_executor_present),
+        "provider_execution_allowed": False,
+        "key4u_public_enabled": False,
+        "key4u_contract_proven": True,
+        "key4u_model_authority_proven": False,
+        "aspect_ratio": aspect_ratio,
+        "instruction_sanitized": instruction[:800],
+        "media": {
+            "file_name": record.get("file_name"),
+            "content_type": record.get("content_type"),
+            "size_bytes": record.get("size_bytes"),
+            "sha256": record.get("sha256"),
+        },
+    }
+    return JSONResponse(status_code=200, content=prepare_response)
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
