@@ -234,21 +234,85 @@ def test_14_04_invalid_png_magic_rejected():
     assert "INVALID_PNG_SIGNATURE" in resp.json()["error_code"]
 
 
-def test_14_05_invalid_jpeg_magic_rejected():
+def test_14_05_negative_jpeg_matrix():
     client = TestClient(bot.fastapi_app)
     actor = "10001"
-    fake_jpeg = b"NOT_A_JPEG_FILE"
-    payload = {
-        "file_name": "corrupt.jpg",
-        "content_type": "image/jpeg",
-        "content_base64": base64.b64encode(fake_jpeg).decode("ascii"),
-    }
-    body_bytes = json.dumps(payload).encode("utf-8")
-    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
 
+    # Attack A: b"\xff\xd8\xff\xe0" alone or with arbitrary garbage -> REJECT
+    for attack_a in [b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe0arbitrary_garbage"]:
+        payload_a = {
+            "file_name": "attack_a.jpg",
+            "content_type": "image/jpeg",
+            "content_base64": base64.b64encode(attack_a).decode("ascii"),
+        }
+        body_bytes = json.dumps(payload_a).encode("utf-8")
+        headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
+        resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
+        assert resp.status_code == 400
+        assert "INVALID_JPEG_SIGNATURE" in resp.json()["error_code"]
+
+    # Attack B: SOI + APP marker + truncated segment body -> REJECT
+    attack_b = b"\xff\xd8\xff\xe0\x00\x10short\xff\xd9"
+    payload_b = {
+        "file_name": "attack_b.jpg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(attack_b).decode("ascii"),
+    }
+    body_bytes = json.dumps(payload_b).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
     resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
     assert resp.status_code == 400
     assert "INVALID_JPEG_SIGNATURE" in resp.json()["error_code"]
+
+    # Attack C: SOI + segment declaring length beyond available bytes -> REJECT
+    attack_c = b"\xff\xd8\xff\xe0\xff\xffdata\xff\xd9"
+    payload_c = {
+        "file_name": "attack_c.jpg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(attack_c).decode("ascii"),
+    }
+    body_bytes = json.dumps(payload_c).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
+    resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
+    assert resp.status_code == 400
+    assert "INVALID_JPEG_SIGNATURE" in resp.json()["error_code"]
+
+    # Attack D: SOI + arbitrary garbage + EOI only, without valid JPEG structural progression -> REJECT
+    attack_d = b"\xff\xd8arbitrary_garbage_without_markers\xff\xd9"
+    payload_d = {
+        "file_name": "attack_d.jpg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(attack_d).decode("ascii"),
+    }
+    body_bytes = json.dumps(payload_d).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
+    resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
+    assert resp.status_code == 400
+    assert "INVALID_JPEG_SIGNATURE" in resp.json()["error_code"]
+
+    # Fixture E: existing canonical valid JPEG fixture (SAMPLE_JPEG_BYTES) -> PASS
+    payload_e = {
+        "file_name": "valid_fixture.jpg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(SAMPLE_JPEG_BYTES).decode("ascii"),
+    }
+    body_bytes = json.dumps(payload_e).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
+    resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+
+    # Fixture F: valid .jpeg extension -> PASS
+    payload_f = {
+        "file_name": "valid_photo.jpeg",
+        "content_type": "image/jpeg",
+        "content_base64": base64.b64encode(SAMPLE_JPEG_BYTES).decode("ascii"),
+    }
+    body_bytes = json.dumps(payload_f).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", body_bytes, actor_id=actor)
+    resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
 
 
 def test_14_06_invalid_webp_magic_rejected():
@@ -318,6 +382,47 @@ def test_14_09_oversized_image_rejected(monkeypatch):
     resp = client.post("/internal/v1/uploads", content=body_bytes, headers=headers)
     assert resp.status_code == 413
     assert "FILE_TOO_LARGE" in resp.json()["error_code"]
+
+
+def test_14_09b_image_hard_max_and_subdub_size_invariants(monkeypatch):
+    """Verify Section 5 invariants:
+
+    IMAGE_UPLOAD_DEFAULT_MAX_MB=20
+    IMAGE_UPLOAD_HARD_MAX_MB=20
+    ENV_CAN_REDUCE_IMAGE_MAX=YES
+    ENV_CAN_INCREASE_IMAGE_MAX_ABOVE_20MB=NO
+    SUBDUB_VIDEO_AUDIO_SIZE_CONTRACT_REGRESSION=NO
+    """
+    from services.subdub_upload_staging import (
+        IMAGE_UPLOAD_DEFAULT_MAX_MB,
+        IMAGE_UPLOAD_HARD_MAX_MB,
+        get_max_upload_bytes_for_extension,
+    )
+
+    assert IMAGE_UPLOAD_DEFAULT_MAX_MB == 20
+    assert IMAGE_UPLOAD_HARD_MAX_MB == 20
+
+    # 1. Default without env override -> 20 MB
+    monkeypatch.delenv("IMAGE_UPLOAD_MAX_MB", raising=False)
+    assert get_max_upload_bytes_for_extension(".png") == 20 * 1024 * 1024
+    assert get_max_upload_bytes_for_extension(".jpg") == 20 * 1024 * 1024
+    assert get_max_upload_bytes_for_extension(".jpeg") == 20 * 1024 * 1024
+    assert get_max_upload_bytes_for_extension(".webp") == 20 * 1024 * 1024
+
+    # 2. ENV reduces limit below 20 MB -> allowed
+    monkeypatch.setenv("IMAGE_UPLOAD_MAX_MB", "10")
+    assert get_max_upload_bytes_for_extension(".png") == 10 * 1024 * 1024
+
+    # 3. ENV attempts to increase above 20 MB (e.g. 50 MB) -> strictly capped at 20 MB
+    monkeypatch.setenv("IMAGE_UPLOAD_MAX_MB", "50")
+    assert get_max_upload_bytes_for_extension(".png") == 20 * 1024 * 1024
+    assert get_max_upload_bytes_for_extension(".jpg") == 20 * 1024 * 1024
+
+    # 4. Non-image media (video/audio) preserves SubDub 50 MB default / 500 MB max behavior
+    monkeypatch.delenv("SUBDUB_UPLOAD_MAX_MB", raising=False)
+    assert get_max_upload_bytes_for_extension(".mp4") == 50 * 1024 * 1024
+    assert get_max_upload_bytes_for_extension(".wav") == 50 * 1024 * 1024
+
 
 
 def test_14_10_supplied_sha256_mismatch_rejected():
@@ -696,6 +801,67 @@ def test_15_j_price_cost_xu_injection_rejected():
         assert resp.json()["error_code"] == "AUTHORITY_INJECTION_REJECTED"
 
 
+def test_15_j2_normalized_authority_keys_and_nested_injection_rejected():
+    """Verify Section 8 invariants:
+    - FORBIDDEN_AUTHORITY_NORMALIZATION_CONSISTENT=YES
+    - NESTED_AUTHORITY_INJECTION_REJECTED=YES
+    Attacks for: task_id, provider_task_id, output_url, job_status, api_key, owner_id, account_id,
+                 nested provider, nested model, nested charged_xu
+    """
+    client = TestClient(bot.fastapi_app)
+    actor = "10001"
+
+    # Top-level attacks with various casing and underscores
+    flat_attack_keys = [
+        "task_id",
+        "provider_task_id",
+        "output_url",
+        "job_status",
+        "api_key",
+        "owner_id",
+        "account_id",
+        "TASK_ID",
+        "Provider_Task_Id",
+        "Output_Url",
+        "Job_Status",
+        "Api_Key",
+        "Owner_Id",
+        "Account_Id",
+    ]
+    for key in flat_attack_keys:
+        payload = {
+            "upload_id": "upl_123",
+            "transform_instruction": "oil painting",
+            key: "injected_val",
+        }
+        body_bytes = json.dumps(payload).encode("utf-8")
+        headers = make_auth_headers("POST", "/internal/v1/web-image-transform/prepare", body_bytes, actor_id=actor)
+        resp = client.post("/internal/v1/web-image-transform/prepare", content=body_bytes, headers=headers)
+        assert resp.status_code == 400, f"Expected 400 for key {key}, got {resp.status_code}"
+        assert resp.json()["error_code"] == "AUTHORITY_INJECTION_REJECTED"
+
+    # Nested attacks
+    nested_attacks = [
+        {"options": {"provider": "key4u"}},
+        {"config": {"model": "grok"}},
+        {"meta": {"charged_xu": 100}},
+        {"extra": {"nested": {"provider_task_id": "p_999"}}},
+        {"items": [{"task_id": "t_111"}]},
+        {"data": {"nested_output": {"output_url": "https://attacker.com/out.png"}}},
+    ]
+    for attack_dict in nested_attacks:
+        payload = {
+            "upload_id": "upl_123",
+            "transform_instruction": "oil painting",
+            **attack_dict,
+        }
+        body_bytes = json.dumps(payload).encode("utf-8")
+        headers = make_auth_headers("POST", "/internal/v1/web-image-transform/prepare", body_bytes, actor_id=actor)
+        resp = client.post("/internal/v1/web-image-transform/prepare", content=body_bytes, headers=headers)
+        assert resp.status_code == 400, f"Expected 400 for nested attack {attack_dict}, got {resp.status_code}"
+        assert resp.json()["error_code"] == "AUTHORITY_INJECTION_REJECTED"
+
+
 def test_15_k_to_o_valid_same_owner_image_upload_prepare_provider_disabled():
     client = TestClient(bot.fastapi_app)
     actor = "10001"
@@ -729,7 +895,7 @@ def test_15_k_to_o_valid_same_owner_image_upload_prepare_provider_disabled():
         # Clause K: Valid same-owner image returns PREPARED_PROVIDER_DISABLED
         assert data["ok"] is True
         assert data["status"] == "PREPARED_PROVIDER_DISABLED"
-        assert data["status_reason"] == "AWAITING_OWNER_AUTHORIZED_VISIBLE_LIVE_ACCEPTANCE"
+        assert data["status_reason"] == "EXTERNAL_PROVIDER_AUTHORITY_AND_ENTITLEMENT_UNPROVEN"
         assert data["upload_id"] == upload_id
         assert data["owner_id"] == actor
         assert data["capability"] == "image_transform"
@@ -737,13 +903,26 @@ def test_15_k_to_o_valid_same_owner_image_upload_prepare_provider_disabled():
         assert data["provider_family"] == "key4u"
         assert data["provider_executor_implemented"] is True
         assert data["provider_execution_allowed"] is False
-        assert data["key4u_public_enabled"] is False
+        assert data["key4u_public_enabled"] is bool(bot.KEY4U_PUBLIC_ENABLED)
         assert data["key4u_contract_proven"] is True
         assert data["key4u_model_authority_proven"] is False
         assert data["aspect_ratio"] == "16:9"
         assert "Make the background" in data["instruction_sanitized"]
         assert data["media"]["file_name"] == "target_art.png"
         assert data["media"]["content_type"] == "image/png"
+
+        # Blockers verification (Section 7)
+        assert "blockers" in data
+        assert "KEY4U_ACCOUNT_ENTITLEMENT_PROVEN=NO" in data["blockers"]
+        assert "KEY4U_PRICING_AUTHORITY_PROVEN=NO" in data["blockers"]
+        assert "KEY4U_QUOTA_AUTHORITY_PROVEN=NO" in data["blockers"]
+        assert "KEY4U_SPECIFIC_GROK_MODEL_PROVIDER_AUTHORITY_PROVEN=NO" in data["blockers"]
+        assert "AWAITING_OWNER_AUTHORIZED_VISIBLE_LIVE_ACCEPTANCE" in data["blockers"]
+        assert data["blocker_details"]["account_entitlement_proven"] is False
+        assert data["blocker_details"]["pricing_authority_proven"] is False
+        assert data["blocker_details"]["quota_authority_proven"] is False
+        assert data["blocker_details"]["specific_model_authority_proven"] is False
+        assert data["blocker_details"]["owner_live_acceptance_proven"] is False
 
         # Clause L: No provider task ID
         assert "task_id" not in data
@@ -759,3 +938,50 @@ def test_15_k_to_o_valid_same_owner_image_upload_prepare_provider_disabled():
 
     # Clause O: KEY4U_PUBLIC_ENABLED remains false
     assert bot.KEY4U_PUBLIC_ENABLED is False
+
+
+def test_15_o2_prepare_runtime_truth_key4u_public_state(monkeypatch):
+    """Verify Section 6 invariants:
+    - PREPARE_HARDCODED_KEY4U_PUBLIC_ENABLED=NO
+    - RUNTIME_KEY4U_PUBLIC_STATE_LIED_ABOUT=NO
+    - Regardless of runtime public flag, provider_execution_allowed remains false in R24E3A
+    """
+    client = TestClient(bot.fastapi_app)
+    actor = "10001"
+
+    # Stage valid PNG
+    stage_payload = {
+        "file_name": "truth_check.png",
+        "content_type": "image/png",
+        "content_base64": base64.b64encode(SAMPLE_PNG_BYTES).decode("ascii"),
+    }
+    stage_bytes = json.dumps(stage_payload).encode("utf-8")
+    stage_headers = make_auth_headers("POST", "/internal/v1/uploads", stage_bytes, actor_id=actor)
+    stage_resp = client.post("/internal/v1/uploads", content=stage_bytes, headers=stage_headers)
+    assert stage_resp.status_code == 200
+    upload_id = stage_resp.json()["upload_id"]
+
+    prepare_payload = {
+        "upload_id": upload_id,
+        "transform_instruction": "art style transfer",
+        "aspect_ratio": "1:1",
+    }
+    prepare_bytes = json.dumps(prepare_payload).encode("utf-8")
+    prepare_headers = make_auth_headers("POST", "/internal/v1/web-image-transform/prepare", prepare_bytes, actor_id=actor)
+
+    # 1. When KEY4U_PUBLIC_ENABLED is True: response reflects True, but provider_execution_allowed is still False
+    monkeypatch.setattr(bot, "KEY4U_PUBLIC_ENABLED", True)
+    resp = client.post("/internal/v1/web-image-transform/prepare", content=prepare_bytes, headers=prepare_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["key4u_public_enabled"] is True
+    assert data["provider_execution_allowed"] is False
+
+    # 2. When KEY4U_PUBLIC_ENABLED is False: response reflects False
+    monkeypatch.setattr(bot, "KEY4U_PUBLIC_ENABLED", False)
+    resp = client.post("/internal/v1/web-image-transform/prepare", content=prepare_bytes, headers=prepare_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["key4u_public_enabled"] is False
+    assert data["provider_execution_allowed"] is False
+

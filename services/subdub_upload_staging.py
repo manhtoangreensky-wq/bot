@@ -82,7 +82,9 @@ ALLOWED_MIME_TYPES = (
     | ALLOWED_SUBTITLE_MIME_TYPES
     | ALLOWED_IMAGE_MIME_TYPES
 )
-IMAGE_UPLOAD_MAX_MB = 20
+IMAGE_UPLOAD_DEFAULT_MAX_MB = 20
+IMAGE_UPLOAD_HARD_MAX_MB = 20
+IMAGE_UPLOAD_MAX_MB = IMAGE_UPLOAD_DEFAULT_MAX_MB
 
 FORBIDDEN_AUTHORITY_KEYS = {
     "local_path",
@@ -117,16 +119,17 @@ def get_max_upload_bytes_for_extension(extension: str) -> int:
     """Resolve maximum upload bytes depending on media kind.
 
     Images are strictly bounded to max 20MB (or bounded IMAGE_UPLOAD_MAX_MB).
+    Environment can reduce below 20MB, but CANNOT increase above 20MB.
     Video/Audio retain existing SUBDUB_UPLOAD_MAX_MB (default 50MB, cap 500MB).
     """
     clean_ext = str(extension or "").lower()
     if clean_ext in ALLOWED_IMAGE_EXTENSIONS:
-        raw_mb = os.getenv("IMAGE_UPLOAD_MAX_MB", "20").strip()
+        raw_mb = os.getenv("IMAGE_UPLOAD_MAX_MB", str(IMAGE_UPLOAD_DEFAULT_MAX_MB)).strip()
         try:
             val_mb = int(raw_mb)
         except (TypeError, ValueError):
-            val_mb = 20
-        bounded_mb = max(1, min(50, val_mb))
+            val_mb = IMAGE_UPLOAD_DEFAULT_MAX_MB
+        bounded_mb = max(1, min(IMAGE_UPLOAD_HARD_MAX_MB, val_mb))
         return bounded_mb * 1024 * 1024
     return get_max_upload_bytes()
 
@@ -139,6 +142,70 @@ def sanitize_filename(filename: str, fallback: str = "media.bin") -> tuple[str, 
         clean = fallback
     ext = Path(clean).suffix.lower()
     return clean, ext
+
+
+def validate_jpeg_structure(content: bytes) -> tuple[bool, str]:
+    """Validate JPEG Start-of-Image (SOI), segment progression, and End-of-Image (EOI)."""
+    if len(content) < 4 or not content.startswith(b"\xff\xd8"):
+        return False, "INVALID_JPEG_SOI"
+    if not content.startswith(b"\xff\xd8\xff"):
+        return False, "INVALID_JPEG_MARKER"
+
+    trimmed = content.rstrip(b"\r\n\x00 ")
+    if not trimmed.endswith(b"\xff\xd9"):
+        return False, "INVALID_JPEG_EOI_MISSING"
+
+    idx = 2
+    length = len(content)
+    has_sos = False
+
+    while idx < length:
+        if content[idx] != 0xFF:
+            if has_sos:
+                next_ff = content.find(b"\xff", idx)
+                if next_ff == -1:
+                    return False, "TRUNCATED_JPEG_NO_EOI"
+                idx = next_ff
+                continue
+            return False, "INVALID_JPEG_MARKER_ALIGNMENT"
+
+        while idx < length and content[idx] == 0xFF:
+            idx += 1
+        if idx >= length:
+            return False, "TRUNCATED_JPEG_AT_MARKER"
+
+        marker = content[idx]
+        idx += 1
+
+        if marker in (0x00, 0x01) or (0xD0 <= marker <= 0xD7):
+            continue
+        elif marker == 0xD8:
+            return False, "UNEXPECTED_NESTED_SOI"
+        elif marker == 0xD9:
+            break
+        else:
+            if idx + 2 > length:
+                return False, "TRUNCATED_JPEG_SEGMENT_LENGTH"
+            seg_len = (content[idx] << 8) | content[idx + 1]
+            if seg_len < 2:
+                return False, "INVALID_JPEG_SEGMENT_LENGTH"
+            if idx + seg_len > length:
+                return False, "TRUNCATED_JPEG_SEGMENT_BODY"
+            if marker == 0xDA:
+                has_sos = True
+            idx += seg_len
+
+    try:
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(content)) as im:
+            im.verify()
+            if im.format != "JPEG":
+                return False, f"UNEXPECTED_IMAGE_FORMAT:{im.format}"
+    except Exception as exc:
+        return False, f"MALFORMED_JPEG_STRUCTURE:{type(exc).__name__}"
+
+    return True, "OK"
 
 
 def validate_media_content(extension: str, content: bytes, mime_type: str = "") -> tuple[bool, str]:
@@ -208,8 +275,9 @@ def validate_media_content(extension: str, content: bytes, mime_type: str = "") 
         if len(content) < 8 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
             return False, "INVALID_PNG_SIGNATURE"
     elif clean_ext in {".jpg", ".jpeg"}:
-        if len(content) < 4 or not content.startswith(b"\xff\xd8\xff"):
-            return False, "INVALID_JPEG_SIGNATURE"
+        ok_jpg, reason_jpg = validate_jpeg_structure(content)
+        if not ok_jpg:
+            return False, f"INVALID_JPEG_SIGNATURE:{reason_jpg}"
     elif clean_ext == ".webp":
         if len(content) < 12 or not content.startswith(b"RIFF") or content[8:12] != b"WEBP":
             return False, "INVALID_WEBP_SIGNATURE"

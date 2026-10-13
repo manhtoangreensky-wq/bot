@@ -286169,23 +286169,31 @@ async def api_internal_web_image_jobs_artifact(job_id: str, request: Request):
 
 # ─── CANONICAL WEB IMAGE TRANSFORM PREPARE SEAM (BOT-R24E3A) ─────────────────
 
-FORBIDDEN_IMAGE_TRANSFORM_AUTHORITY_KEYS = frozenset({
-    "amount", "amountvnd", "amountxu", "price", "cost", "currency", "paymentid", "ordercode",
-    "checkouturl", "webhook", "provider", "providername", "providerid", "providertaskid",
-    "providerjobid", "providervoiceid", "providerfileid", "providerroute", "model", "modelname",
-    "tier", "qualitytier", "quotexu", "chargedxu", "xu", "xucost", "xucharge", "fee", "credits",
-    "wallet", "walletid", "walletbalance", "balance", "apikey", "apitoken", "token", "secret",
-    "jobid", "jobstatus", "status", "statusreason", "output", "outputurl", "assetid", "downloadurl",
-    "role", "filepath", "localpath", "previewaudiopath", "accountid", "userid", "canonicaluserid",
-    "actorid", "telegramuserid", "profileid", "canonicalprofileid", "ispaidjob", "confirmpaid",
-    "task_id", "output_url", "paid",
-})
+def _normalize_authority_key(key: str) -> str:
+    return "".join(ch for ch in str(key or "").lower() if ch.isalnum())
+
+
+_RAW_FORBIDDEN_IMAGE_TRANSFORM_KEYS = (
+    "amount", "amount_vnd", "amount_xu", "price", "cost", "currency", "payment_id", "order_code",
+    "checkout_url", "webhook", "provider", "provider_name", "provider_id", "provider_task_id",
+    "provider_job_id", "provider_voice_id", "provider_file_id", "provider_route", "model", "model_name",
+    "tier", "quality_tier", "quota_xu", "charged_xu", "xu", "xu_cost", "xu_charge", "fee", "credits",
+    "wallet", "wallet_id", "wallet_balance", "balance", "api_key", "api_token", "token", "secret",
+    "job_id", "job_status", "status", "status_reason", "output", "output_url", "asset_id", "download_url",
+    "role", "file_path", "local_path", "preview_audio_path", "account_id", "user_id", "canonical_user_id",
+    "actor_id", "telegram_user_id", "profile_id", "canonical_profile_id", "is_paid_job", "confirm_paid",
+    "task_id", "output_url", "paid", "owner_id",
+)
+
+FORBIDDEN_IMAGE_TRANSFORM_AUTHORITY_KEYS = frozenset(
+    _normalize_authority_key(k) for k in _RAW_FORBIDDEN_IMAGE_TRANSFORM_KEYS if _normalize_authority_key(k)
+)
 
 
 def _contains_forbidden_image_transform_authority(payload: Any) -> tuple[bool, str]:
     if isinstance(payload, dict):
         for k, v in payload.items():
-            norm = "".join(ch for ch in str(k or "").lower() if ch.isalnum())
+            norm = _normalize_authority_key(k)
             if norm in FORBIDDEN_IMAGE_TRANSFORM_AUTHORITY_KEYS:
                 return True, str(k)
             sub_forbidden, sub_key = _contains_forbidden_image_transform_authority(v)
@@ -286320,13 +286328,14 @@ async def api_internal_web_image_transform_prepare(request: Request):
             content={"ok": False, "error_code": "INVALID_ASPECT_RATIO", "message": f"aspect_ratio must be one of {sorted(supported_aspect_ratios)}"},
         )
 
-    # Resolve Key4U executor existence without calling it
+    # Resolve Key4U executor existence and runtime public flag without calling provider
     key4u_executor_present = hasattr(Key4UProvider, "image_edit")
+    key4u_public_state = bool(globals().get("KEY4U_PUBLIC_ENABLED", False))
 
     prepare_response = {
         "ok": True,
         "status": "PREPARED_PROVIDER_DISABLED",
-        "status_reason": "AWAITING_OWNER_AUTHORIZED_VISIBLE_LIVE_ACCEPTANCE",
+        "status_reason": "EXTERNAL_PROVIDER_AUTHORITY_AND_ENTITLEMENT_UNPROVEN",
         "upload_id": upload_id,
         "owner_id": clean_actor,
         "capability": "image_transform",
@@ -286334,11 +286343,25 @@ async def api_internal_web_image_transform_prepare(request: Request):
         "provider_family": "key4u",
         "provider_executor_implemented": bool(key4u_executor_present),
         "provider_execution_allowed": False,
-        "key4u_public_enabled": False,
+        "key4u_public_enabled": key4u_public_state,
         "key4u_contract_proven": True,
         "key4u_model_authority_proven": False,
         "aspect_ratio": aspect_ratio,
         "instruction_sanitized": instruction[:800],
+        "blockers": [
+            "KEY4U_ACCOUNT_ENTITLEMENT_PROVEN=NO",
+            "KEY4U_PRICING_AUTHORITY_PROVEN=NO",
+            "KEY4U_QUOTA_AUTHORITY_PROVEN=NO",
+            "KEY4U_SPECIFIC_GROK_MODEL_PROVIDER_AUTHORITY_PROVEN=NO",
+            "AWAITING_OWNER_AUTHORIZED_VISIBLE_LIVE_ACCEPTANCE",
+        ],
+        "blocker_details": {
+            "account_entitlement_proven": False,
+            "pricing_authority_proven": False,
+            "quota_authority_proven": False,
+            "specific_model_authority_proven": False,
+            "owner_live_acceptance_proven": False,
+        },
         "media": {
             "file_name": record.get("file_name"),
             "content_type": record.get("content_type"),
