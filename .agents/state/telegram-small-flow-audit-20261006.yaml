@@ -14,43 +14,19 @@ objective: >-
   narrow defects; preserve AutoPost WIP and stable Product/Edit/SubDub/Voice/Music
   engines. Do not change secrets, wallets, production data, call paid providers,
   send real Telegram messages, or merge/deploy/restart without authorization.
-current_spec: S12.35.403-main-integration-consolidated-verification
+current_spec: S12.35.405-owner-live-accept-receipt-binding
 current_spec_contract: >-
-  Reconcile the accumulated UI-only WIP onto current main, preserve every
-  main-only protected change, run full compile and the workflow-selected safe
-  navigation suite, triage concrete failures before publishing one batch PR.
-  Preserve the old checkout and keep live deployment gated by runtime delta.
+  Bind the Owner live-accept callback token to the current receipt and fail
+  closed on stale or malformed controls before the existing paid-test gate.
+  Preserve Product Video engine/provider paths; close only after fresh source
+  compile and full PR CI pass.
 next_action: >-
-  Canonical continuation is this integration worktree, based on main e2b48f21.
-  Native worktree creation returned Not a git repository (chat root is a
-  wrapper directory); Git fallback created this sibling checkout and the exact
-  UI patch applied cleanly. Old dirty WIP is preserved. Protected folder/config/
-  router/worker/deploy file diffs are empty; the function-source comparator
-  reports 26 changed UI/pending/Support functions in bot.py. Latest targeted
-  pytest result is `19 passed, 16 subtests passed in 30.23s`. Full bot compile
-  session 36866 ended exit 0. Full 41-module suite session 34782 ended with
-  44 failed, 256 passed and 66 subtests passed. Concrete test-fixture causes
-  were fixed; failed cleanup cases reran 16 passed / 7 subtests, and Admin
-  action/status modules reran 46 passed. Pytest lastfailed cache is now empty.
-  Draft PR #1426 is open. Linux source compile passed; full CI #38347923041
-  failed at Admin Package Orders with the same missing planner-cleanup fixture
-  dependency. Test-only sibling fixture fixes pass 9 tests / 8 subtests; Home
-  fixtures pass 5 tests / 22 subtests. Customer Done missing helper was reproduced
-  and its fixture fixed: 3 tests / 18 subtests pass; actual SQLite replay and
-  concurrent regressions pass 2 tests. Bot blob remains 36cd263870c077a1115509d941b8b82a22e1a7be.
-  First test-only follow-up a8dbd278 was pushed. Linux source compile run
-  38349346631 passed; main CI 38349346656 passed Package Orders/Security DB,
-  then completed 200 Admin tests with five missing-namespace errors in Ask,
-  Note and customer category fixtures. The three fixtures were updated and
-  all five exact failed cases reran `Ran 5 tests in 13.174s — OK`. Push this
-  second test-only follow-up and verify the new full run. Keep
-  merge/deployment/whole-goal gates open; review concrete CI failures before
-  any next change. Read docs/reports/TELEGRAM_UI_INTEGRATION_20261013.md.
-  Current VPS SHA is 381c71bb9e52876eb35b15f5c417ca2cf833dc28,
-  blob d7e4f3da4f07c326571084dcdb5d45e6053090eb; bot/web/nginx active/running
-  with NRestarts=0. Main's protected #1424 delta is not live, so an immediate
-  main deploy would expand beyond UI. A7/client acceptance remains open. No
-  production source, data, wallet, provider, Telegram, merge or deploy was touched.
+  Run the focused source-extracted Owner callback regressions (RED observed on
+  prior behavior; GREEN after patch), review the exact diff and compile/CI gates.
+  Local full-source py_compile has stalled without output before; do not count
+  that as pass. Update the existing draft PR #1426 only after local scope checks,
+  then require fresh Linux source compile and full workflow before locking this
+  spec. Keep remaining audit and release gates open; do not merge or deploy here.
 latest_spec_result_S12_35_387: >-
   The actual emitted `memory|delete_yes|445|fixture-delete-token` matched the
   exact registered `^memory\|` handler. A shared in-memory fixture seam proved
@@ -11648,3 +11624,41 @@ S12_35_404_owner_live_accept_callback_registration:
     Commit b3f91bb0e8b7a74fdc9d7255617624f384b2135b is verified in draft PR
     #1426; not merged or live. Remaining A3/A5/A6 coverage, A7,
     current-main/runtime reconciliation and one-batch delivery remain open.
+
+S12_35_405_owner_live_accept_receipt_binding:
+  status: local_green_ci_pending
+  pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
+  contract: >-
+    Both Owner live-accept keyboards must emit a callback token accepted by the
+    dedicated registered route. A stale/malformed token must be ACKed once and
+    rejected before handle_owner_authorized_live_test_confirm; preserve the
+    existing paid-test gate and all engine/provider behavior.
+  red: >-
+    RED against pre-fix source: both keyboard fixture paths emitted
+    `owner_live_a` instead of the registered 12-character hex token. A stale
+    callback token also reached `handle_owner_authorized_live_test_confirm`
+    with the newer active-session receipt; the fixture recorded the paid-gate
+    call. These reproduce the mismatch and stale-session acceptance.
+  fix: >-
+    Derive the 12-character callback token from SHA-256 of the receipt, use it
+    in both keyboards, route all action-prefixed callbacks to the dedicated
+    handler, and compare the callback token with the active receipt before the
+    existing authorization/paid-test gate. Missing or mismatched tokens receive
+    one expiry response.
+  verification: >-
+    Source-extracted focused suite after patch: `Ran 4 tests in 1.368s — OK`;
+    includes both actual keyboard builders, registered route matching, stale
+    receipt rejection and exactly-one ACK. RED was observed first with two
+    expected failures. Test-module py_compile, state/CI YAML safe_load and
+    `git diff --check` exited 0. Local bot.py py_compile
+    produced no output after 60 seconds and was interrupted; it is NOT_VERIFIED.
+    Fresh Linux source-compile and full CI are pending for the updated head.
+  safety: >-
+    No real Telegram event, provider, paid job, invoice, wallet, database,
+    production data, AutoPost, merge, deploy or restart. The paid confirmation
+    function is guarded by a fail-on-call fixture for the stale-token case.
+  delivery: >-
+    Current changes are local WIP in the existing draft PR worktree. This spec
+    is not locked until fresh Linux source compile and full CI pass; PR is not
+    merged or live. All remaining whole-goal, A7 and one-batch release gates
+    remain open.

@@ -95231,7 +95231,7 @@ def video_route_expected_handler(callback: str) -> str:
         return "handle_product_video_public_confirm_callback"
     if callback_value.startswith("vproduct|b14_confirm"):
         return ""
-    if callback_value == "vproduct|owner_live_accept" or re.fullmatch(r"vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?", callback_value):
+    if callback_value == "vproduct|owner_live_accept" or callback_value.startswith("vproduct|owner_live_accept|"):
         return "handle_product_video_owner_live_accept_callback"
     for prefix, owner in VIDEO_PUBLIC_CALLBACK_OWNER_PREFIXES[1:]:
         if callback_value.startswith(prefix):
@@ -106646,12 +106646,17 @@ def product_video_public_preflight_panel_text(
     )
 
 
+def product_video_owner_live_accept_callback_token(owner_receipt: str) -> str:
+    clean_receipt = str(owner_receipt or "").strip()
+    return hashlib.sha256(clean_receipt.encode("utf-8")).hexdigest()[:12] if clean_receipt else ""
+
+
 def build_product_video_owner_live_accept_keyboard(
     owner_receipt: str = "",
     lang: str = "vi",
 ) -> InlineKeyboardMarkup:
     """Build InlineKeyboardMarkup for Owner-authorized live acceptance (Directive #1422, N21AA)."""
-    token = (owner_receipt or "")[:12]
+    token = product_video_owner_live_accept_callback_token(owner_receipt)
     cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)],
@@ -106672,7 +106677,7 @@ def product_video_public_preflight_panel_keyboard(
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
     if owner_receipt:
-        token = str(owner_receipt).strip()[:12]
+        token = product_video_owner_live_accept_callback_token(owner_receipt)
         cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
         rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
     if panel_kind == "ready":
@@ -109010,10 +109015,7 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         or getattr(query, "data", "")
         or ""
     )
-    if not query or not re.fullmatch(
-        r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
-        callback_data,
-    ):
+    if not query or not re.fullmatch(r"^vproduct\|owner_live_accept(?:\|.*)?$", callback_data):
         return
 
     # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
@@ -109050,6 +109052,16 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         return await safe_edit_or_send(
             query,
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    callback_parts = callback_data.split("|", 2)
+    callback_token = callback_parts[2] if len(callback_parts) == 3 else ""
+    expected_token = product_video_owner_live_accept_callback_token(owner_receipt)
+    if not callback_token or callback_token != expected_token:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Nút xác nhận kiểm thử trực tiếp đã hết hạn. Hãy mở lại màn hình xác nhận.",
         )
 
     try:
@@ -275800,7 +275812,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_product_video_owner_live_accept_callback, pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_video_owner_live_accept_callback, pattern=r"^vproduct\|owner_live_accept(?:\|.*)?$"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$)|owner_live_accept(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_architecture_profile_callback, pattern=r"^archprofile\|"))

@@ -146,3 +146,28 @@ answer for valid/stale paths. No product-source changes were required.
 Exact failed-case rerun: `Ran 5 tests in 13.174s — OK`. The original operation,
 Back and pending-state assertions remain. The next full Linux run is still
 required; no whole-workflow success is claimed from this narrow rerun.
+
+## S12.35.405 — Owner live-accept receipt binding
+
+Root cause reproduced in source-extracted fixtures: the Owner button sliced the
+receipt ID at 12 characters (actual IDs start `owner_live_auth_`), so it emitted
+`owner_live_a` instead of the 12-character hex form accepted by the route. The
+handler also accepted a stale button token while taking the newer receipt from
+the active session, allowing that stale click to reach the existing paid-test
+confirmation gate.
+
+The focused fix hashes the receipt to a 12-character hex callback token in both
+keyboard builders, routes this action prefix to its dedicated handler, and
+compares token-to-current-receipt before the paid-test gate. Stale/malformed
+callbacks are ACKed once and shown as expired. No Product Video engine/provider,
+invoice, wallet or job logic changed.
+
+Evidence: both actual keyboard builders plus registration and stale-token handler
+fixture are GREEN (`Ran 4 tests in 1.368s — OK`); the two new assertions were
+first observed RED on the prior source for the exact mismatch and paid-gate call.
+Test-module `py_compile`, state/CI YAML parsing, and `git diff --check` passed.
+Local `bot.py` `py_compile` stalled without output for more than 60 seconds and
+was interrupted, so it is not counted as verification. Fresh
+Linux source compile and complete CI for the new head remain pending. This spec
+is not locked until those gates pass; PR #1426 remains draft/unmerged and no
+deployment or live Telegram/provider test was performed.
