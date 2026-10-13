@@ -2,6 +2,16 @@
 
 Status: ACTIVE — do not treat this file or any isolated green test as whole-bot completion.
 
+Latest callback closure candidate (2026-10-13): PR #1426 is still OPEN/DRAFT.
+Full CI run #38350432275 passed on `ab2eb614`, before the latest callback-route
+fix; a new full CI run is required for the current working tree. S12.35.404
+reproduced and locally fixed a missing dedicated route for the emitted Product
+Video Owner live-accept button. The fix reaches an existing owner-authorized
+paid-test handler; it has not been dispatched or deployed. Keep the batch and
+goal ACTIVE until the fresh CI, remaining ordered A3/A5/A6 coverage, A7 client
+latency evidence, protected-main/runtime reconciliation and single-batch gates
+are resolved.
+
 Latest delivery (2026-10-11 12:46 +07): PR #1421 is MERGED at `6db4279c…`,
 full PR CI and exact-SHA bot-only deploy #38115714586 succeeded. Strict-host
 SSH verifies that exact runtime and source blob `280e1ab0…`; bot/web/nginx plus

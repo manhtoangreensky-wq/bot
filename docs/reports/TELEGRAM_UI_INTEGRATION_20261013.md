@@ -1,5 +1,21 @@
 # Telegram UI integration — 13/10/2026
 
+## Latest follow-up — S12.35.403/.404
+
+Full Linux CI #38350432275 and source compile #38350432301 passed on HEAD
+`ab2eb614f6473d2a9e93af008bb7a5faedb9ee0a`. After that CI, a missing dedicated
+registration was reproduced for the emitted Product Video
+`vproduct|owner_live_accept` button. The exact owner handler route is now added
+ahead of the generic Video route and excluded from the generic pattern. RED was
+confirmed; route/dedupe tests now pass (`2 tests in 2.376s`). A fresh full CI
+and source-compile run is required because the successful run predates this fix.
+
+The existing handler can admit an Owner-authorized paid Product Video test.
+No callback or Telegram event was dispatched and no job, invoice, provider,
+wallet or production data was used. This local route fix is not live. Other A3/
+A5/A6 visual/dynamic route coverage, A7 latency, protected-source/runtime
+reconciliation and the one-batch delivery gate remain open.
+
 ## Source and delivery state
 
 Base: `e2b48f215f30a088156a1e29c1f402170274dcf0` (current GitHub main).

@@ -11604,3 +11604,44 @@ S12_35_403_second_linux_ci_followup:
     No product-source changes occurred.
   verification: Ran 5 tests in 13.174s — OK
   next: Push same draft PR and verify full Linux workflow at new head.
+
+S12_35_403_third_linux_ci_verification:
+  head: ab2eb614f6473d2a9e93af008bb7a5faedb9ee0a
+  main_ci_run: 38350432275
+  main_ci_result: SUCCESS
+  source_compile_run: 38350432301
+  source_compile_result: SUCCESS
+  limit: >-
+    Both runs predate S12.35.404. They do not verify the current working-tree
+    change; a fresh full CI/source compile run is required after push.
+
+S12_35_404_owner_live_accept_callback_registration:
+  status: locally_fixed_registered_callback_route_ci_pending
+  pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
+  contract: >-
+    The exact Owner live-accept button callback must reach its existing dedicated
+    handler before the generic Product Video handler, accepting only the
+    optional 12-character lowercase-hex receipt token form.
+  red: >-
+    The keyboard and video_route_expected_handler emitted/mapped
+    vproduct|owner_live_accept[|token], but lifespan registered only the generic
+    ^vproduct\| handler. The new focused regression failed because no dedicated
+    exact registration existed.
+  fix: >-
+    Register handle_product_video_owner_live_accept_callback with its exact
+    anchored pattern before the generic Product Video route; exclude the same
+    action from the generic regex.
+  verification: >-
+    RED: focused regression failed at missing dedicated route. GREEN: the new
+    route assertion and existing replay/dedupe regression passed (2 tests,
+    2.376s). git diff --check exited 0. Fresh Linux source compile and full CI
+    remain required for the changed head.
+  safety: >-
+    No callback dispatch, real Telegram event, provider call, paid job/invoice,
+    wallet or production data operation occurred. Existing dedicated handler
+    can admit an Owner-authorized paid Product Video test; wiring is a callback
+    availability change only and does not edit engine implementation.
+  delivery: >-
+    Local candidate in draft PR #1426; not pushed yet, not merged or live.
+    Remaining A3/A5/A6 coverage, A7, current-main/runtime reconciliation and
+    one-batch delivery remain open.

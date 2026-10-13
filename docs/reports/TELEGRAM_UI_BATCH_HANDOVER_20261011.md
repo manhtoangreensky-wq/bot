@@ -1,5 +1,22 @@
 # Telegram UI/callback — batch continuation 11/10/2026
 
+## Latest continuation — 13/10/2026 — S12.35.403/.404
+
+- Integrated full CI #38350432275 and source compile #38350432301 passed for
+  HEAD `ab2eb614`. These runs predate the local S12.35.404 correction and do not
+  verify the current working tree.
+- S12.35.404 reproduced a missing dedicated registration for the emitted
+  `vproduct|owner_live_accept` callback; the generic Video handler otherwise
+  caught it. The exact Owner handler now registers before the generic route,
+  and the generic pattern excludes Owner live-accept.
+- RED failed because the dedicated route was absent. GREEN: two route/dedupe
+  tests passed in 2.376s; `git diff --check` passed. A new full CI is required.
+- The existing handler can admit an Owner-authorized paid Product Video test.
+  No callback, provider, wallet or production data was used; no engine code
+  changed. The fix remains local to draft PR #1426 and is not live.
+- Remaining ordered A3/A5/A6 route coverage, client A7 timing, protected-main /
+  runtime reconciliation and the one-batch delivery gate remain open.
+
 ## Canonical integration checkpoint — S12.35.403
 
 - Continue in `work/telegram-ui-integration-20261013` on

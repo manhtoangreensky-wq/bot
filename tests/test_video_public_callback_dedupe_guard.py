@@ -44,6 +44,27 @@ def _run_immediate(coro):
 
 
 class VideoPublicCallbackDedupeGuardTests(unittest.TestCase):
+    def test_owner_live_accept_has_an_exact_dedicated_route_before_generic_video(self):
+        owner_route = re.search(
+            r'(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\('
+            r'handle_product_video_owner_live_accept_callback, pattern=r"([^"]+)"\)\)\s*$',
+            BOT_SOURCE,
+        )
+        generic_route = re.search(
+            r'(?m)^\s*tg_app\.add_handler\(CallbackQueryHandler\('
+            r'handle_video_product_callback, pattern=r"([^"]+)"\)\)\s*$',
+            BOT_SOURCE,
+        )
+        self.assertIsNotNone(owner_route)
+        self.assertIsNotNone(generic_route)
+        pattern = re.compile(owner_route.group(1))
+        self.assertTrue(pattern.fullmatch("vproduct|owner_live_accept"))
+        self.assertTrue(pattern.fullmatch("vproduct|owner_live_accept|0123456789ab"))
+        self.assertFalse(pattern.fullmatch("vproduct|owner_live_accept|NOT-A-TOKEN"))
+        self.assertLess(owner_route.start(), generic_route.start())
+        generic_pattern = re.compile(generic_route.group(1))
+        self.assertFalse(generic_pattern.match("vproduct|owner_live_accept|0123456789ab"))
+
     def test_exact_replay_stops_before_route_but_distinct_event_reaches_route(self):
         self.assertIn(
             "tg_app.add_handler(CallbackQueryHandler(video_public_callback_dedupe_guard), group=-9)",
