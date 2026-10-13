@@ -29,6 +29,10 @@
   blob is unchanged; await the test-only follow-up CI before merge/deploy.
 - Detailed integration evidence:
   [TELEGRAM_UI_INTEGRATION_20261013.md](TELEGRAM_UI_INTEGRATION_20261013.md).
+- Second Linux CI on `a8dbd278` passed the earlier Package/Security gates and
+  ran 200 Admin tests, with five namespace fixture errors. Ask/Note/customer
+  category dependencies are supplied; exact rerun: 5 tests in 13.174s — OK.
+  Push the test-only follow-up to the same draft PR and wait for full CI.
 
 ## Latest local checkpoint — 13/10/2026, S12.35.402
 

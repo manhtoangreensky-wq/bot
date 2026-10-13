@@ -109,3 +109,19 @@ Initial tested HEAD: `53a18c67d3d3e15762010a4e704ae171bacbae5c`.
   still applies to that exact blob. A new complete CI run is required after push.
 - Codex PR attachment was attempted but the app returned
   `thread attachment identity count exceeds 100`; the PR is available by URL.
+
+## Second Linux run — remaining Admin fixture namespaces
+
+HEAD `a8dbd278e639521e2e8971f68b8078c6948d60b6`:
+source compile #38349346631 succeeded. CI #38349346656 passed Package Orders
+and Security/DB, then Admin Route completed 200 tests with 5 fixture errors.
+
+The errors were missing `asyncio` in Ask/Note source-extracted namespaces and
+missing `is_admin_user` in the customer-category fixture. The three namespaces
+now provide their existing production dependencies. The Ask branch fixture also
+stops adding a synthetic ACK before the actual branch and asserts exactly one
+answer for valid/stale paths. No product-source changes were required.
+
+Exact failed-case rerun: `Ran 5 tests in 13.174s — OK`. The original operation,
+Back and pending-state assertions remain. The next full Linux run is still
+required; no whole-workflow success is claimed from this narrow rerun.

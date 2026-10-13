@@ -6408,6 +6408,7 @@ class AdminRootMenuCallbackSingleAckTests(unittest.TestCase):
             normalize_user_language=lambda _lang: "vi",
             get_user_language=lambda _uid: "vi",
             public_hub_copy=lambda _lang: Copy(support_ticket_prompt_body="Describe the issue"),
+            is_admin_user=lambda _uid: False,
             html=html,
             time=SimpleNamespace(time=lambda: 1_000.0),
             USER_PENDING={},

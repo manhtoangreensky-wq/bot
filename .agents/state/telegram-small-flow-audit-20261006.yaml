@@ -38,7 +38,12 @@ next_action: >-
   fixtures pass 5 tests / 22 subtests. Customer Done missing helper was reproduced
   and its fixture fixed: 3 tests / 18 subtests pass; actual SQLite replay and
   concurrent regressions pass 2 tests. Bot blob remains 36cd263870c077a1115509d941b8b82a22e1a7be.
-  Push this test-only follow-up to #1426 and verify its full Linux run. Keep
+  First test-only follow-up a8dbd278 was pushed. Linux source compile run
+  38349346631 passed; main CI 38349346656 passed Package Orders/Security DB,
+  then completed 200 Admin tests with five missing-namespace errors in Ask,
+  Note and customer category fixtures. The three fixtures were updated and
+  all five exact failed cases reran `Ran 5 tests in 13.174s — OK`. Push this
+  second test-only follow-up and verify the new full run. Keep
   merge/deployment/whole-goal gates open; review concrete CI failures before
   any next change. Read docs/reports/TELEGRAM_UI_INTEGRATION_20261013.md.
   Current VPS SHA is 381c71bb9e52876eb35b15f5c417ca2cf833dc28,
@@ -11526,7 +11531,7 @@ latest_local_parser_recovery_20261013:
     No package download, installation or production environment change.
 
 S12_35_403_main_integration_consolidated_verification:
-  status: linux_ci_fixture_failure_followup_verified_pending_push
+  status: second_linux_ci_namespace_failure_followup_verified_pending_push
   source_base: e2b48f215f30a088156a1e29c1f402170274dcf0
   workspace: C:/Users/toann/Documents/Codex/2026-09-15/l-m-c-i-tr-x20/work/telegram-ui-integration-20261013
   branch: audit/telegram-ui-integration-20261013
@@ -11584,3 +11589,18 @@ S12_35_403_linux_ci_fixture_followup:
   attachment: >-
     Attempted required Codex attach_artifact; app returned thread attachment
     identity count exceeds 100. Keep the verified PR URL; do not unlink history.
+
+S12_35_403_second_linux_ci_followup:
+  head: a8dbd278e639521e2e8971f68b8078c6948d60b6
+  source_compile_run: 38349346631 SUCCESS
+  main_ci_run: 38349346656 FAILURE
+  result: >-
+    Package Orders and Security/DB are green. Admin Route ran 200 tests,
+    ending with five fixture errors: asyncio absent in Ask/Note namespaces,
+    is_admin_user absent in customer category namespace. Product defines both.
+  fix: >-
+    Supply the three fixture dependencies. Ask's obsolete synthetic pre-ACK
+    was removed and valid/stale branches now assert exactly one answer.
+    No product-source changes occurred.
+  verification: Ran 5 tests in 13.174s — OK
+  next: Push same draft PR and verify full Linux workflow at new head.
