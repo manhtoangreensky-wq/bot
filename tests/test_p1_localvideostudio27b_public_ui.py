@@ -1934,6 +1934,76 @@ def test_option_c_expired_pending_brief_is_released_even_when_feature_is_off(tmp
     assert not message.replies
 
 
+def test_option_c_expired_callback_clears_only_its_pending_session(tmp_path):
+    svc = planning_service()
+    events = []
+    namespace = compile_option_c_adapter(tmp_path / 'plans.sqlite3', events)
+    now = int(time.time())
+    expired_at = now - svc.SESSION_TTL_SECONDS - 2
+    expired_state = svc.new_session('expired1', now=expired_at)
+    expired_state = svc.apply_callback(
+        expired_state,
+        svc.callback_data('expired1', 'goal', 'cut_pacing'),
+        now=expired_at,
+    )['session']
+    context = planning_context_with_session(svc, expired_state)
+    marker_key = namespace['_LOCAL_VIDEO_PLANNING_PENDING_KEY']
+    context.user_data[marker_key] = {
+        'user_id': '7',
+        'chat_id': '70',
+        'session_id': 'expired1',
+        'expires_at': expired_at + svc.SESSION_TTL_SECONDS,
+    }
+    brief_view = svc.render_view(expired_state)
+    stale_skip = next(
+        value
+        for row in brief_view['rows']
+        for _label, value in row
+        if value.endswith('|brief_skip')
+    )
+
+    def run_no_io(awaitable):
+        try:
+            awaitable.send(None)
+        except StopIteration as completed:
+            return completed.value
+        awaitable.close()
+        raise AssertionError('expired callback fixture unexpectedly yielded I/O')
+
+    stale_query = PlanningFakeQuery(stale_skip, 'expired-brief-skip', events)
+    assert run_no_io(namespace['handle_local_video_studio_public_callback'](
+        planning_update(stale_query), context,
+    )) is True
+
+    assert len(stale_query.answers) == 1
+    assert stale_query.answers[0][1].get('show_alert') is True
+    assert not stale_query.edits
+    assert marker_key not in context.user_data
+    assert '7:70:expired1' not in context.user_data[svc.STATE_KEY]['sessions']
+
+    newer = svc.new_session('newer001', now=now)
+    newer = svc.apply_callback(
+        newer,
+        svc.callback_data('newer001', 'goal', 'cut_pacing'),
+        now=now,
+    )['session']
+    svc.put_session(context.user_data[svc.STATE_KEY], '7', '70', newer)
+    context.user_data[marker_key] = {
+        'user_id': '7',
+        'chat_id': '70',
+        'session_id': 'newer001',
+        'expires_at': now + svc.SESSION_TTL_SECONDS,
+    }
+    replay_query = PlanningFakeQuery(stale_skip, 'expired-brief-replay', events)
+    assert run_no_io(namespace['handle_local_video_studio_public_callback'](
+        planning_update(replay_query), context,
+    )) is True
+
+    assert len(replay_query.answers) == 1
+    assert context.user_data[marker_key]['session_id'] == 'newer001'
+    assert svc.get_session(context.user_data[svc.STATE_KEY], '7', '70', 'newer001') is not None
+
+
 def test_deleting_opened_plan_then_saving_never_overwrites_another_source_plan(tmp_path):
     svc = planning_service()
     store = planning_store_module()

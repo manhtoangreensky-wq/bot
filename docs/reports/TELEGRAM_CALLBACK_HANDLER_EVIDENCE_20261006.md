@@ -1602,6 +1602,19 @@ Direct fixture GREEN: `Home pending cleanup regressions: PASS (Video planner
 /menu)`. Another user's marker is preserved; finance note persistence is never
 called. No financial data, payment, wallet or production path was accessed.
 
+## S12.35.406 — Expired Option C planner callback releases only matching pending state
+
+The emitted brief-screen `brief_skip` callback for an expired planner session
+previously returned one stale-session alert and pruned the expired session, but
+left `_LOCAL_VIDEO_PLANNING_PENDING_KEY` pointing at that session. A focused
+fixture reproduced the leftover marker. The stale-session branch now calls the
+existing session-ID-guarded cleanup; the regression also proves a newer session
+and its pending marker survive replay of the old button. Local result:
+`1 passed in 2.14s`; test-file compile and `git diff --check` exit `0`. The
+explicit Linux CI selection is updated; full CI for this change is pending.
+No production plan DB, video job/render, provider, wallet, AutoPost, or stable
+Product/Edit/SubDub/Voice/Music engine was used.
+
 ### S12.35.385 — Admin Ticket status values fail closed
 
 The actual Admin Ticket keyboard emits only `resolved`, `refund_pending`, and

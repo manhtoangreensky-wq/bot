@@ -6212,3 +6212,32 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - Do not reopen without new evidence. Continue the next still-open ordered
   Admin/customer spec; keep A3/A5/A6 manual/dynamic coverage, A7 client timing,
   exact-main/runtime reconciliation, and the one-batch release gate open.
+
+### S12.35.395 closure — saved-plan route slice verified in CI
+
+- The exact four local saved-plan route cases (owner/chat-scoped list/view/edit/
+  delete, failed-delete recovery and optimistic-version/source-plan preservation)
+  passed in PR #1426 full CI run `38368052822` on head `619e9a0f`; complete-source
+  compilation and all workflow steps also passed.
+- No saved-plan UI defect was reproduced in that slice. It is closed/locked on
+  the draft PR, not merged/live. The expired pending-marker follow-up is separate
+  S12.35.406 below.
+
+### S12.35.406 — Expired planner callback clears only its stale pending marker
+
+- RED: the emitted `brief_skip` control for an expired Option C planner session
+  reached the source-extracted callback handler, returned one stale-session
+  alert and pruned that session, but left its text-pending marker in
+  `context.user_data`.
+- Minimal fix: the `session is None` branch calls the existing conditional
+  pending cleanup with the callback's `session_id`. The regression asserts one
+  alert/no edit, removal of the expired session and matching marker, plus
+  preservation of a newer active session/marker on a stale replay.
+- Local GREEN: `1 passed in 2.14s`; test-module `py_compile` and `git diff --check`
+  exited `0`. The current full-source/CI verification is pending; the prior
+  successful run predates this fix. The test is added to the Linux navigation
+  CI selector.
+- Fixture only: no production plan DB, video/job/render, provider, wallet,
+  AutoPost, stable engine, Telegram, merge, deploy or restart. Lock the fix after
+  the current exact-head CI gate; keep the rest of A3/A5/A6/A7 and one-batch
+  release open.

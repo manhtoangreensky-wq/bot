@@ -14,22 +14,21 @@ objective: >-
   narrow defects; preserve AutoPost WIP and stable Product/Edit/SubDub/Voice/Music
   engines. Do not change secrets, wallets, production data, call paid providers,
   send real Telegram messages, or merge/deploy/restart without authorization.
-current_spec: S12.35.405-owner-live-accept-receipt-binding
+current_spec: S12.35.406-expired-planner-callback-pending-cleanup
 current_spec_contract: >-
-  Bind the Owner live-accept callback token to the current receipt and fail
-  closed on stale or malformed controls before the existing paid-test gate.
-  Preserve Product Video engine/provider paths; close only after fresh source
-  compile and full PR CI pass.
+  When a local Video Studio planning callback targets an expired session, clear
+  only that session's stale text-input pending marker after the owner/chat-scoped
+  session lookup fails. Preserve any newer session marker and its state. Do not
+  read/write production plan data or enter video rendering/provider/job paths.
+  Lock after the focused emitted-callback fixture passes; batch CI remains a
+  separate gate.
 next_action: >-
-  S12.35.405 is locked on exact head 669b5c1f: source compile 38361311908 and
-  full CI 38361311896 both passed. Follow the next open ordered checklist spec
-  for Admin/customer UI/callbacks. The checklist and callback evidence now record
-  the .404/.405 exact-head lock. For each next spec, require a reproduced defect,
-  a minimal fix, and its focused regression before moving on; do not revisit a
-  locked defect absent new evidence.
-  S12.35.319 and S12.35.399–.402 are also locked by the same exact-head full CI;
-  do not reopen those defects absent new evidence.
-  Keep remaining audit, A7 and one-batch release gates open; do not merge/deploy.
+  S12.35.395's exact four saved-plan regression cases passed in full CI
+  38368052822 on PR head 619e9a0f. S12.35.406 has focused RED/GREEN locally;
+  update its evidence and include its regression in CI, then continue the next
+  still-open ordered Admin/customer spec without reopening a locked issue.
+  Keep remaining A3/A5/A6 dynamic/manual coverage, A7 latency, exact-main/runtime
+  reconciliation and one-batch release gates open; do not merge/deploy.
 latest_spec_result_S12_35_387: >-
   The actual emitted `memory|delete_yes|445|fixture-delete-token` matched the
   exact registered `^memory\|` handler. A shared in-memory fixture seam proved
@@ -11212,7 +11211,7 @@ S12_35_392_suggest_music_read_only_recommendation_route:
     mutation, merge, deploy or restart.
 
 S12_35_395_local_video_saved_plan_route_audit:
-  status: local_assertions_completed_clean_runner_unverified_ci_case_added
+  status: focused_saved_plan_cases_verified_in_full_ci_38368052822
   contract: >-
     Emit Local Video Studio entry/back controls from the production menu, verify
     the exact ^lvs27b\| callback registration, and re-run local-only saved-plan
@@ -11231,14 +11230,19 @@ S12_35_395_local_video_saved_plan_route_audit:
     temporary SQLite file. A direct pytest retry for the four saved-plan cases
     produced no output/result after more than four minutes and was interrupted;
     record that retry NOT_VERIFIED, not as a test failure. Added only those four
-    tests to the existing Linux Small Navigation CI step. The CI change has not
-    yet been pushed/run. No clean pytest PASS is claimed from Windows.
+    tests to the existing Linux Small Navigation CI step. Exact PR head
+    619e9a0f then passed all four selected cases in full CI run 38368052822;
+    the full-source compile and all other steps passed as well. No local Windows
+    pytest PASS is claimed for those four cases.
   limits: >-
     Sub-actions were executed against the source-extracted handler; the exact
     registered pattern and entry/back route were separately exercised. This is
     not Telegram-client rendering/latency or live runtime evidence. Whole-source
-    The four-test CI selection, exact YAML/diff check, remaining A3/A5/A6, A7,
-    main/protected-source refresh and one-batch delivery remain open.
+    PR #1426 full CI run 38368052822 passed the explicit four-test selection
+    on exact head 619e9a0f, along with full-source compilation and every other
+    workflow step. The stale expired-pending callback is a distinct follow-up
+    spec S12.35.406 and is not covered by that run. Exact current-main/runtime
+    reconciliation, remaining A3/A5/A6, A7 and one-batch delivery remain open.
   side_effects: >-
     Only temporary local SQLite fixture data was used and removed. No production
     DB/session, provider, video render/job, Xu, payment/wallet, Telegram API,
@@ -11689,3 +11693,37 @@ S12_35_405_owner_live_accept_receipt_binding:
     Commit `669b5c1f` is pushed to existing draft PR #1426 and this spec is
     locked by exact-head CI evidence. PR remains open/draft, not merged or live.
     All remaining whole-goal, A7 and one-batch release gates remain open.
+
+S12_35_406_expired_planner_callback_pending_cleanup:
+  status: focused_regression_green_local_ci_pending
+  pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
+  contract: >-
+    When a callback emitted for an expired Option C Video Studio session is
+    tapped, ACK one stale-session alert and clear only the text-pending marker
+    whose session_id matches that callback. Preserve a newer active session and
+    its pending marker. No production plans, rendering, provider, job or wallet.
+  red: >-
+    The real `brief_skip` callback emitted by render_view was dispatched through
+    the source-extracted Option C callback handler for an expired session. The
+    handler returned one stale alert and pruned the session, but the assertion
+    failed because `_LOCAL_VIDEO_PLANNING_PENDING_KEY` still referenced the
+    expired session. RED assertion: `marker_key not in context.user_data`.
+  fix: >-
+    On the existing `session is None` stale branch, call the existing
+    `_local_video_planning_clear_pending(context, session_id)`. Its session-ID
+    guard preserves any newer session marker. No other route or processing code
+    changed.
+  verification: >-
+    Focused pytest after the fix: `1 passed in 2.14s`; it asserts one alert, no
+    screen edit, stale-session removal, matching-marker cleanup, and preservation
+    of a newer session/marker on stale replay. Test-file py_compile and
+    `git diff --check` exited 0. Whole `bot.py` compile/current PR CI are pending;
+    the preceding successful CI run predates this fix. The explicit CI selector
+    now includes this regression.
+  safety: >-
+    Local source-extracted handler and in-memory session state only. No database
+    connection, production data, video render/job, provider, AutoPost, stable
+    Product/Edit/SubDub/Voice/Music engine, GitHub write, merge, deploy or restart.
+  delivery: >-
+    Local WIP only pending current exact-head CI. Keep draft PR #1426 unmerged
+    and runtime untouched; lock at the release gate after current CI passes.

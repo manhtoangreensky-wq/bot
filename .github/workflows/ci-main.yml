@@ -150,7 +150,7 @@ jobs:
             tests/test_video_downloader_freehub_exit_pending.py
           python -m pytest -q --noconftest \
             tests/test_p1_localvideostudio27b_public_ui.py \
-            -k 'option_c_library_view_and_confirmed_delete_are_owner_chat_scoped or deleting_opened_plan_then_saving_never_overwrites_another_source_plan or delete_commit_failure_keeps_the_existing_session_and_callbacks_usable or deleting_another_plan_preserves_current_plan_optimistic_version'
+            -k 'option_c_library_view_and_confirmed_delete_are_owner_chat_scoped or deleting_opened_plan_then_saving_never_overwrites_another_source_plan or delete_commit_failure_keeps_the_existing_session_and_callbacks_usable or deleting_another_plan_preserves_current_plan_optimistic_version or expired_callback_clears_only_its_pending_session'
 
       - name: Run Workflow Hygiene Unit Tests
         run: |

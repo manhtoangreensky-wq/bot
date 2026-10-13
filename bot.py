@@ -71635,6 +71635,7 @@ async def _handle_option_c_video_planning_callback(
     except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
         session = None
     if session is None:
+        _local_video_planning_clear_pending(context, session_id)
         return await query.answer("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
     if local_video_studio_public.store_has_callback_id(store, callback_id, now=now):
         return await query.answer("Thao tác này đã được nhận.")

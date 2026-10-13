@@ -1,6 +1,12 @@
 # Telegram UI integration — 13/10/2026
 
-## Latest follow-up — S12.35.403–.405
+## Latest follow-up — S12.35.403–.406
+
+S12.35.406 fixes a stale local-planner input marker after an emitted callback
+targets an expired session. The change is one existing-helper call guarded by
+the callback's session ID; the new focused regression passes locally and is in
+the Linux navigation CI selection. Current PR CI for this source change remains
+pending; no merge/deploy or engine/provider path was used.
 
 Full Linux CI #38350432275 and source compile #38350432301 passed on HEAD
 `ab2eb614f6473d2a9e93af008bb7a5faedb9ee0a`. After that CI, a missing dedicated
