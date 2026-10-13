@@ -1630,6 +1630,15 @@ def finalize_owner_acceptance_token(
 
 
 CALLBACK_OWNERSHIP_BOOL_AUTHORITY: str = "NO"
+PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE: str = "NO"
+CALLER_CAN_SET_REGISTERED_CALLBACK_PROVENANCE: str = "NO"
+CALLER_ROLE_SECURITY_AUTHORITY: str = "NO"
+CALLSITE_SECURITY_AUTHORITY: str = "NO"
+PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT: str = "BLOCK"
+HMAC_ROLE: str = "INTEGRITY_ONLY"
+HMAC_IS_CALLBACK_OWNERSHIP_AUTHORITY: str = "NO"
+CALLBACK_OWNERSHIP_RECEIPT_PROVENANCE: str = "NOT_PROVEN"
+CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY: str = "NO"
 
 
 def _compute_callback_ownership_signature(payload_dict: dict[str, Any]) -> str:
@@ -1681,35 +1690,42 @@ def get_callback_hmac_secret_status() -> dict[str, Any]:
 
 def create_canonical_callback_ownership_receipt(
     *,
-    telegram_update_id: int | str,
-    callback_query_id: str,
-    chat_id: int | str,
-    user_id: int | str,
-    job_id: int | str,
-    request_id: str,
-    owner_receipt: str,
+    telegram_update_id: int | str = 0,
+    callback_query_id: str = "",
+    chat_id: int | str = "",
+    user_id: int | str = "",
+    job_id: int | str = "",
+    request_id: str = "",
+    owner_receipt: str = "",
     callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
     caller_role: str = "bot",
     provenance: str = "NOT_PROVEN",
     is_test_fixture: bool = False,
 ) -> dict[str, Any]:
-    """Canonical Bot callback ownership validation receipt issued only by registered Bot dispatcher."""
-    # N21AF §8: Generic services, workers, providers cannot create callback ownership receipt
-    if caller_role in ("generic_service", "worker", "provider", "router", "services"):
+    """Tombstoned production callback receipt issuer (PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE=NO).
+
+    Caller-controlled strings, caller_role, callsite, and raw plausible IDs cannot produce authority
+    (CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY=NO, CALLER_ROLE_SECURITY_AUTHORITY=NO,
+    CALLSITE_SECURITY_AUTHORITY=NO, PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK,
+    CALLER_CAN_SET_REGISTERED_CALLBACK_PROVENANCE=NO).
+    """
+    clean_prov = str(provenance or "").strip()
+    if clean_prov and clean_prov not in ("NOT_PROVEN", "TEST_ONLY"):
         raise PermissionError(
-            f"Caller role '{caller_role}' cannot create callback ownership receipt "
-            "(GENERIC_SERVICE_CAN_CREATE_VALID_CALLBACK_RECEIPT=NO, WORKER_CAN_CREATE_VALID_CALLBACK_RECEIPT=NO, "
-            "PROVIDER_CAN_CREATE_VALID_CALLBACK_RECEIPT=NO)"
+            "Caller cannot set registered callback provenance "
+            "(CALLER_CAN_SET_REGISTERED_CALLBACK_PROVENANCE=NO)"
         )
-    allowed_callsites = (
-        "bot.py:handle_product_video_owner_live_accept_callback",
-        "bot.py:handle_owner_authorized_live_test_confirm",
-    )
-    if callsite not in allowed_callsites:
+
+    # In production, the issuer is unavailable and tombstoned fail-closed.
+    if not is_test_fixture:
         raise PermissionError(
-            f"Unauthorized callback validation callsite '{callsite}' "
-            "(CALLSITE_STRING_CAN_CREATE_CALLBACK_AUTHORITY=NO)"
+            "Production callback receipt issuer is unavailable; arbitrary caller IDs cannot be signed into authority "
+            "(PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE=NO, CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY=NO, "
+            "CALLER_ROLE_SECURITY_AUTHORITY=NO, CALLSITE_SECURITY_AUTHORITY=NO, "
+            "PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK)"
         )
+
+    # Isolated test fixture receipt creation path
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
         raise PermissionError("owner_receipt required for callback ownership receipt")
@@ -1717,29 +1733,21 @@ def create_canonical_callback_ownership_receipt(
         up_id = int(telegram_update_id or 0)
     except Exception:
         up_id = 0
-    if up_id <= 0:
-        raise PermissionError("telegram_update_id > 0 required for callback ownership receipt")
     cbq_id = str(callback_query_id or "").strip()
-    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id.startswith("cbq_synthetic_") or cbq_id == "cbq_1":
-        raise PermissionError("Real callback_query_id required for callback ownership receipt (ARBITRARY_IDS_TO_TRUSTED_RECEIPT=NO)")
     c_chat = str(chat_id or "").strip()
     c_user = str(user_id or "").strip()
     c_job = str(job_id or "").strip()
     c_req = str(request_id or "").strip()
-    if not c_chat or not c_user or not c_job or not c_req:
-        raise PermissionError("Complete chat_id, user_id, job_id, request_id required for callback ownership receipt")
 
-    # N21AF §10: ARBITRARY_IDS_TO_TRUSTED_RECEIPT=NO
-    # Caller supplying caller_role="bot" or raw IDs alone does not constitute proven callback provenance
-    receipt_id = f"cbor_{secrets.token_hex(12)}"
+    receipt_id = f"cbor_test_{secrets.token_hex(12)}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rcpt = {
         "ok": True,
         "receipt_id": receipt_id,
         "status": "VALIDATED",
         "validator": "services.video_trace_state:create_canonical_callback_ownership_receipt",
-        "callsite": callsite,
-        "caller_role": caller_role,
+        "callsite": str(callsite or "").strip(),
+        "caller_role": str(caller_role or "").strip(),
         "telegram_update_id": up_id,
         "callback_query_id": cbq_id,
         "chat_id": c_chat,
@@ -1749,7 +1757,7 @@ def create_canonical_callback_ownership_receipt(
         "owner_receipt": clean_rcpt,
         "created_at": now_iso,
         "validated_at": now_iso,
-        "provenance": "TEST_ONLY" if is_test_fixture else str(provenance or "NOT_PROVEN"),
+        "provenance": "TEST_ONLY",
         "hmac_role": "INTEGRITY_ONLY",
     }
     rcpt["signature"] = _compute_callback_ownership_signature(rcpt)

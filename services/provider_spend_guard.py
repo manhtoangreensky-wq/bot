@@ -429,7 +429,19 @@ CALLER_ROLE_STRING_CAN_CREATE_CALLBACK_AUTHORITY: str = "NO"
 ARBITRARY_IDS_TO_TRUSTED_RECEIPT: str = "NO"
 CALLBACK_OWNERSHIP_RECEIPT_PROVENANCE: str = "NOT_PROVEN"
 TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT: str = "NO"
-# ─── END N21AC / N21AD / N21AE / N21AF INVARIANT CONSTANTS ──────────────────
+
+# N21AG explicit additions
+PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE: str = "NO"
+CALLER_CAN_SET_REGISTERED_CALLBACK_PROVENANCE: str = "NO"
+CALLER_ROLE_SECURITY_AUTHORITY: str = "NO"
+CALLSITE_SECURITY_AUTHORITY: str = "NO"
+PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT: str = "BLOCK"
+MINT_AUTHORITY_ARBITRARY_KWARGS: str = "NO"
+LEGACY_TEST_OVERRIDE_KEYWORD_ACCEPTED: str = "NO"
+OWNER_LIVE_CONFIRM_HELPER_FAILCLOSED: str = "YES"
+LIVE_DISABLED_SIDE_EFFECTS_BEFORE_BLOCK: int = 0
+CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY: str = "NO"
+# ─── END N21AC / N21AD / N21AE / N21AF / N21AG INVARIANT CONSTANTS ───────────
 
 
 def validate_owner_live_button_eligibility(
@@ -925,14 +937,8 @@ def issue_bot_mint_authority(
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
-    **kwargs: Any,
 ) -> BotMintAuthority:
     """Issue genuine Bot mint authority bound to pre-existing durable Bot validation event in SQLite."""
-    if "_caller_override_for_test" in kwargs or kwargs.get("_caller_override_for_test"):
-        raise PermissionError(
-            f"Unauthorized mint caller '{kwargs.get('_caller_override_for_test')}': generic service/worker/provider cannot issue mint authority "
-            "(CALLSITE_STRING_IS_AUTHORITY=NO, PRODUCTION_PAID_LIVE_TEST_OVERRIDE=ABSENT)"
-        )
     if callsite not in _ALLOWED_LIVE_MINT_CALLSITES:
         raise PermissionError(f"Unauthorized mint callsite: '{callsite}'")
 
