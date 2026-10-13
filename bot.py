@@ -106549,15 +106549,41 @@ def product_video_public_preflight_panel_keyboard(
     ready=None,
     back_callback: str = "vproduct|b14_scene_count_screen",
     owner_receipt: str = "",
+    job_id: str | int = 0,
+    request_id: str = "",
+    user_id: str | int = "",
+    db_path: str | None = None,
 ) -> InlineKeyboardMarkup:
     if not resolved_state:
         resolved_state = "ready_healthy" if bool(ready) else "blocked_provider"
     panel_kind = product_video_public_preflight_public_kind(resolved_state)
     rows = []
-    if owner_receipt:
-        token = str(owner_receipt).strip()[:12]
-        cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
-        rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
+    clean_user_id = str(user_id).strip() if str(user_id or "").strip() not in {"", "0", "None"} else ""
+    if owner_receipt and job_id and request_id:
+        should_render = False  # N21AC/N21AD §14: OWNER_LIVE_BUTTON_DEFAULT_RENDER=NO (fail-closed)
+        from services.provider_spend_guard import validate_canonical_owner_live_authorization
+        try:
+            is_valid, _, auth_data = validate_canonical_owner_live_authorization(
+                owner_receipt,
+                product_family="Product Video",
+                job_id=str(job_id) if job_id else "",
+                request_id=str(request_id) if request_id else "",
+                user_id=clean_user_id,
+                db_path=db_path,
+            )
+            auth_uid = str((auth_data or {}).get("user_id") or "").strip()
+            if auth_uid in {"0", "None"}:
+                auth_uid = ""
+            if auth_uid:
+                should_render = bool(is_valid and clean_user_id and auth_uid == clean_user_id)
+            else:
+                should_render = bool(is_valid)
+        except Exception:
+            should_render = False
+        if should_render:
+            token = str(owner_receipt).strip()[:12]
+            cb_data = f"vproduct|owner_live_accept|{token}" if token else "vproduct|owner_live_accept"
+            rows.append([InlineKeyboardButton("👑 Xác nhận kiểm thử trực tiếp (Owner)", callback_data=cb_data)])
     if panel_kind == "ready":
         rows.append([InlineKeyboardButton("✅ Xác nhận tạo video", callback_data="vproduct|b14_confirm"), InlineKeyboardButton("🧾 Xem lại hóa đơn", callback_data="vproduct|b14_invoice_screen")])
     elif panel_kind == "ready_try":
@@ -106623,6 +106649,7 @@ async def product_video_show_public_preflight_panel(
             lang,
             resolved_state=resolved_state,
             back_callback=back_callback,
+            user_id=user_id,
         ),
     )
 
@@ -109024,26 +109051,47 @@ async def handle_owner_authorized_live_test_confirm(
     if not clean_rcpt:
         raise PermissionError("Owner live authorization receipt is required for live test acceptance")
 
-    # Validate durable pre-existing Owner live authorization record
-    is_valid, blocker, auth_data = validate_owner_live_authorization(
-        clean_rcpt,
-        product_family="Product Video",
-        job_id=str(job_id),
-        request_id=str(request_id),
-        operation="create_video_task",
-    )
-    if not is_valid:
-        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
-
     query = getattr(update, "callback_query", None)
     real_update_id = getattr(update, "update_id", 0) or 0
     real_cbq_id = getattr(query, "id", "") or ""
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
     real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
 
+    # Validate durable pre-existing Owner live authorization record
+    is_valid, blocker, auth_data = validate_owner_live_authorization(
+        clean_rcpt,
+        product_family="Product Video",
+        job_id=str(job_id),
+        request_id=str(request_id),
+        user_id=str(real_user_id) if real_user_id else "",
+        operation="create_video_task",
+    )
+    if not is_valid:
+        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
+
+    if not real_cbq_id or not real_update_id or not real_chat_id or not real_user_id:
+        raise PermissionError(
+            "Real Telegram callback query event with valid update/callback_query/chat/user is required "
+            "(REAL_TELEGRAM_EVENT=YES, REAL_CALLBACK_QUERY_ID=YES, CALLSITE_STRING_ALONE_CAN_AUTHORIZE=NO)"
+        )
+
     # Section 10: DURABLE_OWNER_MAX_SOLE_SOURCE=YES, CALLER_EXPECTED_MAX_INFLUENCE=NO
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
+
+    video_trace_state.record_owner_live_callback_origin_in_trace(
+        clean_rcpt,
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        callback_action="create_video_task",
+        callback_ownership_validated=True,
+        validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+        validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+    )
 
     mint_auth = issue_bot_mint_authority(
         callsite=callsite,
@@ -121774,6 +121822,10 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
                 "seconds_per_scene": safe_int(draft.get("b14_scene_seconds"), 8),
                 "unit_xu": safe_int(draft.get("b14_quality_xu"), 80),
                 "entry_mode": "prompt_video",
+                "telegram_update_id": safe_int(getattr(update, "update_id", 0), 0),
+                "callback_query_id": str(getattr(query, "id", "") or "").strip(),
+                "callback_action": "b14_confirm",
+                "callback_ownership_validated": bool(confirmation_guard.get("ok")),
             },
         )
         session = dict(intake_result.get("session") or session)

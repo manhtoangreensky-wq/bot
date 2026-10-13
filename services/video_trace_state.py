@@ -65,6 +65,7 @@ def get_canonical_db_path() -> str:
         or os.getenv("DB_FILE")
         or os.getenv("DATABASE_PATH")
         or os.getenv("SQLITE_DB_PATH")
+        or os.getenv("SPEND_GUARD_DB_PATH")
         or "toandaas_system.db"
     ).strip()
 
@@ -738,6 +739,8 @@ def begin_video_confirm_execution(
     idempotency_key: str,
     payload: dict | None = None,
     product_type: str = "video_ai_real",
+    telegram_update_id: int | str = 0,
+    callback_query_id_safe: str = "",
     conn=None,
 ) -> dict:
     """Atomically persist one request and one non-claimable internal job."""
@@ -750,11 +753,24 @@ def begin_video_confirm_execution(
     clean_user_id = int(user_id or 0)
     clean_chat_id = int(chat_id or 0)
     attempt_key = str(idempotency_key or "").strip()[:240]
+    payload_dict = dict(payload or {})
+    try:
+        eff_update_id = int(telegram_update_id or payload_dict.get("telegram_update_id") or 0)
+    except (ValueError, TypeError):
+        eff_update_id = 0
+    eff_callback_id = str(
+        callback_query_id_safe
+        or payload_dict.get("callback_query_id_safe")
+        or payload_dict.get("callback_query_id")
+        or ""
+    ).strip()[:160]
     if clean_project_id <= 0 or clean_user_id <= 0 or not attempt_key:
         return {
             "ok": False,
             "request_id": "",
             "job_id": 0,
+            "project_id": clean_project_id,
+            "confirm_attempt_key": attempt_key,
             "session": session,
             "reason": "invalid_confirm_identity",
             "durable_persisted": False,
@@ -793,15 +809,19 @@ def begin_video_confirm_execution(
         ).strip()
         trace = dict(existing or draft.get("video_trace") or {})
         prior_job_id = int(trace.get("job_id") or 0)
+        resolved_update_id = eff_update_id or int(trace.get("telegram_update_id") or 0)
+        resolved_callback_id = eff_callback_id or str(trace.get("callback_query_id_safe") or "").strip()
         trace.update(
             {
-                **dict(payload or {}),
+                **payload_dict,
                 "request_id": request_id,
                 "project_id": clean_project_id,
                 "confirm_attempt_key": attempt_key,
                 "owner_user_id": clean_user_id,
                 "owner_chat_id": clean_chat_id,
                 "product_type": str(product_type or trace.get("product_type") or "video_ai_real"),
+                "telegram_update_id": resolved_update_id,
+                "callback_query_id_safe": resolved_callback_id,
             }
         )
         if not existing:
@@ -817,7 +837,7 @@ def begin_video_confirm_execution(
                 }
             )
         if not trace.get("events"):
-            trace = _append_trace_event(trace, STAGE_REQUEST_RECEIVED, payload)
+            trace = _append_trace_event(trace, STAGE_REQUEST_RECEIVED, payload_dict)
         if not persist_video_request_trace(trace, conn=connection, commit=False):
             raise RuntimeError("trace_persistence_failed")
 
@@ -871,6 +891,8 @@ def begin_video_confirm_execution(
             "ok": True,
             "request_id": request_id,
             "job_id": job_id,
+            "project_id": clean_project_id,
+            "confirm_attempt_key": attempt_key,
             "job": job_readback,
             "session": session,
             "reason": "",
@@ -1026,6 +1048,24 @@ def record_video_confirm_precheck_result(
             stage = STAGE_ADMISSION_BLOCKED
         else:
             stage = STAGE_PREFLIGHT_BLOCKED
+        existing_mint_status = str(trace.get("bot_origin_mint_status") or "").strip().upper()
+        merged_update_id = int(
+            precheck_payload.get("telegram_update_id") or trace.get("telegram_update_id") or 0
+        )
+        merged_cb_id = str(
+            precheck_payload.get("callback_query_id") or trace.get("callback_query_id") or ""
+        ).strip()
+        merged_ownership = bool(
+            precheck_payload.get("callback_ownership_validated")
+            or trace.get("callback_ownership_validated")
+        )
+        merged_action = str(
+            precheck_payload.get("callback_action")
+            or trace.get("callback_action")
+            or precheck_payload.get("action")
+            or trace.get("action")
+            or ""
+        ).strip()
         trace.update(
             {
                 **precheck_payload,
@@ -1042,6 +1082,24 @@ def record_video_confirm_precheck_result(
                 "charge_state": "NO_CHARGE",
             }
         )
+        if (
+            stage == STAGE_READY_TO_SUBMIT
+            and merged_ownership
+            and merged_update_id > 0
+            and bool(merged_cb_id)
+            and existing_mint_status not in {"MINTED", "CONSUMED"}
+        ):
+            now_origin_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            trace.update(
+                {
+                    "telegram_update_id": merged_update_id,
+                    "callback_query_id": merged_cb_id,
+                    "callback_action": merged_action or "b14_confirm",
+                    "callback_ownership_validated": True,
+                    "bot_origin_mint_status": "READY",
+                    "bot_origin_recorded_at": now_origin_iso,
+                }
+            )
         trace = _append_trace_event(
             trace,
             stage,
@@ -1569,3 +1627,161 @@ def finalize_owner_acceptance_token(
         logger.warning("Failed to finalize owner acceptance token %s: %s", clean_fp, exc)
         return False
 
+
+def record_owner_live_callback_origin_in_trace(
+    owner_receipt: str,
+    *,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    callback_action: str = "create_video_task",
+    callback_ownership_validated: bool = True,
+    validation_source: str = "",
+    validation_callsite: str = "",
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict:
+    """Bind validated Telegram callback origin evidence onto an existing canonical trace row."""
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        raise PermissionError("owner_receipt is required to bind canonical callback origin")
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    if up_id <= 0:
+        raise PermissionError("telegram_update_id > 0 is required for canonical Bot-origin evidence")
+    cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise PermissionError("Real callback_query_id is required for canonical Bot-origin evidence")
+    c_chat = str(chat_id or "").strip()
+    c_user = str(user_id or "").strip()
+    c_job = str(job_id or "").strip()
+    c_req = str(request_id or "").strip()
+    c_act = str(callback_action or "").strip()
+    if not c_chat or not c_user or not c_job or not c_req or c_req.startswith("req_fallback_"):
+        raise PermissionError("Complete chat_id, user_id, job_id, and request_id are required for canonical Bot-origin evidence")
+    if c_act not in ("b14_confirm", "create_video_task"):
+        raise PermissionError(f"Unsupported callback_action '{c_act}' for canonical Bot-origin evidence")
+    if not callback_ownership_validated:
+        raise PermissionError("callback_ownership_validated=True is required for canonical Bot-origin evidence")
+
+    ensure_video_trace_schema(conn, db_path=db_path)
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    savepoint = ""
+    try:
+        savepoint = _begin_sqlite_transaction(c)
+        cur = c.cursor()
+        cur.execute("SELECT request_id, trace_payload_json FROM video_request_traces")
+        for r_row in cur.fetchall():
+            try:
+                p_obj = json.loads(r_row["trace_payload_json"] or "{}")
+            except Exception:
+                p_obj = {}
+            if (
+                int(p_obj.get("telegram_update_id") or 0) == up_id
+                and str(p_obj.get("callback_query_id") or "").strip() == cbq_id
+                and str(p_obj.get("bot_origin_mint_status") or "").strip().upper() in {"READY", "MINTED", "CONSUMED"}
+            ):
+                raise PermissionError(
+                    "Replay of Telegram callback origin (telegram_update_id, callback_query_id) is blocked "
+                    "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+                )
+
+        cur.execute(
+            """
+            SELECT request_id, job_id, owner_user_id, owner_chat_id, current_stage, trace_payload_json
+            FROM video_request_traces
+            WHERE request_id = ? OR request_id = ? OR confirm_attempt_key = ? OR request_id = ?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (f"COA-{clean_rcpt}", clean_rcpt, f"COA-{clean_rcpt}", f"OAT-{clean_rcpt}"),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise PermissionError("Canonical owner authorization trace record missing in video_request_traces")
+
+        row_pk = str(row["request_id"])
+        row_stage = str(row["current_stage"] or "").strip().upper()
+        try:
+            raw_payload = json.loads(row["trace_payload_json"] or "{}")
+        except Exception:
+            raw_payload = {}
+        target_dict = raw_payload.get("auth") if isinstance(raw_payload.get("auth"), dict) else raw_payload
+
+        if (
+            row_stage in {"CONSUMED", "CLAIMED", "REVOKED"}
+            or str(target_dict.get("status") or "").strip().lower() in {"consumed", "revoked"}
+            or bool(target_dict.get("consumed"))
+        ):
+            raise PermissionError("Canonical owner authorization trace record is already consumed or revoked")
+
+        existing_mint_st = str(
+            raw_payload.get("bot_origin_mint_status") or target_dict.get("bot_origin_mint_status") or ""
+        ).strip().upper()
+        if existing_mint_st in {"READY", "MINTED", "CONSUMED"}:
+            raise PermissionError(
+                f"Canonical Bot-origin authority already used (status={existing_mint_st}) "
+                "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
+            )
+
+        auth_job = str(
+            target_dict.get("job_id") or (row["job_id"] if row["job_id"] is not None else "") or ""
+        ).strip()
+        if auth_job and auth_job != c_job:
+            raise PermissionError(f"Canonical Bot-origin job_id mismatch: '{auth_job}' != '{c_job}'")
+
+        auth_req = str(target_dict.get("request_id") or "").strip()
+        if auth_req and auth_req != c_req:
+            raise PermissionError(f"Canonical Bot-origin request_id mismatch: '{auth_req}' != '{c_req}'")
+
+        auth_user = str(target_dict.get("user_id") or "").strip()
+        if auth_user and auth_user != "0" and auth_user != c_user:
+            raise PermissionError(f"Canonical Bot-origin user_id mismatch: '{auth_user}' != '{c_user}'")
+
+        auth_chat = str(
+            target_dict.get("chat_id") or (row["owner_chat_id"] if row["owner_chat_id"] else "") or ""
+        ).strip()
+        if auth_chat and auth_chat != "0" and auth_chat != c_chat:
+            raise PermissionError(f"Canonical Bot-origin chat_id mismatch: '{auth_chat}' != '{c_chat}'")
+
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        origin_fields = {
+            "telegram_update_id": up_id,
+            "callback_query_id": cbq_id,
+            "callback_chat_id": c_chat,
+            "callback_user_id": c_user,
+            "callback_job_id": c_job,
+            "callback_request_id": c_req,
+            "callback_action": c_act,
+            "callback_ownership_validated": True,
+            "validation_source": str(validation_source or ""),
+            "validation_callsite": str(validation_callsite or ""),
+            "bot_origin_mint_status": "READY",
+            "bot_origin_recorded_at": now_iso,
+        }
+        raw_payload.update(origin_fields)
+        if isinstance(raw_payload.get("auth"), dict):
+            raw_payload["auth"].update(origin_fields)
+
+        c.execute(
+            """
+            UPDATE video_request_traces
+            SET trace_payload_json = ?, updated_at = ?
+            WHERE request_id = ?
+            """,
+            (json.dumps(raw_payload, ensure_ascii=False, sort_keys=True), now_iso, row_pk),
+        )
+        _commit_sqlite_transaction(c, savepoint)
+        savepoint = ""
+        return {"ok": True, "trace_request_id": row_pk, "bot_origin_mint_status": "READY"}
+    except Exception:
+        if savepoint:
+            _rollback_sqlite_transaction(c, savepoint)
+        raise
+    finally:
+        if should_close:
+            c.close()

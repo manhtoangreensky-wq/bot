@@ -3531,6 +3531,7 @@ def validate_owner_acceptance_authorization(
     environ: dict[str, str] | None = None,
     current_time: float | None = None,
     db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner-authorized acceptance lane for a single controlled live job.
 
@@ -3595,9 +3596,9 @@ def validate_owner_acceptance_authorization(
     attempt_fingerprint = compute_owner_acceptance_attempt_fingerprint(auth)
     env = dict(environ or os.environ)
     effective_db_path = db_path or env.get("DB_PATH") or env.get("SQLITE_DB_PATH")
-    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, db_path=effective_db_path):
+    if is_owner_acceptance_token_claimed_or_consumed(fingerprint, conn=conn, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"token_fingerprint": fingerprint}
-    if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, db_path=effective_db_path):
+    if is_owner_acceptance_attempt_claimed_or_consumed(attempt_fingerprint, conn=conn, db_path=effective_db_path):
         return False, "owner_acceptance_already_consumed", {"attempt_fingerprint": attempt_fingerprint}
 
     if is_r05a:
@@ -3606,12 +3607,14 @@ def validate_owner_acceptance_authorization(
         if not ctx_product or ctx_product != "self_shot_scene_change":
             return False, "owner_acceptance_product_mismatch", {}
     else:
+        if bool(auth.get("allow_other_product")):
+            return False, "owner_acceptance_product_mismatch", {}
         allowed_acceptance_products = {
             CANONICAL_ACCEPTANCE_PRODUCT_TYPE,
             "video_ai_video_reference",
             "self_shot_scene_change",
         }
-        if pinned_product not in allowed_acceptance_products and not auth.get("allow_other_product"):
+        if pinned_product not in allowed_acceptance_products:
             return False, "owner_acceptance_product_mismatch", {}
         if ctx_product and ctx_product != pinned_product:
             return False, "owner_acceptance_product_mismatch", {}
@@ -3661,7 +3664,7 @@ def validate_owner_acceptance_authorization(
         if ctx_project_id is not None and str(ctx_project_id).strip() != str(auth.get("project_id")).strip():
             return False, "owner_acceptance_project_mismatch", {}
 
-    # 4. Provider pinning (shopaikey_video or fal_video for owner acceptance; key4u_video for R05A)
+    # 4. Provider pinning (shopaikey_video, key4u_video, or fal_video for owner acceptance; key4u_video for R05A)
     pinned_provider = str(
         auth.get("provider")
         or (CANONICAL_ACCEPTANCE_PROVIDER if (pinned_product != "video_ai_video_reference" and not is_r05a) else "")
@@ -3683,7 +3686,7 @@ def validate_owner_acceptance_authorization(
             return False, "owner_acceptance_provider_mismatch", {}
         allowed_acceptance_providers = {"key4u_video"}
     else:
-        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "fal_video", "fal.ai", "fal-video"}
+        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "key4u_video", "fal_video", "fal.ai", "fal-video"}
     if not is_r05a and pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()
