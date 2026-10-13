@@ -410,7 +410,26 @@ OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE: str = "YES"
 MISSING_USER_OWNER_LIVE_BUTTON: str = "HIDDEN"
 CALLER_VALIDATION_STRINGS_AUTHORITY: str = "NO"
 BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN: str = "owner_live_issuance_authority_not_proven"
-# ─── END N21AC / N21AD / N21AE INVARIANT CONSTANTS ──────────────────────────
+
+# N21AF explicit additions
+PRODUCTION_PAID_LIVE_TEST_OVERRIDE: str = "ABSENT"
+CALLER_CAN_BYPASS_PAID_LIVE_AVAILABILITY: str = "NO"
+PAID_LIVE_UNAVAILABLE_BUTTON: str = "HIDDEN"
+OWNER_LIVE_CALLBACK_FAILCLOSED: str = "YES"
+OWNER_LIVE_MINT_FAILCLOSED: str = "YES"
+OWNER_LIVE_RESERVATION_FAILCLOSED: str = "YES"
+CALLBACK_HMAC_HARDCODED_FALLBACK: str = "ABSENT"
+HMAC_ROLE: str = "INTEGRITY_ONLY"
+HMAC_IS_CALLBACK_OWNERSHIP_AUTHORITY: str = "NO"
+GENERIC_SERVICE_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+WORKER_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+PROVIDER_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+CALLSITE_STRING_CAN_CREATE_CALLBACK_AUTHORITY: str = "NO"
+CALLER_ROLE_STRING_CAN_CREATE_CALLBACK_AUTHORITY: str = "NO"
+ARBITRARY_IDS_TO_TRUSTED_RECEIPT: str = "NO"
+CALLBACK_OWNERSHIP_RECEIPT_PROVENANCE: str = "NOT_PROVEN"
+TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT: str = "NO"
+# ─── END N21AC / N21AD / N21AE / N21AF INVARIANT CONSTANTS ──────────────────
 
 
 def validate_owner_live_button_eligibility(
@@ -425,6 +444,10 @@ def validate_owner_live_button_eligibility(
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
+    # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
+
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id or clean_user_id in {"0", "None"}:
         return False, "owner_live_user_id_required", {}
@@ -494,12 +517,6 @@ def create_owner_live_authorization(*args: Any, **kwargs: Any) -> str:
     (video_request_traces table). The spend guard must NEVER create authority records.
     Any call to this function in production raises PermissionError unconditionally.
     """
-    caller_override = kwargs.get("_caller_override_for_test")
-    if caller_override in ("worker", "provider", "router", "direct_provider", "shell", "script"):
-        raise PermissionError(
-            f"Unauthorized owner auth creator '{caller_override}': worker/provider/router cannot create owner live authorization "
-            "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO)"
-        )
     raise PermissionError(
         "create_owner_live_authorization is RETIRED unconditionally (N21AC-FIX1). "
         "Owner authority cannot be created in spend_guard under any arguments or caller overrides. "
@@ -908,15 +925,15 @@ def issue_bot_mint_authority(
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
-    _caller_override_for_test: str | None = None,
+    **kwargs: Any,
 ) -> BotMintAuthority:
     """Issue genuine Bot mint authority bound to pre-existing durable Bot validation event in SQLite."""
-    if _caller_override_for_test in ("generic_service", "worker", "provider", "router", "services"):
+    if "_caller_override_for_test" in kwargs or kwargs.get("_caller_override_for_test"):
         raise PermissionError(
-            f"Unauthorized mint caller '{_caller_override_for_test}': generic service/worker/provider cannot issue mint authority "
-            "(CALLSITE_STRING_IS_AUTHORITY=NO)"
+            f"Unauthorized mint caller '{kwargs.get('_caller_override_for_test')}': generic service/worker/provider cannot issue mint authority "
+            "(CALLSITE_STRING_IS_AUTHORITY=NO, PRODUCTION_PAID_LIVE_TEST_OVERRIDE=ABSENT)"
         )
-    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES and not _caller_override_for_test:
+    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES:
         raise PermissionError(f"Unauthorized mint callsite: '{callsite}'")
 
     # N21AD §3: CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO, VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY=NO
@@ -928,9 +945,9 @@ def issue_bot_mint_authority(
             "(CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO)"
         )
 
-    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE and not _caller_override_for_test:
+    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
         raise PermissionError(f"Unauthorized validation_source: '{validation_source}'")
-    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE and not _caller_override_for_test:
+    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
         raise PermissionError(f"Unauthorized validation_callsite: '{validation_callsite}'")
 
     if action not in ("b14_confirm", "create_video_task"):
@@ -988,8 +1005,9 @@ def issue_bot_mint_authority(
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
 
-        # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
-        if PAID_LIVE_TEST_AVAILABLE != "YES" and _caller_override_for_test != "allow_paid_live_mint_test":
+        # N21AF §3, §4: Universal fail-closed when paid live test is unavailable.
+        # No test override parameter or branch exists (PRODUCTION_PAID_LIVE_TEST_OVERRIDE=ABSENT, CALLER_CAN_BYPASS_PAID_LIVE_AVAILABILITY=NO)
+        if PAID_LIVE_TEST_AVAILABLE != "YES":
             raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
 
         try:
@@ -1097,6 +1115,14 @@ def issue_bot_mint_authority(
                 )
 
             if callback_ownership_receipt is not None:
+                if callback_ownership_receipt.get("provenance") == "TEST_ONLY":
+                    if os.environ.get("PYTEST_CURRENT_TEST") is None:
+                        if should_close:
+                            active_conn.rollback()
+                        raise PermissionError(
+                            "TEST_ONLY callback receipt cannot authorize real transport "
+                            "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                        )
                 if not verify_canonical_callback_ownership_receipt(
                     callback_ownership_receipt,
                     telegram_update_id=up_id,

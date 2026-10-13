@@ -109044,6 +109044,8 @@ async def handle_owner_authorized_live_test_confirm(
     """
     from decimal import Decimal
     from services.provider_spend_guard import (
+        PAID_LIVE_TEST_AVAILABLE,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
         issue_bot_mint_authority,
         mint_multiscene_bot_confirmation_plan,
         validate_owner_live_authorization,
@@ -109051,6 +109053,9 @@ async def handle_owner_authorized_live_test_confirm(
         BOT_CONFIRM_VALIDATION_SOURCE,
         BOT_CONFIRM_VALIDATION_CALLSITE,
     )
+
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        raise PermissionError(f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
 
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
@@ -109094,6 +109099,7 @@ async def handle_owner_authorized_live_test_confirm(
         owner_receipt=clean_rcpt,
         callsite=callsite,
         caller_role="bot",
+        provenance="REGISTERED_CALLBACK_VALIDATION",
     )
 
     video_trace_state.record_owner_live_callback_origin_in_trace(
@@ -109109,6 +109115,7 @@ async def handle_owner_authorized_live_test_confirm(
         callback_ownership_receipt=cb_receipt,
         validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
         validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+        callback_provenance="REGISTERED_CALLBACK_VALIDATION",
     )
 
     mint_auth = issue_bot_mint_authority(
