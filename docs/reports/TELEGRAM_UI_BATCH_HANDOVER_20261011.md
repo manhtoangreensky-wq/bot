@@ -3,19 +3,26 @@
 ## Latest continuation — 13/10/2026 — S12.35.403/.404
 
 - Integrated full CI #38350432275 and source compile #38350432301 passed for
-  HEAD `ab2eb614`. These runs predate the local S12.35.404 correction and do not
-  verify the current working tree.
+  HEAD `ab2eb614`. Those runs predate S12.35.404. Commit `b3f91bb0` is now
+  pushed to PR #1426; source-compile guard #38353329268 passed and full CI
+  #38353329226 completed SUCCESS on that exact head. Its Product Callback Replay
+  Guard Boundary step passed for the new route regression.
 - S12.35.404 reproduced a missing dedicated registration for the emitted
   `vproduct|owner_live_accept` callback; the generic Video handler otherwise
   caught it. The exact Owner handler now registers before the generic route,
   and the generic pattern excludes Owner live-accept.
 - RED failed because the dedicated route was absent. GREEN: two route/dedupe
-  tests passed in 2.376s; `git diff --check` passed. A new full CI is required.
+  tests passed in 2.376s; `git diff --check` passed. Full CI and source compile
+  passed on exact commit `b3f91bb0`.
 - The existing handler can admit an Owner-authorized paid Product Video test.
   No callback, provider, wallet or production data was used; no engine code
-  changed. The fix remains local to draft PR #1426 and is not live.
+  changed. The fix is on draft PR #1426 and is not live.
 - Remaining ordered A3/A5/A6 route coverage, client A7 timing, protected-main /
   runtime reconciliation and the one-batch delivery gate remain open.
+- S12.35.395 had no product assertion failure, but the Windows SQLite cleanup
+  runner and its pytest retry did not provide a clean result. Four focused local
+  saved-plan tests were added to the existing Linux Small Navigation step. They
+  remain unverified until that new CI run completes.
 
 ## Canonical integration checkpoint — S12.35.403
 

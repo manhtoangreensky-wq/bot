@@ -2,15 +2,19 @@
 
 Status: ACTIVE — do not treat this file or any isolated green test as whole-bot completion.
 
-Latest callback closure candidate (2026-10-13): PR #1426 is still OPEN/DRAFT.
-Full CI run #38350432275 passed on `ab2eb614`, before the latest callback-route
-fix; a new full CI run is required for the current working tree. S12.35.404
+Latest callback closure candidate (2026-10-13): PR #1426 is still OPEN/DRAFT at
+`b3f91bb0`. Source-compile run #38353329268 and full CI #38353329226 both passed
+on that SHA. Earlier full CI #38350432275 passed on `ab2eb614`, before
+the latest callback-route fix. S12.35.404
 reproduced and locally fixed a missing dedicated route for the emitted Product
 Video Owner live-accept button. The fix reaches an existing owner-authorized
 paid-test handler; it has not been dispatched or deployed. Keep the batch and
-goal ACTIVE until the fresh CI, remaining ordered A3/A5/A6 coverage, A7 client
-latency evidence, protected-main/runtime reconciliation and single-batch gates
-are resolved.
+goal ACTIVE until the new S12.35.395 CI selection, remaining ordered A3/A5/A6
+coverage, A7 client latency evidence, protected-main/runtime reconciliation
+and single-batch gates are resolved.
+S12.35.395's route assertions had no product failure, but its Windows runner did
+not return a clean result. Four local saved-plan tests are now selected in the
+Linux CI step; their terminal result is still pending.
 
 Latest delivery (2026-10-11 12:46 +07): PR #1421 is MERGED at `6db4279c…`,
 full PR CI and exact-SHA bot-only deploy #38115714586 succeeded. Strict-host

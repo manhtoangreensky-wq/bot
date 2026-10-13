@@ -7,12 +7,17 @@ Full Linux CI #38350432275 and source compile #38350432301 passed on HEAD
 registration was reproduced for the emitted Product Video
 `vproduct|owner_live_accept` button. The exact owner handler route is now added
 ahead of the generic Video route and excluded from the generic pattern. RED was
-confirmed; route/dedupe tests now pass (`2 tests in 2.376s`). A fresh full CI
-and source-compile run is required because the successful run predates this fix.
+confirmed; route/dedupe tests now pass (`2 tests in 2.376s`). Source-compile
+guard #38353329268 and full CI #38353329226 both passed on exact commit
+`b3f91bb0e8b7a74fdc9d7255617624f384b2135b`, including its `Product Callback
+Replay Guard Boundary` step. S12.35.395's four saved-plan SQLite tests were
+added to the existing Linux Small Navigation step because local Windows pytest
+did not return a result; that CI selection is pending push/run.
 
 The existing handler can admit an Owner-authorized paid Product Video test.
 No callback or Telegram event was dispatched and no job, invoice, provider,
-wallet or production data was used. This local route fix is not live. Other A3/
+wallet or production data was used. The route fix is pushed to draft PR #1426,
+not merged or live. Other A3/
 A5/A6 visual/dynamic route coverage, A7 latency, protected-source/runtime
 reconciliation and the one-batch delivery gate remain open.
 

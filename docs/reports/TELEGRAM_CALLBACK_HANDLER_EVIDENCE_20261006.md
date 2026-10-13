@@ -1441,6 +1441,35 @@ stalled locally. Full `bot.py` compile currently has a no-result local process
 pending, so no full-source or CI pass is claimed. Fixture-only; no production
 Ticket, payment, wallet, provider, engine, AutoPost or Telegram action occurred.
 
+### S12.35.404 — Product Video Owner live-accept callback registration
+
+The current-main keyboard emitted `vproduct|owner_live_accept` or the same
+callback with a 12-character lowercase-hex receipt token. The route map expected
+`handle_product_video_owner_live_accept_callback`, but lifespan registered only
+the generic Product Video route. RED: the exact dedicated route regression
+failed because that registration was absent. The narrow fix registers the
+existing handler with an anchored token pattern before the generic handler and
+excludes this action from the generic pattern. GREEN: focused route/dedupe tests
+passed (2 tests); source compile #38353329268 and full CI #38353329226 both
+passed on exact commit `b3f91bb0e8b7a74fdc9d7255617624f384b2135b`, including the
+Product Callback Replay Guard Boundary step. The handler can admit an
+Owner-authorized paid Product Video test; no callback was dispatched and no
+invoice, job, provider, wallet, or production data was touched. This closes only
+the callback registration defect; PR #1426 is still OPEN/DRAFT and not deployed.
+
+### S12.35.395 — Local Video Studio saved-plan navigation/CRUD fixture result
+
+The actual Local Video Studio saved-plan `lvs27b` callback registration, entry,
+list, detail, Back, edit, confirmed delete, owner/chat isolation, delete-failure
+recovery, and optimistic-version fixtures returned without product assertions
+failing. The original direct runner exited 1 during Windows temporary SQLite
+cleanup, so it is not counted as a clean test PASS. A focused pytest retry stayed
+silent for more than four minutes and was interrupted; record it as
+NOT_VERIFIED. The four local SQLite-backed saved-plan tests have been selected
+in the existing Linux Small Navigation CI step; that result is pending push/CI.
+No video generation/render/provider, payment, wallet, production DB, Telegram,
+or protected engine action was used.
+
 ### S12.35.400 — Manual top-up foreign-owner ACK count
 
 Ten customer controls emitted by the real manual top-up and PayOS-recovery
