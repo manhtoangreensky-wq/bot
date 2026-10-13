@@ -6233,11 +6233,31 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   pending cleanup with the callback's `session_id`. The regression asserts one
   alert/no edit, removal of the expired session and matching marker, plus
   preservation of a newer active session/marker on a stale replay.
-- Local GREEN: `1 passed in 2.14s`; test-module `py_compile` and `git diff --check`
-  exited `0`. The current full-source/CI verification is pending; the prior
-  successful run predates this fix. The test is added to the Linux navigation
-  CI selector.
+- Local GREEN recorded before this turn: `1 passed in 2.14s`; test-module
+  `py_compile` and `git diff --check` exited `0`. Exact-head full CI
+  `38373784079` and source-compile guard `38373781737` both passed on
+  `8f2fa21c8cb948241759fd54364177ab940ee109`; full CI ran the changed Linux
+  navigation selector. Current Windows bundled Python has no `pytest`, and
+  `py_compile bot.py` did not return within 120 seconds; those local attempts
+  are not counted as passes.
 - Fixture only: no production plan DB, video/job/render, provider, wallet,
   AutoPost, stable engine, Telegram, merge, deploy or restart. Lock the fix after
-  the current exact-head CI gate; keep the rest of A3/A5/A6/A7 and one-batch
-  release open.
+  the exact-head CI gate; S12.35.406 is now locked. Keep the rest of A3/A5/A6/A7,
+  current-main/runtime reconciliation, and one-batch release open. PR #1426 is
+  still OPEN/DRAFT and conflicts with updated main; no merge/deploy occurred.
+
+### A7 read-only recheck — 2026-10-13
+
+- GitHub main and VPS `/opt/toanaas/bot` both read as `8c056a37b5a3a3310232702bf44279bac48c1498`; `toanaas-bot.service` is active/running with `NRestarts=0`. The generic timing logger source is present in runtime `bot.py`.
+- One strict-host 24-hour anonymous aggregate across `callback_dispatch_timing` route families returned `matching_events=0`. A separate approved phase aggregate for `menu|main` and `menu|main_video` returned `callback_latency_events=0`, `malformed_matching_events=0`. No raw logs were returned.
+- Owner reports the latest Account Back, Video menu/Back, and Bảng giá screens each appeared in under 1 second; two reports lacked exact click timestamps. The empty windows do not correlate these taps or prove all buttons are smooth.
+- No new bot-side latency defect was reproduced. The historical single 5,678.657ms awaited-edit sample remains a one-off whose cause below the Telegram edit boundary is unknown. Do not infer network/device failure or hardware purchase. A7 remains partial and ordered last, after A3/A5/A6 route coverage.
+- Current main equals runtime, but relative to PR #1426's base `e2b48f21`, main adds `bot.py`, provider-spend-guard, Video provider-router, Video trace-state, and spend-guard test changes. These are protected deltas; PR #1426 currently conflicts. No rebase, merge, deploy, or restart was run.
+
+### S12.35.407 — Admin report route/source recheck
+
+- Contract: recheck the read-only registered Admin month/year and standard quick-report commands, correct period/range forwarding, public denial before report reads, missing-provider-log wording, and fixture aggregation. No production report query, payment/wallet, provider, chart/file generation, or send.
+- Verification: bundled Python `-m unittest -v tests.test_admin_report_source_availability` → `Ran 4 tests in 4.599s — OK`. The four cases cover registered month/year render and pre-read denial, quick-command period/range mapping, missing provider-log behavior, and fixture aggregation.
+- No Admin report defect was reproduced in this bounded slice. Exact-head full CI `38373784079` also passed the selected Admin Finance action renderer suite, Admin Overview callback suite, and report-source suite; the source-compile guard passed separately.
+- Fixture/source only; no production data or financial/provider side effects. This does not validate every Admin operational action or production report accuracy.
+- Next: continue ordered A3/A5/A6 review; A7 remains the final audit section. Current main/runtime equality is a read-only snapshot, not permission to merge/deploy; preserve the protected provider/Video delta until final reconciliation.

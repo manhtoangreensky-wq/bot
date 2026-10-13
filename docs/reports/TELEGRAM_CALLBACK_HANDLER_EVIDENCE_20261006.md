@@ -1611,9 +1611,41 @@ fixture reproduced the leftover marker. The stale-session branch now calls the
 existing session-ID-guarded cleanup; the regression also proves a newer session
 and its pending marker survive replay of the old button. Local result:
 `1 passed in 2.14s`; test-file compile and `git diff --check` exit `0`. The
-explicit Linux CI selection is updated; full CI for this change is pending.
+explicit Linux CI selection is updated. Exact-head full CI run
+`38373784079` and source-compile guard `38373781737` both passed on
+`8f2fa21c8cb948241759fd54364177ab940ee109`; the full CI included the Small
+Navigation/UI Closure regression selector. On the current Windows runtime,
+pytest is unavailable and full-source `py_compile` did not return within 120
+seconds, so those local attempts are not counted as passes.
 No production plan DB, video job/render, provider, wallet, AutoPost, or stable
 Product/Edit/SubDub/Voice/Music engine was used.
+
+### S12.35.407 — Admin report command/read-only source recheck
+
+Fresh fixture-only recheck on the current audit branch:
+`python -m unittest -v tests.test_admin_report_source_availability` returned
+`Ran 4 tests in 4.599s — OK`. The suite exercises registered month/year report
+commands and denial before reads, standard report period/range forwarding,
+missing-provider-log handling, and fixture aggregation. No production report
+data, payment/wallet action, provider call, generated file/chart or Telegram
+send was used. No defect was reproduced in this bounded report slice; it does
+not validate every Admin action or real report data. Exact-head full CI
+`38373784079` also passed the selected Admin Finance action renderer suite,
+Admin Overview callback suite, and this report-source module.
+
+### A7 — read-only callback timing recheck — 2026-10-13
+
+Current GitHub main and VPS bot runtime both read as
+`8c056a37b5a3a3310232702bf44279bac48c1498`; bot service is active/running with
+`NRestarts=0`, and the generic timing logger source is present. The sanitized
+24-hour all-family `callback_dispatch_timing` aggregate returned 0 matching
+events. The separate `menu|main`/`menu|main_video` phase aggregate returned 0
+events and 0 malformed matches. Owner-reported Account Back, Video menu/Back,
+and Bảng giá screens were under 1 second, but not all taps had exact timestamps.
+No persistent current server-side delay was reproduced; the prior single
+5,678.657ms awaited Telegram edit remains unexplained below that API boundary.
+A7 remains partial; the empty window does not prove all-button smoothness or
+identify a network/device cause.
 
 ### S12.35.385 — Admin Ticket status values fail closed
 

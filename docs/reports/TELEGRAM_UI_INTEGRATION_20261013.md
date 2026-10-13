@@ -4,9 +4,22 @@
 
 S12.35.406 fixes a stale local-planner input marker after an emitted callback
 targets an expired session. The change is one existing-helper call guarded by
-the callback's session ID; the new focused regression passes locally and is in
-the Linux navigation CI selection. Current PR CI for this source change remains
-pending; no merge/deploy or engine/provider path was used.
+the callback's session ID; the regression asserts a newer session marker stays
+intact. Full CI #38373784079 and source-compile guard #38373781737 passed on exact
+head `8f2fa21c8cb948241759fd54364177ab940ee109`, including the Linux navigation
+selector. Current Windows-local pytest is unavailable and full-source compile
+did not return within 120 seconds; only the exact-head GitHub runs count for
+whole-source verification. PR #1426 remains OPEN/DRAFT and conflicts with updated
+main; no merge/deploy or engine/provider path was used.
+
+S12.35.407 freshly rechecked the registered Admin report fixture suite:
+`Ran 4 tests in 4.599s — OK`, with no report-route defect reproduced in that
+bounded slice. Exact-head full CI also passed Admin Finance action renderers,
+Admin Overview callback, and report-source tests. Read-only runtime/main both equal `8c056a37`; the 24-hour
+callback timing aggregates returned no events, so A7 remains partial (not a
+claim that every button is measured). PR #1426 remains open/draft and conflicts
+with current main's protected provider/Video delta; the one-batch release gate
+is still open.
 
 Full Linux CI #38350432275 and source compile #38350432301 passed on HEAD
 `ab2eb614f6473d2a9e93af008bb7a5faedb9ee0a`. After that CI, a missing dedicated

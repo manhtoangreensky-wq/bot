@@ -23,12 +23,15 @@ current_spec_contract: >-
   Lock after the focused emitted-callback fixture passes; batch CI remains a
   separate gate.
 next_action: >-
-  S12.35.395's exact four saved-plan regression cases passed in full CI
-  38368052822 on PR head 619e9a0f. S12.35.406 has focused RED/GREEN locally;
-  update its evidence and include its regression in CI, then continue the next
-  still-open ordered Admin/customer spec without reopening a locked issue.
-  Keep remaining A3/A5/A6 dynamic/manual coverage, A7 latency, exact-main/runtime
-  reconciliation and one-batch release gates open; do not merge/deploy.
+  S12.35.406 is locked on exact head 8f2fa21c after full CI 38373784079 and
+  source compile guard 38373781737 passed. S12.35.407 freshly rechecked the
+  Admin report fixture suite (4 tests passed, no code change). Continue the next
+  still-open ordered A3/A5/A6 Admin/customer spec without reopening locked
+  issues; A7 stays last and partial because current read-only windows are empty
+  and Owner-timed route durations are not all click-correlated. Current GitHub
+  main equals runtime at 8c056a37, but adds protected provider/video files over
+  this PR's base; PR #1426 is OPEN/DRAFT and conflicting. Do not merge/deploy.
+  Keep whole-goal coverage and one-batch release gates open.
 latest_spec_result_S12_35_387: >-
   The actual emitted `memory|delete_yes|445|fixture-delete-token` matched the
   exact registered `^memory\|` handler. A shared in-memory fixture seam proved
@@ -11695,7 +11698,7 @@ S12_35_405_owner_live_accept_receipt_binding:
     All remaining whole-goal, A7 and one-batch release gates remain open.
 
 S12_35_406_expired_planner_callback_pending_cleanup:
-  status: focused_regression_green_local_ci_pending
+  status: locked_exact_head_ci_pass
   pr: https://github.com/manhtoangreensky-wq/bot/pull/1426
   contract: >-
     When a callback emitted for an expired Option C Video Studio session is
@@ -11717,13 +11720,77 @@ S12_35_406_expired_planner_callback_pending_cleanup:
     Focused pytest after the fix: `1 passed in 2.14s`; it asserts one alert, no
     screen edit, stale-session removal, matching-marker cleanup, and preservation
     of a newer session/marker on stale replay. Test-file py_compile and
-    `git diff --check` exited 0. Whole `bot.py` compile/current PR CI are pending;
-    the preceding successful CI run predates this fix. The explicit CI selector
-    now includes this regression.
+    `git diff --check` exited 0 in the preceding local work. Exact-head full CI
+    run 38373784079 and source-compile guard 38373781737 both completed SUCCESS
+    on `8f2fa21c8cb948241759fd54364177ab940ee109`; full CI includes the changed
+    Small Navigation selector. The current Windows runtime has no pytest and its
+    `py_compile bot.py` attempt did not return within 120 seconds, so neither is
+    counted as a current local pass.
   safety: >-
     Local source-extracted handler and in-memory session state only. No database
     connection, production data, video render/job, provider, AutoPost, stable
     Product/Edit/SubDub/Voice/Music engine, GitHub write, merge, deploy or restart.
   delivery: >-
-    Local WIP only pending current exact-head CI. Keep draft PR #1426 unmerged
-    and runtime untouched; lock at the release gate after current CI passes.
+    Commit `8f2fa21c8cb948241759fd54364177ab940ee109` is pushed to draft PR #1426;
+    exact-head full CI and source-compile guard passed and this code defect is
+    locked. PR remains OPEN/DRAFT and currently conflicts with updated main.
+    No merge/deploy/restart; whole-goal, latency, current-main/runtime and
+    one-batch release gates remain open.
+
+S12_35_407_admin_report_source_routes_recheck:
+  status: focused_unittest_pass_no_product_defect_reproduced
+  contract: >-
+    Recheck the registered read-only Admin month/year and standard quick-report
+    command routes, period/range mapping, public-user denial before report reads,
+    missing-provider-log wording, and fixture aggregation. No production report
+    query, payment/wallet action, provider call, chart/file generation, or send.
+  verification: >-
+    `python -m unittest -v tests.test_admin_report_source_availability` exited 0:
+    Ran 4 tests in 4.599s — OK. The four passing cases cover registered month/
+    year route render and pre-read denial, quick-command period/range mapping,
+    missing provider-log handling, and period fixture aggregation. No product
+    defect was reproduced in this bounded report slice. Full CI run 38373784079
+    on exact SHA 8f2fa21c also passed the Admin Route Regressions suite
+    (including `test_admin_finance_action_renderers.py`) and the
+    Small Navigation/UI Closure suite (including
+    `test_admin_overview_callback.py` and this report-source module).
+  safety: >-
+    Fixture/source-only reads. No production data, provider, wallet/payment,
+    Telegram send, engine path, merge, deploy or restart.
+  limits: >-
+    Verifies these read-only report routes and fixture behavior only; does not
+    validate every Admin operation or production report data correctness.
+
+S12_35_396_current_main_runtime_latency_recheck_20261013:
+  status: read_only_main_runtime_match_empty_latency_window
+  contract: >-
+    Read current GitHub main and VPS bot SHA/service state; aggregate only
+    anonymous callback_dispatch_timing families and the approved menu|main and
+    menu|main_video callback_latency phases for the preceding 24 hours. Return
+    counts/averages/maxima only; no raw logs or runtime mutation.
+  result: >-
+    GitHub main and VPS runtime both equal
+    8c056a37b5a3a3310232702bf44279bac48c1498. The runtime commit is #1427;
+    toanaas-bot.service is active/running with NRestarts=0. The all-family
+    callback_dispatch_timing aggregate returned matching_events=0. The separate
+    menu phase aggregate returned callback_latency_events=0 and
+    malformed_matching_events=0. Logger source is present in runtime bot.py.
+    Owner-reported latest Account Back, Video menu/Back, and Bảng giá displays
+    were each under 1 second, without exact timestamps for all taps.
+  limits: >-
+    Empty log windows do not prove no clicks, logger failure, or smoothness for
+    all buttons. No fresh latency defect was reproduced; the historical single
+    5,678.657ms awaited-edit sample remains unlocalized below the Telegram edit
+    boundary. A7 remains partial and ordered last; do not infer a network/device
+    cause or hardware need.
+  reconciliation: >-
+    Relative to PR #1426 recorded base e2b48f215f30a088156a1e29c1f402170274dcf0,
+    current main adds bot.py, services/provider_spend_guard.py,
+    services/video_provider_router.py, services/video_trace_state.py, and
+    tests/test_p0_paid_spend_guard_and_bot_origin.py. The provider/video delta is
+    protected and is why PR #1426 currently conflicts. Main already equals VPS;
+    do not rebase/merge/deploy until final ordered checklist and protected-source
+    comparison.
+  safety: >-
+    Read-only GitHub API and strict-host SSH; no raw logs, identities, payloads,
+    DB/data writes, provider, wallet, Telegram send, deploy or restart.
