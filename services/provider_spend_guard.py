@@ -398,7 +398,63 @@ WRONG_REQUEST_OWNER_LIVE_BUTTON: str = "HIDDEN"
 CALLER_ENTRYPOINT_AUTHORITY: str = "NO"
 CALLER_BOT_ORIGIN_BOOL_AUTHORITY: str = "NO"
 CALLER_USER_FLOW_AUTHORITY: str = "NO"
-# ─── END N21AC / N21AD INVARIANT CONSTANTS ──────────────────────────────────
+
+# N21AE explicit additions
+CALLBACK_OWNERSHIP_BOOL_AUTHORITY: str = "NO"
+DURABLE_CALLBACK_VALIDATION_SOURCE: str = "services.video_trace_state:record_owner_live_callback_origin_in_trace"
+OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP: str = "PASS"
+BOT_EVENT_EXISTED_BEFORE_MINT: str = "YES"
+BOT_MINT_CLAIM_IS_CONSUMPTION_NOT_ORIGIN_CREATION: str = "YES"
+PAID_LIVE_AVAILABILITY_GATE_ENFORCED: str = "YES"
+OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE: str = "YES"
+MISSING_USER_OWNER_LIVE_BUTTON: str = "HIDDEN"
+CALLER_VALIDATION_STRINGS_AUTHORITY: str = "NO"
+BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN: str = "owner_live_issuance_authority_not_proven"
+# ─── END N21AC / N21AD / N21AE INVARIANT CONSTANTS ──────────────────────────
+
+
+def validate_owner_live_button_eligibility(
+    owner_receipt: str,
+    *,
+    job_id: str | int = 0,
+    request_id: str = "",
+    user_id: str | int = "",
+    chat_id: str | int = "",
+    db_path: str | None = None,
+    env: dict[str, str] | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id or clean_user_id in {"0", "None"}:
+        return False, "owner_live_user_id_required", {}
+
+    valid, blocker, auth_data = validate_canonical_owner_live_authorization(
+        owner_receipt,
+        product_family="Product Video",
+        job_id=str(job_id) if job_id else "",
+        request_id=str(request_id) if request_id else "",
+        user_id=clean_user_id,
+        db_path=db_path,
+        env=env,
+        conn=conn,
+    )
+    if not valid:
+        return False, blocker, auth_data
+
+    auth_uid = str((auth_data or {}).get("user_id") or "").strip()
+    if not auth_uid or auth_uid in {"0", "None"}:
+        return False, "owner_live_auth_missing_user_id", auth_data
+    if auth_uid != clean_user_id:
+        return False, "owner_live_auth_user_mismatch", auth_data
+
+    clean_chat_id = str(chat_id or "").strip()
+    if clean_chat_id and clean_chat_id not in {"0", "None"}:
+        auth_cid = str((auth_data or {}).get("chat_id") or "").strip()
+        if auth_cid and auth_cid not in {"0", "None"} and auth_cid != clean_chat_id:
+            return False, "owner_live_auth_chat_mismatch", auth_data
+
+    return True, "", auth_data
 
 
 @dataclasses.dataclass(frozen=True)
@@ -845,6 +901,7 @@ def issue_bot_mint_authority(
     validation_source: str = "",
     validation_callsite: str = "",
     validated_ownership: bool = False,
+    callback_ownership_receipt: dict | None = None,
     purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
     owner_receipt: str = "",
     expected_max_provider_spend_usd: float | Decimal = 0.0,
@@ -930,6 +987,11 @@ def issue_bot_mint_authority(
                 "owner_receipt is required when issuing BotMintAuthority with PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST "
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
+
+        # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
+        if PAID_LIVE_TEST_AVAILABLE != "YES" and _caller_override_for_test != "allow_paid_live_mint_test":
+            raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
+
         try:
             auth_valid, auth_blocker, auth_data = validate_owner_live_authorization(
                 clean_owner_receipt,
@@ -955,7 +1017,8 @@ def issue_bot_mint_authority(
         auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
         actual_expected_max = from_micro_usd(auth_micro) if auth_micro else Decimal("0.0")
 
-        # Claim single-use Bot live mint event
+        # N21AE §3, §4: Pre-existing durable Bot event verification
+        # Query video_request_traces for genuine callback event recorded by registered Bot dispatcher
         should_close = False
         active_conn = conn
         if active_conn is None:
@@ -964,6 +1027,127 @@ def issue_bot_mint_authority(
         try:
             if not active_conn.in_transaction:
                 active_conn.execute("BEGIN IMMEDIATE")
+            cur = active_conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='video_request_traces'")
+            if cur.fetchone() is None:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(
+                    "Pre-existing durable Bot event table missing "
+                    "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
+                )
+
+            cur.execute(
+                """
+                SELECT request_id, job_id, owner_user_id, owner_chat_id, trace_payload_json
+                FROM video_request_traces
+                WHERE request_id = ? OR request_id = ? OR confirm_attempt_key = ? OR request_id = ?
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (f"COA-{clean_owner_receipt}", clean_owner_receipt, f"COA-{clean_owner_receipt}", f"OAT-{clean_owner_receipt}"),
+            )
+            trace_row = cur.fetchone()
+            if not trace_row:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(
+                    f"Pre-existing durable Bot callback event missing for '{clean_owner_receipt}' "
+                    "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
+                )
+
+            (db_req_id, db_job_id, db_user_id, db_chat_id, db_payload_json) = trace_row
+            try:
+                t_payload = json.loads(db_payload_json or "{}")
+            except Exception:
+                t_payload = {}
+            target_p = t_payload.get("auth") if isinstance(t_payload.get("auth"), dict) else t_payload
+
+            t_update_id = int(t_payload.get("telegram_update_id") or target_p.get("telegram_update_id") or 0)
+            t_cbq_id = str(t_payload.get("callback_query_id") or target_p.get("callback_query_id") or "").strip()
+            t_chat_id = str(t_payload.get("callback_chat_id") or target_p.get("callback_chat_id") or db_chat_id or "").strip()
+            t_user_id = str(t_payload.get("callback_user_id") or target_p.get("callback_user_id") or db_user_id or "").strip()
+            t_job_id = str(t_payload.get("callback_job_id") or target_p.get("callback_job_id") or db_job_id or "").strip()
+            t_req_id = str(t_payload.get("callback_request_id") or target_p.get("callback_request_id") or db_req_id or "").strip()
+            t_action = str(t_payload.get("callback_action") or target_p.get("callback_action") or "").strip()
+            t_mint_st = str(t_payload.get("bot_origin_mint_status") or target_p.get("bot_origin_mint_status") or "").strip().upper()
+            t_own_res = str(t_payload.get("callback_ownership_result") or target_p.get("callback_ownership_result") or "").strip().upper()
+            t_cb_rcpt = t_payload.get("callback_ownership_receipt") or target_p.get("callback_ownership_receipt")
+
+            from services.video_trace_state import verify_canonical_callback_ownership_receipt
+            if (
+                t_update_id <= 0
+                or not t_cbq_id
+                or t_own_res != "VALIDATED"
+                or not verify_canonical_callback_ownership_receipt(
+                    t_cb_rcpt,
+                    telegram_update_id=up_id,
+                    callback_query_id=cbq_id,
+                    chat_id=str(chat_id).strip(),
+                    user_id=str(user_id).strip(),
+                    job_id=j_id,
+                    request_id=r_id,
+                    owner_receipt=clean_owner_receipt,
+                )
+            ):
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(
+                    "Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
+                    "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
+                )
+
+            if callback_ownership_receipt is not None:
+                if not verify_canonical_callback_ownership_receipt(
+                    callback_ownership_receipt,
+                    telegram_update_id=up_id,
+                    callback_query_id=cbq_id,
+                    chat_id=str(chat_id).strip(),
+                    user_id=str(user_id).strip(),
+                    job_id=j_id,
+                    request_id=r_id,
+                    owner_receipt=clean_owner_receipt,
+                ):
+                    if should_close:
+                        active_conn.rollback()
+                    raise PermissionError(
+                        "Caller callback_ownership_receipt invalid or signature verification failed"
+                    )
+
+            if t_mint_st in {"MINTED", "CONSUMED"}:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError("Durable Bot live event already used (BOT_MINT_EVENT_SINGLE_USE=YES)")
+
+            # Match exact identity against pre-existing event
+            if up_id != t_update_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event telegram_update_id mismatch: '{up_id}' != '{t_update_id}'")
+            if cbq_id != t_cbq_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event callback_query_id mismatch: '{cbq_id}' != '{t_cbq_id}'")
+            if str(chat_id).strip() != t_chat_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event chat_id mismatch: '{chat_id}' != '{t_chat_id}'")
+            if str(user_id).strip() != t_user_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event user_id mismatch: '{user_id}' != '{t_user_id}'")
+            if j_id != t_job_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event job_id mismatch: '{j_id}' != '{t_job_id}'")
+            if r_id != t_req_id:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event request_id mismatch: '{r_id}' != '{t_req_id}'")
+            if action and t_action and action != t_action:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Durable Bot event action mismatch: '{action}' != '{t_action}'")
+
             claim_key = f"owner_live:{r_id}:{clean_owner_receipt}"
             try:
                 active_conn.execute(
@@ -996,6 +1180,21 @@ def issue_bot_mint_authority(
                     f"Durable Bot Owner-live event '{claim_key}' already claimed; single-use enforced "
                     "(BOT_MINT_EVENT_SINGLE_USE=YES)"
                 )
+
+            # Mark trace status MINTED
+            t_payload["bot_origin_mint_status"] = "MINTED"
+            if isinstance(t_payload.get("auth"), dict):
+                t_payload["auth"]["bot_origin_mint_status"] = "MINTED"
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            cur.execute(
+                """
+                UPDATE video_request_traces
+                SET trace_payload_json = ?, updated_at = ?
+                WHERE request_id = ?
+                """,
+                (json.dumps(t_payload, ensure_ascii=False, sort_keys=True), now_iso, str(db_req_id)),
+            )
+
             if should_close:
                 active_conn.commit()
         finally:
@@ -2937,6 +3136,17 @@ def reserve_provider_spend(
             owner_auth_slots_count: int = 1
             owner_auth_used_confs: list[str] = []
             if is_durable_paid_live_test:
+                # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
+                if PAID_LIVE_TEST_AVAILABLE != "YES" or OWNER_AUTH_ISSUANCE_SEAM != "PROVEN":
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+                        reason="Owner live authorization issuance authority is not proven; paid live test is unavailable",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
                 # Directive #1422 & Section 17: Proven lineage required for paid live test before transport
                 if str(context.entrypoint or "").strip().lower() != "bot":
                     conn.rollback()

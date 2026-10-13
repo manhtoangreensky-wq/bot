@@ -106560,24 +106560,17 @@ def product_video_public_preflight_panel_keyboard(
     rows = []
     clean_user_id = str(user_id).strip() if str(user_id or "").strip() not in {"", "0", "None"} else ""
     if owner_receipt and job_id and request_id:
-        should_render = False  # N21AC/N21AD §14: OWNER_LIVE_BUTTON_DEFAULT_RENDER=NO (fail-closed)
-        from services.provider_spend_guard import validate_canonical_owner_live_authorization
+        should_render = False  # N21AE: OWNER_LIVE_BUTTON eligibility checked via canonical validator & user binding
+        from services.provider_spend_guard import validate_owner_live_button_eligibility
         try:
-            is_valid, _, auth_data = validate_canonical_owner_live_authorization(
+            is_eligible, _, auth_data = validate_owner_live_button_eligibility(
                 owner_receipt,
-                product_family="Product Video",
                 job_id=str(job_id) if job_id else "",
                 request_id=str(request_id) if request_id else "",
                 user_id=clean_user_id,
                 db_path=db_path,
             )
-            auth_uid = str((auth_data or {}).get("user_id") or "").strip()
-            if auth_uid in {"0", "None"}:
-                auth_uid = ""
-            if auth_uid:
-                should_render = bool(is_valid and clean_user_id and auth_uid == clean_user_id)
-            else:
-                should_render = bool(is_valid)
+            should_render = bool(is_eligible)
         except Exception:
             should_render = False
         if should_render:
@@ -108962,6 +108955,18 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
         )
 
+    # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
+    from services.provider_spend_guard import (
+        PAID_LIVE_TEST_AVAILABLE,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+    )
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
+        )
+
     try:
         plan = await handle_owner_authorized_live_test_confirm(
             update,
@@ -109079,6 +109084,18 @@ async def handle_owner_authorized_live_test_confirm(
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
+    cb_receipt = video_trace_state.create_canonical_callback_ownership_receipt(
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        chat_id=real_chat_id,
+        user_id=real_user_id,
+        job_id=str(job_id),
+        request_id=str(request_id),
+        owner_receipt=clean_rcpt,
+        callsite=callsite,
+        caller_role="bot",
+    )
+
     video_trace_state.record_owner_live_callback_origin_in_trace(
         clean_rcpt,
         telegram_update_id=real_update_id,
@@ -109089,6 +109106,7 @@ async def handle_owner_authorized_live_test_confirm(
         request_id=str(request_id),
         callback_action="create_video_task",
         callback_ownership_validated=True,
+        callback_ownership_receipt=cb_receipt,
         validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
         validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
     )
@@ -109105,6 +109123,7 @@ async def handle_owner_authorized_live_test_confirm(
         validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
         validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
         validated_ownership=True,
+        callback_ownership_receipt=cb_receipt,
         purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         owner_receipt=clean_rcpt,
         expected_max_provider_spend_usd=durable_max_usd,

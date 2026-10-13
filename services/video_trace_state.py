@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import hmac
 import html
 import json
 import logging
@@ -1628,6 +1629,172 @@ def finalize_owner_acceptance_token(
         return False
 
 
+CALLBACK_OWNERSHIP_BOOL_AUTHORITY: str = "NO"
+
+
+def _compute_callback_ownership_signature(payload_dict: dict[str, Any]) -> str:
+    """Deterministic HMAC-SHA256 signature over critical callback receipt fields."""
+    keys = (
+        "receipt_id",
+        "callsite",
+        "caller_role",
+        "telegram_update_id",
+        "callback_query_id",
+        "chat_id",
+        "user_id",
+        "job_id",
+        "request_id",
+        "owner_receipt",
+    )
+    canonical_repr = "|".join(str(payload_dict.get(k, "")).strip() for k in keys)
+    secret = os.environ.get("SESSION_SECRET", "toanaas_callback_ownership_canonical_salt_2026")
+    return hmac.new(secret.encode("utf-8"), canonical_repr.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def create_canonical_callback_ownership_receipt(
+    *,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    owner_receipt: str,
+    callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
+    caller_role: str = "bot",
+) -> dict[str, Any]:
+    """Canonical Bot callback ownership validation receipt issued only by registered Bot dispatcher."""
+    if caller_role in ("generic_service", "worker", "provider", "router", "services"):
+        raise PermissionError(f"Caller role '{caller_role}' cannot create callback ownership receipt")
+    allowed_callsites = (
+        "bot.py:handle_product_video_owner_live_accept_callback",
+        "bot.py:handle_owner_authorized_live_test_confirm",
+    )
+    if callsite not in allowed_callsites:
+        raise PermissionError(f"Unauthorized callback validation callsite '{callsite}'")
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        raise PermissionError("owner_receipt required for callback ownership receipt")
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    if up_id <= 0:
+        raise PermissionError("telegram_update_id > 0 required for callback ownership receipt")
+    cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise PermissionError("Real callback_query_id required for callback ownership receipt")
+    c_chat = str(chat_id or "").strip()
+    c_user = str(user_id or "").strip()
+    c_job = str(job_id or "").strip()
+    c_req = str(request_id or "").strip()
+    if not c_chat or not c_user or not c_job or not c_req:
+        raise PermissionError("Complete chat_id, user_id, job_id, request_id required for callback ownership receipt")
+    receipt_id = f"cbor_{secrets.token_hex(12)}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rcpt = {
+        "ok": True,
+        "receipt_id": receipt_id,
+        "status": "VALIDATED",
+        "validator": "services.video_trace_state:create_canonical_callback_ownership_receipt",
+        "callsite": callsite,
+        "caller_role": caller_role,
+        "telegram_update_id": up_id,
+        "callback_query_id": cbq_id,
+        "chat_id": c_chat,
+        "user_id": c_user,
+        "job_id": c_job,
+        "request_id": c_req,
+        "owner_receipt": clean_rcpt,
+        "created_at": now_iso,
+        "validated_at": now_iso,
+    }
+    rcpt["signature"] = _compute_callback_ownership_signature(rcpt)
+    return rcpt
+
+
+def verify_canonical_callback_ownership_receipt(
+    receipt: dict[str, Any] | None,
+    *,
+    telegram_update_id: int | str | None = None,
+    callback_query_id: str | None = None,
+    chat_id: int | str | None = None,
+    user_id: int | str | None = None,
+    job_id: int | str | None = None,
+    request_id: str | None = None,
+    owner_receipt: str | None = None,
+) -> bool:
+    """Empirically verify authentic HMAC signature and contextual identities of a callback ownership receipt."""
+    if not isinstance(receipt, dict):
+        return False
+    if receipt.get("status") != "VALIDATED" or not receipt.get("ok"):
+        return False
+    sig = receipt.get("signature")
+    if not sig or not isinstance(sig, str):
+        return False
+    expected_sig = _compute_callback_ownership_signature(receipt)
+    if not hmac.compare_digest(sig, expected_sig):
+        return False
+    if telegram_update_id is not None:
+        try:
+            if int(receipt.get("telegram_update_id") or 0) != int(telegram_update_id or 0):
+                return False
+        except Exception:
+            return False
+    if callback_query_id is not None and str(receipt.get("callback_query_id") or "").strip() != str(callback_query_id).strip():
+        return False
+    if chat_id is not None and str(receipt.get("chat_id") or "").strip() != str(chat_id).strip():
+        return False
+    if user_id is not None and str(receipt.get("user_id") or "").strip() != str(user_id).strip():
+        return False
+    if job_id is not None and str(receipt.get("job_id") or "").strip() != str(job_id).strip():
+        return False
+    if request_id is not None and str(receipt.get("request_id") or "").strip() != str(request_id).strip():
+        return False
+    if owner_receipt is not None and str(receipt.get("owner_receipt") or "").strip() != str(owner_receipt).strip():
+        return False
+    return True
+
+
+def get_canonical_callback_ownership_receipt(
+    owner_receipt: str,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve verified canonical callback ownership receipt from video_request_traces."""
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt:
+        return None
+    ensure_video_trace_schema(conn, db_path=db_path)
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        cur = c.cursor()
+        cur.execute(
+            """
+            SELECT trace_payload_json
+            FROM video_request_traces
+            WHERE request_id = ? OR request_id = ? OR confirm_attempt_key = ? OR request_id = ?
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (f"COA-{clean_rcpt}", clean_rcpt, f"COA-{clean_rcpt}", f"OAT-{clean_rcpt}"),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        p_obj = json.loads(row["trace_payload_json"] or "{}")
+        target = p_obj.get("auth") if isinstance(p_obj.get("auth"), dict) else p_obj
+        rcpt = p_obj.get("callback_ownership_receipt") or target.get("callback_ownership_receipt")
+        if isinstance(rcpt, dict) and verify_canonical_callback_ownership_receipt(rcpt):
+            return rcpt
+        return None
+    except Exception:
+        return None
+    finally:
+        if should_close:
+            c.close()
+
+
 def record_owner_live_callback_origin_in_trace(
     owner_receipt: str,
     *,
@@ -1638,7 +1805,8 @@ def record_owner_live_callback_origin_in_trace(
     job_id: int | str,
     request_id: str,
     callback_action: str = "create_video_task",
-    callback_ownership_validated: bool = True,
+    callback_ownership_validated: bool = False,
+    callback_ownership_receipt: dict | None = None,
     validation_source: str = "",
     validation_callsite: str = "",
     db_path: str | None = None,
@@ -1666,8 +1834,26 @@ def record_owner_live_callback_origin_in_trace(
         raise PermissionError("Complete chat_id, user_id, job_id, and request_id are required for canonical Bot-origin evidence")
     if c_act not in ("b14_confirm", "create_video_task"):
         raise PermissionError(f"Unsupported callback_action '{c_act}' for canonical Bot-origin evidence")
-    if not callback_ownership_validated:
-        raise PermissionError("callback_ownership_validated=True is required for canonical Bot-origin evidence")
+
+    # N21AE §5: CALLBACK_OWNERSHIP_BOOL_AUTHORITY=NO
+    # Caller boolean alone cannot establish authority. Must provide canonical receipt.
+    if callback_ownership_receipt is None or not isinstance(callback_ownership_receipt, dict):
+        raise PermissionError(
+            "Caller boolean callback_ownership_validated alone cannot establish callback ownership; "
+            "canonical callback ownership receipt from registered Bot dispatcher required "
+            "(CALLBACK_OWNERSHIP_BOOL_AUTHORITY=NO)"
+        )
+    if not verify_canonical_callback_ownership_receipt(
+        callback_ownership_receipt,
+        telegram_update_id=up_id,
+        callback_query_id=cbq_id,
+        chat_id=c_chat,
+        user_id=c_user,
+        job_id=c_job,
+        request_id=c_req,
+        owner_receipt=clean_rcpt,
+    ):
+        raise PermissionError("Callback ownership receipt validation or HMAC signature verification failed")
 
     ensure_video_trace_schema(conn, db_path=db_path)
     c, should_close = get_db_connection(conn, db_path=db_path)
@@ -1758,8 +1944,10 @@ def record_owner_live_callback_origin_in_trace(
             "callback_request_id": c_req,
             "callback_action": c_act,
             "callback_ownership_validated": True,
-            "validation_source": str(validation_source or ""),
-            "validation_callsite": str(validation_callsite or ""),
+            "callback_ownership_result": "VALIDATED",
+            "callback_ownership_receipt": callback_ownership_receipt,
+            "validation_source": str(validation_source or "bot.py:handle_product_video_owner_live_accept_callback"),
+            "validation_callsite": str(validation_callsite or "bot.py:handle_product_video_owner_live_accept_callback"),
             "bot_origin_mint_status": "READY",
             "bot_origin_recorded_at": now_iso,
         }
