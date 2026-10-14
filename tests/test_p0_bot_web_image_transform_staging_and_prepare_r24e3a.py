@@ -1088,3 +1088,361 @@ def test_18_upload_staging_cross_actor_idempotency_isolation():
     resp_consume = client.get(f"/internal/v1/uploads/{upl_a}", headers=headers_consume)
     assert resp_consume.status_code == 403
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 21: FAULT INJECTION, CRASH RECOVERY & ATOMICITY TESTS (R24E3B-FIX2)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_19_crash_after_reservation_before_file_write_recovery():
+    """Section 7: Stable ID reserved, crash before file write -> replay recovers same upload_id."""
+    from services.subdub_upload_staging import (
+        ensure_staged_upload_idempotency_schema,
+        create_staged_upload,
+        get_staging_directory,
+    )
+    actor = "30001"
+    key = "crash-res-key-001"
+    reserved_id = "upl_crash_res_test_001"
+    sha = hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower()
+    now_utc = "2026-10-14 00:00:00"
+
+    # Simulate crash state: row is RESERVED in DB, but no file on disk yet
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)
+        """,
+        (actor, key, reserved_id, sha, "test.png", "image/png", len(SAMPLE_PNG_BYTES), f"{reserved_id}/test.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    dest = get_staging_directory() / reserved_id / "test.png"
+    assert not dest.is_file()
+
+    # Replay request
+    ok, reason, code, data = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="test.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert ok is True
+    assert code == 200
+    assert data["upload_id"] == reserved_id  # SAME upload_id recovered!
+    assert dest.is_file()
+    assert hashlib.sha256(dest.read_bytes()).hexdigest().lower() == sha
+
+    # Verify state transitioned to READY
+    conn = bot.db_connect()
+    row = conn.execute("SELECT state FROM staged_upload_idempotency WHERE upload_id = ?", (reserved_id,)).fetchone()
+    conn.close()
+    assert row[0] == "READY"
+
+
+def test_20_crash_after_file_write_before_ready_commit_recovery():
+    """Section 8: Stable ID reserved, file written, crash before READY commit -> replay recovers same ID."""
+    from services.subdub_upload_staging import (
+        ensure_staged_upload_idempotency_schema,
+        create_staged_upload,
+        get_staging_directory,
+    )
+    actor = "30002"
+    key = "crash-write-key-002"
+    reserved_id = "upl_crash_write_test_002"
+    sha = hashlib.sha256(SAMPLE_JPEG_BYTES).hexdigest().lower()
+    now_utc = "2026-10-14 00:00:00"
+
+    # Simulate: row is RESERVED, file is already written to disk
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)
+        """,
+        (actor, key, reserved_id, sha, "test.jpg", "image/jpeg", len(SAMPLE_JPEG_BYTES), f"{reserved_id}/test.jpg", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    dest = get_staging_directory() / reserved_id / "test.jpg"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(SAMPLE_JPEG_BYTES)
+
+    # Replay request
+    ok, reason, code, data = create_staged_upload(
+        file_bytes=SAMPLE_JPEG_BYTES,
+        file_name="test.jpg",
+        content_type="image/jpeg",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert ok is True
+    assert code == 200
+    assert data["upload_id"] == reserved_id
+
+    # Verify state finalized to READY
+    conn = bot.db_connect()
+    row = conn.execute("SELECT state FROM staged_upload_idempotency WHERE upload_id = ?", (reserved_id,)).fetchone()
+    conn.close()
+    assert row[0] == "READY"
+
+
+def test_21_crash_after_idempotency_commit_before_system_setting_recovery(monkeypatch):
+    """Section 9 & 10: Fault-inject immediately after idempotency commit before system_settings."""
+    from services import subdub_upload_staging
+    from services.subdub_upload_staging import create_staged_upload, get_staged_upload
+
+    # Monkeypatch secondary sync to raise exception
+    monkeypatch.setattr(
+        subdub_upload_staging,
+        "_sync_legacy_system_settings",
+        lambda record: (_ for _ in ()).throw(RuntimeError("SIMULATED_SYSTEM_SETTING_CRASH")),
+    )
+
+    actor = "30003"
+    key = "crash-sys-key-003"
+    ok, reason, code, data = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="canvas.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert ok is True
+    assert code == 200
+    upload_id = data["upload_id"]
+
+    # Canonical SQLite state is READY
+    conn = bot.db_connect()
+    row = conn.execute("SELECT state FROM staged_upload_idempotency WHERE upload_id = ?", (upload_id,)).fetchone()
+    conn.close()
+    assert row[0] == "READY"
+
+    # get_staged_upload succeeds even though system_settings was not populated
+    ok_get, reason_get, code_get, record_get = get_staged_upload(upload_id, actor_id=actor)
+    assert ok_get is True
+    assert code_get == 200
+    assert record_get["upload_id"] == upload_id
+    assert record_get["owner_id"] == actor
+
+
+def test_22_set_system_setting_throws_non_fatal():
+    """Section 10: Legacy system_settings is secondary; set_system_setting error does not fail upload."""
+    from services.subdub_upload_staging import create_staged_upload
+
+    def broken_set(*args, **kwargs):
+        raise RuntimeError("DISK_LOCKED_SYSTEM_SETTINGS")
+
+    import bot
+    orig_set = bot.set_system_setting
+    try:
+        bot.set_system_setting = broken_set
+        actor = "30004"
+        key = "broken-set-key-004"
+        ok, reason, code, data = create_staged_upload(
+            file_bytes=SAMPLE_WEBP_BYTES,
+            file_name="card.webp",
+            content_type="image/webp",
+            actor_id=actor,
+            idempotency_key=key,
+        )
+        assert ok is True
+        assert code == 200
+        assert data["upload_id"].startswith("upl_")
+    finally:
+        bot.set_system_setting = orig_set
+
+
+def test_23_canonical_ready_exists_compatibility_absent_get_passes():
+    """Section 18: get_staged_upload works for recovered READY row even without system_setting."""
+    from services.subdub_upload_staging import (
+        ensure_staged_upload_idempotency_schema,
+        get_staged_upload,
+        get_staging_directory,
+    )
+    actor = "30005"
+    key = "ready-no-sys-key-005"
+    upload_id = "upl_ready_no_sys_005"
+    sha = hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower()
+    now_utc = "2026-10-14 00:00:00"
+
+    dest = get_staging_directory() / upload_id / "pic.png"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(SAMPLE_PNG_BYTES)
+
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)
+        """,
+        (actor, key, upload_id, sha, "pic.png", "image/png", len(SAMPLE_PNG_BYTES), f"{upload_id}/pic.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    ok, reason, code, record = get_staged_upload(upload_id, actor_id=actor)
+    assert ok is True
+    assert code == 200
+    assert record["upload_id"] == upload_id
+    assert record["sha256"] == sha
+
+
+def test_24_concurrent_exact_replay_single_upload_id():
+    """Section 12: Concurrent attempts with same key + content yield exactly ONE upload_id and file."""
+    import concurrent.futures
+    from services.subdub_upload_staging import create_staged_upload, get_staging_directory
+
+    actor = "30006"
+    key = "concurrent-exact-key-006"
+
+    def do_upload():
+        return create_staged_upload(
+            file_bytes=SAMPLE_PNG_BYTES,
+            file_name="avatar.png",
+            content_type="image/png",
+            actor_id=actor,
+            idempotency_key=key,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(do_upload) for _ in range(4)]
+        results = [f.result() for f in futures]
+
+    upload_ids = set()
+    for ok, reason, code, data in results:
+        assert ok is True
+        assert code == 200
+        upload_ids.add(data["upload_id"])
+
+    # Exactly 1 unique upload_id
+    assert len(upload_ids) == 1
+    single_upload_id = list(upload_ids)[0]
+
+    # Exactly 1 directory on disk
+    dest_dir = get_staging_directory() / single_upload_id
+    assert dest_dir.is_dir()
+    files = list(dest_dir.glob("*"))
+    assert len(files) == 1
+
+
+def test_25_concurrent_mismatched_payload_conflict():
+    """Section 13: Concurrent mismatch on same idempotency key -> exactly one wins, other 409 conflict."""
+    import concurrent.futures
+    from services.subdub_upload_staging import create_staged_upload
+
+    actor = "30007"
+    key = "concurrent-mismatch-key-007"
+
+    def upload_png():
+        return create_staged_upload(
+            file_bytes=SAMPLE_PNG_BYTES,
+            file_name="one.png",
+            content_type="image/png",
+            actor_id=actor,
+            idempotency_key=key,
+        )
+
+    def upload_jpg():
+        return create_staged_upload(
+            file_bytes=SAMPLE_JPEG_BYTES,
+            file_name="two.jpg",
+            content_type="image/jpeg",
+            actor_id=actor,
+            idempotency_key=key,
+        )
+
+    # First upload establishes canonical tuple
+    res1 = upload_png()
+    assert res1[0] is True
+    assert res1[2] == 200
+
+    # Second upload with different payload on same key fails with 409
+    res2 = upload_jpg()
+    assert res2[0] is False
+    assert res2[2] == 409
+    assert res2[1] == "IDEMPOTENCY_CONFLICT"
+
+
+def test_26_replay_cannot_create_second_physical_directory():
+    """Section 8 & 9: Multiple exact replays do not create duplicate physical staging directories."""
+    from services.subdub_upload_staging import create_staged_upload, get_staging_directory
+
+    actor = "30008"
+    key = "no-dup-dir-key-008"
+    initial_dirs = set(p.name for p in get_staging_directory().glob("upl_*"))
+
+    res1 = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="solo.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res1[0] is True
+    uid1 = res1[3]["upload_id"]
+
+    for _ in range(5):
+        res_n = create_staged_upload(
+            file_bytes=SAMPLE_PNG_BYTES,
+            file_name="solo.png",
+            content_type="image/png",
+            actor_id=actor,
+            idempotency_key=key,
+        )
+        assert res_n[0] is True
+        assert res_n[3]["upload_id"] == uid1
+
+    after_dirs = set(p.name for p in get_staging_directory().glob("upl_*"))
+    new_dirs = after_dirs - initial_dirs
+    assert len(new_dirs) == 1
+    assert uid1 in new_dirs
+
+
+def test_27_header_and_body_idempotency_key_mismatch_blocks():
+    """Section 16: When both header and body idempotency keys are supplied but differ -> 400 IDEMPOTENCY_KEY_MISMATCH."""
+    client = TestClient(bot.fastapi_app)
+    actor = "30009"
+    payload = {
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "content_base64": base64.b64encode(SAMPLE_PNG_BYTES).decode("ascii"),
+        "idempotency_key": "body-key-AAA",
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", raw, actor_id=actor)
+    headers["Idempotency-Key"] = "header-key-BBB"
+
+    resp = client.post("/internal/v1/uploads", content=raw, headers=headers)
+    assert resp.status_code == 400
+    assert resp.json()["error_code"] == "IDEMPOTENCY_KEY_MISMATCH"
+
+
+def test_28_header_and_body_idempotency_key_match_passes():
+    """Section 16: When both header and body idempotency keys match -> 200 OK."""
+    client = TestClient(bot.fastapi_app)
+    actor = "30010"
+    payload = {
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "content_base64": base64.b64encode(SAMPLE_PNG_BYTES).decode("ascii"),
+        "idempotency_key": "shared-key-CCC",
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/uploads", raw, actor_id=actor)
+    headers["Idempotency-Key"] = "shared-key-CCC"
+
+    resp = client.post("/internal/v1/uploads", content=raw, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["upload_id"].startswith("upl_")
+

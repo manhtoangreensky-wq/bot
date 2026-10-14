@@ -283309,7 +283309,8 @@ async def api_internal_subdub_upload_create(request: Request):
     file_bytes = b""
     file_name = "media.bin"
     detected_mime = "application/octet-stream"
-    idempotency_key = str(request.headers.get("idempotency-key") or request.headers.get("x-idempotency-key") or "").strip()
+    header_idemp = str(request.headers.get("idempotency-key") or request.headers.get("x-idempotency-key") or "").strip()
+    idempotency_key = header_idemp
     client_meta = {}
 
     if "application/json" in content_type_header:
@@ -283337,7 +283338,13 @@ async def api_internal_subdub_upload_create(request: Request):
 
         file_name = str(data.get("file_name") or data.get("name") or "media.bin").strip()
         detected_mime = str(data.get("content_type") or data.get("mime_type") or "application/octet-stream").strip()
-        idempotency_key = str(data.get("idempotency_key") or idempotency_key).strip()
+        body_idemp = str(data.get("idempotency_key") or "").strip()
+        if header_idemp and body_idemp and header_idemp != body_idemp:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error_code": "IDEMPOTENCY_KEY_MISMATCH", "message": "Header idempotency key does not match body idempotency key"},
+            )
+        idempotency_key = body_idemp or header_idemp
 
         b64_content = data.get("content_base64")
         if b64_content is not None:
