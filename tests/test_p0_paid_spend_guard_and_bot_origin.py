@@ -644,7 +644,7 @@ def create_test_callback_ownership_receipt(
     owner_receipt: str = "",
     callsite: str = "bot.py:handle_owner_authorized_live_test_confirm",
     caller_role: str = "bot",
-    provenance: str = "REGISTERED_CALLBACK_VALIDATION",
+    provenance: str = "TEST_ONLY",
 ) -> dict[str, Any]:
     """Test-only fixture helper to construct callback ownership receipts for unit testing."""
     from services.video_trace_state import _compute_callback_ownership_signature
@@ -11205,6 +11205,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_108",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11312,6 +11313,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_110",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
         )
         record_owner_live_callback_origin_in_trace(
             tid,

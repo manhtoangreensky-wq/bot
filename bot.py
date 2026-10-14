@@ -108919,16 +108919,17 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
     ):
         return
 
-    # N21AG §11: Immediate universal fail-closed while PAID_LIVE_TEST_AVAILABLE=NO (LIVE_DISABLED_SIDE_EFFECTS_BEFORE_BLOCK=0)
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
     from services.provider_spend_guard import (
-        PAID_LIVE_TEST_AVAILABLE,
+        evaluate_paid_live_test_availability,
         BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
     )
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability()
+    if not is_avail:
         await query.answer()
         return await safe_edit_or_send(
             query,
-            f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
         )
 
     # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
@@ -108973,6 +108974,30 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
         )
 
+    # Section 4: Durable registered dispatch event is primary authority
+    from services import video_trace_state
+    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    try:
+        cb_event = video_trace_state.register_registered_callback_dispatch_event(
+            telegram_update_id=real_update_id,
+            callback_query_id=real_cbq_id,
+            user_id=user_id,
+            chat_id=real_chat_id,
+            job_id=job_id,
+            project_id=job_id,
+            request_id=request_id,
+            callback_action="create_video_task",
+            product_type="Product Video",
+            owner_receipt=owner_receipt,
+        )
+    except Exception as reg_exc:
+        await query.answer()
+        logger.error("Failed to register durable callback dispatch event: %s", reg_exc)
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {reg_exc}",
+        )
+
     try:
         plan = await handle_owner_authorized_live_test_confirm(
             update,
@@ -108981,6 +109006,7 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             job_id=job_id,
             request_id=request_id,
             scene_count=scene_count,
+            callback_event=cb_event,
             callsite="bot.py:handle_product_video_owner_live_accept_callback",
         )
     except PermissionError as pe:
@@ -109041,6 +109067,7 @@ async def handle_owner_authorized_live_test_confirm(
     request_id: str,
     scene_count: int = 1,
     expected_max_usd: float | Decimal = 0.0,
+    callback_event: dict[str, Any] | None = None,
     callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
 ) -> dict[str, Any]:
     """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z, N21AA).
@@ -109050,7 +109077,7 @@ async def handle_owner_authorized_live_test_confirm(
     """
     from decimal import Decimal
     from services.provider_spend_guard import (
-        PAID_LIVE_TEST_AVAILABLE,
+        evaluate_paid_live_test_availability,
         BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
         issue_bot_mint_authority,
         mint_multiscene_bot_confirmation_plan,
@@ -109060,12 +109087,14 @@ async def handle_owner_authorized_live_test_confirm(
         BOT_CONFIRM_VALIDATION_CALLSITE,
     )
 
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        raise PermissionError(f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
-
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
         raise PermissionError("Owner live authorization receipt is required for live test acceptance")
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(owner_receipt=clean_rcpt)
+    if not is_avail:
+        raise PermissionError(f"Cannot mint live test confirmation: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
 
     query = getattr(update, "callback_query", None)
     real_update_id = getattr(update, "update_id", 0) or 0
@@ -109095,17 +109124,22 @@ async def handle_owner_authorized_live_test_confirm(
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
-    cb_receipt = video_trace_state.issue_registered_callback_ownership_receipt(
-        telegram_update_id=real_update_id,
-        callback_query_id=real_cbq_id,
-        chat_id=real_chat_id,
-        user_id=real_user_id,
-        job_id=str(job_id),
-        request_id=str(request_id),
-        owner_receipt=clean_rcpt,
-        callsite=callsite,
-        caller_role="bot",
-    )
+    from services import video_trace_state
+    if callback_event is not None:
+        cb_receipt = callback_event
+    else:
+        cb_receipt = video_trace_state.register_registered_callback_dispatch_event(
+            telegram_update_id=real_update_id,
+            callback_query_id=real_cbq_id,
+            chat_id=real_chat_id,
+            user_id=real_user_id,
+            job_id=str(job_id),
+            project_id=str(job_id),
+            request_id=str(request_id),
+            callback_action="create_video_task",
+            product_type="Product Video",
+            owner_receipt=clean_rcpt,
+        )
 
     video_trace_state.record_owner_live_callback_origin_in_trace(
         clean_rcpt,
