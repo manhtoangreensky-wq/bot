@@ -108919,6 +108919,18 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
     ):
         return
 
+    # N21AG §11: Immediate universal fail-closed while PAID_LIVE_TEST_AVAILABLE=NO (LIVE_DISABLED_SIDE_EFFECTS_BEFORE_BLOCK=0)
+    from services.provider_spend_guard import (
+        PAID_LIVE_TEST_AVAILABLE,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+    )
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
+        )
+
     # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
     real_update_id = getattr(update, "update_id", 0) or 0
     real_cbq_id = getattr(query, "id", "") or ""
@@ -108931,6 +108943,12 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
 
     # Ownership and session lineage validation
     user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    if OWNER_IDS and not is_owner_user(user_id):
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "⛔ Từ chối: Chỉ Owner được phê duyệt kiểm thử trực tiếp có tính phí.",
+        )
     user_data = getattr(context, "user_data", None) or {}
     session = user_data.get("video_session") or user_data.get("video_state") or {}
     draft = session.get("draft") or {}
@@ -108953,18 +108971,6 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         return await safe_edit_or_send(
             query,
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
-        )
-
-    # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
-    from services.provider_spend_guard import (
-        PAID_LIVE_TEST_AVAILABLE,
-        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
-    )
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        await query.answer()
-        return await safe_edit_or_send(
-            query,
-            f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
         )
 
     try:
@@ -109044,6 +109050,8 @@ async def handle_owner_authorized_live_test_confirm(
     """
     from decimal import Decimal
     from services.provider_spend_guard import (
+        PAID_LIVE_TEST_AVAILABLE,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
         issue_bot_mint_authority,
         mint_multiscene_bot_confirmation_plan,
         validate_owner_live_authorization,
@@ -109051,6 +109059,9 @@ async def handle_owner_authorized_live_test_confirm(
         BOT_CONFIRM_VALIDATION_SOURCE,
         BOT_CONFIRM_VALIDATION_CALLSITE,
     )
+
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        raise PermissionError(f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
 
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
@@ -109084,7 +109095,7 @@ async def handle_owner_authorized_live_test_confirm(
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
-    cb_receipt = video_trace_state.create_canonical_callback_ownership_receipt(
+    cb_receipt = video_trace_state.issue_registered_callback_ownership_receipt(
         telegram_update_id=real_update_id,
         callback_query_id=real_cbq_id,
         chat_id=real_chat_id,

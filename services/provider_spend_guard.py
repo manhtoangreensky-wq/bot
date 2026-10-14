@@ -360,6 +360,7 @@ QUEUE_WORKER_LINEAGE: str = "PASS"
 CANONICAL_OWNER_AUTH_ISSUANCE_SOURCE: str = "NOT_PROVEN_IN_BOT_REPO_OR_WEB_ACCEPTANCE_BRIDGE_ONLY"
 OWNER_AUTH_ISSUANCE_SEAM: str = "NOT_PROVEN"
 PAID_LIVE_TEST_AVAILABLE: str = "NO"
+OWNER_POLICY_RESET_RULE_UNSPECIFIED: str = "YES"
 
 # N21AC-FIX1 explicit additions
 PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH: str = "NO"
@@ -369,6 +370,89 @@ SPEND_GUARD_AUTHORITY_ROLE: str = "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY"
 TEST_AUTH_FIXTURE_LOCATION: str = "TESTS_ONLY"
 PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT: int = 0
 AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH: str = "ABSENT"
+
+
+def is_paid_live_test_available(
+    *,
+    env: dict[str, str] | None = None,
+    db_path: str | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Dynamically evaluate whether paid live testing is available fail-closed.
+
+    Requires:
+    1. Global kill switch / real provider calls allowed.
+    2. Explicit Owner-approved weekly spend reset policy (reset rule and timezone).
+       If reset rule or timezone is not explicitly configured, fails closed with
+       OWNER_POLICY_RESET_RULE_UNSPECIFIED=YES.
+    3. Canonical owner authorization issuance seam proven.
+    4. Durable database available.
+    """
+    effective_env = os.environ if env is None else env
+    rule = (
+        effective_env.get(RESET_RULE_ENV)
+        or effective_env.get(RESET_RULE_ALIAS_ENV)
+        or ""
+    ).strip().upper()
+    tz = (
+        effective_env.get(TIMEZONE_ENV)
+        or effective_env.get(TIMEZONE_ALIAS_ENV)
+        or ""
+    ).strip().upper()
+
+    if not rule or not tz:
+        return False, "OWNER_POLICY_RESET_RULE_UNSPECIFIED", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule or "UNSPECIFIED",
+            "timezone": tz or "UNSPECIFIED",
+        }
+
+    if rule not in ("MONDAY_0000_UTC", "ISO_WEEK_UTC"):
+        return False, "OWNER_POLICY_RESET_RULE_INVALID", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule,
+            "timezone": tz,
+        }
+
+    if tz != "UTC":
+        return False, "OWNER_POLICY_RESET_RULE_INVALID", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule,
+            "timezone": tz,
+        }
+
+    if str(effective_env.get("PROVIDER_SPEND_KILL_SWITCH") or "").strip() == "1":
+        return False, "KILL_SWITCH_ACTIVE", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if str(effective_env.get(REAL_PROVIDER_CALLS_ENV) or "0").strip() != "1":
+        return False, "REAL_PROVIDER_CALLS_DISABLED", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if OWNER_AUTH_ISSUANCE_SEAM != "PROVEN":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    return True, "", {
+        "PAID_LIVE_TEST_AVAILABLE": "YES",
+        "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        "rule": rule,
+        "timezone": tz,
+    }
 
 # N21AD explicit additions
 DURABLE_BOT_EVENT_AUTHORITY: str = "PROVEN"
@@ -410,7 +494,38 @@ OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE: str = "YES"
 MISSING_USER_OWNER_LIVE_BUTTON: str = "HIDDEN"
 CALLER_VALIDATION_STRINGS_AUTHORITY: str = "NO"
 BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN: str = "owner_live_issuance_authority_not_proven"
-# ─── END N21AC / N21AD / N21AE INVARIANT CONSTANTS ──────────────────────────
+
+# N21AF explicit additions
+PRODUCTION_PAID_LIVE_TEST_OVERRIDE: str = "ABSENT"
+CALLER_CAN_BYPASS_PAID_LIVE_AVAILABILITY: str = "NO"
+PAID_LIVE_UNAVAILABLE_BUTTON: str = "HIDDEN"
+OWNER_LIVE_CALLBACK_FAILCLOSED: str = "YES"
+OWNER_LIVE_MINT_FAILCLOSED: str = "YES"
+OWNER_LIVE_RESERVATION_FAILCLOSED: str = "YES"
+CALLBACK_HMAC_HARDCODED_FALLBACK: str = "ABSENT"
+HMAC_ROLE: str = "INTEGRITY_ONLY"
+HMAC_IS_CALLBACK_OWNERSHIP_AUTHORITY: str = "NO"
+GENERIC_SERVICE_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+WORKER_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+PROVIDER_CAN_CREATE_VALID_CALLBACK_RECEIPT: str = "NO"
+CALLSITE_STRING_CAN_CREATE_CALLBACK_AUTHORITY: str = "NO"
+CALLER_ROLE_STRING_CAN_CREATE_CALLBACK_AUTHORITY: str = "NO"
+ARBITRARY_IDS_TO_TRUSTED_RECEIPT: str = "NO"
+CALLBACK_OWNERSHIP_RECEIPT_PROVENANCE: str = "NOT_PROVEN"
+TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT: str = "NO"
+
+# N21AG explicit additions
+PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE: str = "NO"
+CALLER_CAN_SET_REGISTERED_CALLBACK_PROVENANCE: str = "NO"
+CALLER_ROLE_SECURITY_AUTHORITY: str = "NO"
+CALLSITE_SECURITY_AUTHORITY: str = "NO"
+PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT: str = "BLOCK"
+MINT_AUTHORITY_ARBITRARY_KWARGS: str = "NO"
+LEGACY_TEST_OVERRIDE_KEYWORD_ACCEPTED: str = "NO"
+OWNER_LIVE_CONFIRM_HELPER_FAILCLOSED: str = "YES"
+LIVE_DISABLED_SIDE_EFFECTS_BEFORE_BLOCK: int = 0
+CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY: str = "NO"
+# ─── END N21AC / N21AD / N21AE / N21AF / N21AG INVARIANT CONSTANTS ───────────
 
 
 def validate_owner_live_button_eligibility(
@@ -425,6 +540,10 @@ def validate_owner_live_button_eligibility(
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
+    # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
+
     clean_user_id = str(user_id or "").strip()
     if not clean_user_id or clean_user_id in {"0", "None"}:
         return False, "owner_live_user_id_required", {}
@@ -494,12 +613,6 @@ def create_owner_live_authorization(*args: Any, **kwargs: Any) -> str:
     (video_request_traces table). The spend guard must NEVER create authority records.
     Any call to this function in production raises PermissionError unconditionally.
     """
-    caller_override = kwargs.get("_caller_override_for_test")
-    if caller_override in ("worker", "provider", "router", "direct_provider", "shell", "script"):
-        raise PermissionError(
-            f"Unauthorized owner auth creator '{caller_override}': worker/provider/router cannot create owner live authorization "
-            "(WORKER_CAN_CREATE_OWNER_LIVE_AUTH=NO, PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, DIRECT_PROVIDER_CAN_CREATE_OWNER_LIVE_AUTH=NO, SPEND_GUARD_CAN_CREATE_OWNER_AUTHORITY=NO)"
-        )
     raise PermissionError(
         "create_owner_live_authorization is RETIRED unconditionally (N21AC-FIX1). "
         "Owner authority cannot be created in spend_guard under any arguments or caller overrides. "
@@ -908,15 +1021,9 @@ def issue_bot_mint_authority(
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
-    _caller_override_for_test: str | None = None,
 ) -> BotMintAuthority:
     """Issue genuine Bot mint authority bound to pre-existing durable Bot validation event in SQLite."""
-    if _caller_override_for_test in ("generic_service", "worker", "provider", "router", "services"):
-        raise PermissionError(
-            f"Unauthorized mint caller '{_caller_override_for_test}': generic service/worker/provider cannot issue mint authority "
-            "(CALLSITE_STRING_IS_AUTHORITY=NO)"
-        )
-    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES and not _caller_override_for_test:
+    if callsite not in _ALLOWED_LIVE_MINT_CALLSITES:
         raise PermissionError(f"Unauthorized mint callsite: '{callsite}'")
 
     # N21AD §3: CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO, VALIDATED_OWNERSHIP_BOOL_IS_AUTHORITY=NO
@@ -928,9 +1035,9 @@ def issue_bot_mint_authority(
             "(CALLER_VALIDATED_OWNERSHIP_BOOL_TRUSTED=NO)"
         )
 
-    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE and not _caller_override_for_test:
+    if validation_source != BOT_CONFIRM_VALIDATION_SOURCE:
         raise PermissionError(f"Unauthorized validation_source: '{validation_source}'")
-    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE and not _caller_override_for_test:
+    if validation_callsite != BOT_CONFIRM_VALIDATION_CALLSITE:
         raise PermissionError(f"Unauthorized validation_callsite: '{validation_callsite}'")
 
     if action not in ("b14_confirm", "create_video_task"):
@@ -988,8 +1095,9 @@ def issue_bot_mint_authority(
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
 
-        # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
-        if PAID_LIVE_TEST_AVAILABLE != "YES" and _caller_override_for_test != "allow_paid_live_mint_test":
+        # N21AF §3, §4: Universal fail-closed when paid live test is unavailable.
+        # No test override parameter or branch exists (PRODUCTION_PAID_LIVE_TEST_OVERRIDE=ABSENT, CALLER_CAN_BYPASS_PAID_LIVE_AVAILABILITY=NO)
+        if PAID_LIVE_TEST_AVAILABLE != "YES":
             raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
 
         try:
@@ -1096,7 +1204,24 @@ def issue_bot_mint_authority(
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
                 )
 
+            t_prov = str(t_cb_rcpt.get("provenance") if isinstance(t_cb_rcpt, dict) else "").strip()
+            if t_prov != "REGISTERED_CALLBACK_VALIDATION":
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(
+                    f"Durable Bot event callback receipt provenance '{t_prov}' cannot authorize real transport "
+                    "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                )
+
             if callback_ownership_receipt is not None:
+                c_prov = str(callback_ownership_receipt.get("provenance") or "").strip()
+                if c_prov != "REGISTERED_CALLBACK_VALIDATION":
+                    if should_close:
+                        active_conn.rollback()
+                    raise PermissionError(
+                        "TEST_ONLY callback receipt cannot authorize real transport "
+                        "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                    )
                 if not verify_canonical_callback_ownership_receipt(
                     callback_ownership_receipt,
                     telegram_update_id=up_id,
