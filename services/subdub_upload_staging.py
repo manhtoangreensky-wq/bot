@@ -627,10 +627,10 @@ def create_staged_upload(
 
 
 def get_staged_upload(upload_id: str, actor_id: str | int | None = None) -> tuple[bool, str, int, dict[str, Any]]:
-    """Lookup and consume staged upload by upload_id, enforcing actor ownership.
+    """Lookup and consume staged upload by upload_id, enforcing actor ownership and physical integrity.
 
     Reads from canonical staged_upload_idempotency table as PRIMARY authority.
-    Falls back to system_settings for legacy backward compatibility.
+    Falls back to system_settings for legacy backward compatibility ONLY on confirmed miss.
     """
     clean_id = str(upload_id or "").strip()
     if not UPLOAD_ID_SAFE_CHARS.fullmatch(clean_id):
@@ -642,13 +642,17 @@ def get_staged_upload(upload_id: str, actor_id: str | int | None = None) -> tupl
         if clean_actor.startswith("telegram-"):
             clean_actor = clean_actor[len("telegram-"):].strip()
 
+    staging_dir = get_staging_directory().resolve()
+
     # 1. PRIMARY AUTHORITY: staged_upload_idempotency
+    canonical_row = None
+    canonical_query_succeeded = False
     try:
         import bot
         ensure_staged_upload_idempotency_schema()
         conn = bot.db_connect()
         try:
-            row = conn.execute(
+            canonical_row = conn.execute(
                 """
                 SELECT upload_id, actor_id, file_name, content_type, size_bytes, sha256, relative_path, state, created_at, idempotency_key
                 FROM staged_upload_idempotency
@@ -657,37 +661,78 @@ def get_staged_upload(upload_id: str, actor_id: str | int | None = None) -> tupl
                 """,
                 (clean_id,),
             ).fetchone()
+            canonical_query_succeeded = True
         finally:
             conn.close()
-
-        if row:
-            row_uid, row_actor, row_name, row_mime, row_size, row_sha, row_rel_path, row_state, row_created, row_idemp = row
-            if str(row_state).upper() != "READY":
-                return False, "UPLOAD_NOT_READY", 404, {}
-            if clean_actor and clean_actor != str(row_actor).strip():
-                return False, "FORBIDDEN_CROSS_OWNER", 403, {}
-            staging_dir = get_staging_directory()
-            rel_path = row_rel_path or f"{clean_id}/{row_name}"
-            dest_file = (staging_dir / rel_path).resolve()
-            if not dest_file.is_file():
-                return False, "STAGED_FILE_MISSING", 404, {}
-            record = {
-                "upload_id": row_uid,
-                "owner_id": str(row_actor).strip(),
-                "file_name": row_name,
-                "content_type": row_mime,
-                "size_bytes": int(row_size),
-                "sha256": row_sha,
-                "local_path": str(dest_file),
-                "idempotency_key": row_idemp,
-                "created_at": row_created,
-                "status": "staged",
-            }
-            return True, "OK", 200, record
     except Exception as exc:
-        logger.warning(f"Error querying primary staged_upload_idempotency for {clean_id}: {exc}")
+        logger.error(f"Error querying primary staged_upload_idempotency for {clean_id}: {exc}")
+        return False, "CANONICAL_STORAGE_ERROR", 500, {}
 
-    # 2. SECONDARY FALLBACK: system_settings (for legacy pre-FIX2 records)
+    if not canonical_query_succeeded:
+        return False, "CANONICAL_STORAGE_ERROR", 500, {}
+
+    # If canonical row exists, CANONICAL ROW WINS OVER LEGACY.
+    # NEVER fall back to legacy if canonical row is present (even if RESERVED or corrupt).
+    if canonical_row is not None:
+        row_uid, row_actor, row_name, row_mime, row_size, row_sha, row_rel_path, row_state, row_created, row_idemp = canonical_row
+
+        # State check: must be READY
+        if str(row_state).upper() != "READY":
+            return False, "UPLOAD_NOT_READY", 404, {}
+
+        # Cross-owner check
+        if clean_actor and clean_actor != str(row_actor).strip():
+            return False, "FORBIDDEN_CROSS_OWNER", 403, {}
+
+        # Path containment check
+        rel_path = row_rel_path or f"{clean_id}/{row_name}"
+        dest_file = (staging_dir / rel_path).resolve()
+        try:
+            dest_file.relative_to(staging_dir)
+            if dest_file == staging_dir:
+                return False, "STAGED_FILE_PATH_INVALID", 400, {}
+        except ValueError:
+            return False, "STAGED_FILE_PATH_INVALID", 400, {}
+
+        # Physical file existence
+        if not dest_file.is_file():
+            return False, "STAGED_FILE_MISSING", 404, {}
+
+        # Physical file size match
+        try:
+            actual_size = dest_file.stat().st_size
+        except OSError:
+            return False, "STAGED_FILE_MISSING", 404, {}
+
+        if row_size is not None and actual_size != int(row_size):
+            return False, "STAGED_FILE_SIZE_MISMATCH", 400, {}
+
+        # Physical file SHA256 match
+        try:
+            actual_sha = hashlib.sha256(dest_file.read_bytes()).hexdigest().lower()
+        except OSError:
+            return False, "STAGED_FILE_MISSING", 404, {}
+
+        expected_sha = str(row_sha or "").strip().lower()
+        if expected_sha and actual_sha != expected_sha:
+            return False, "STAGED_FILE_SHA256_MISMATCH", 400, {}
+
+        record = {
+            "upload_id": row_uid,
+            "owner_id": str(row_actor).strip(),
+            "file_name": row_name,
+            "content_type": row_mime,
+            "size_bytes": actual_size,
+            "sha256": actual_sha,
+            "local_path": str(dest_file),
+            "idempotency_key": row_idemp,
+            "created_at": row_created,
+            "status": "staged",
+        }
+        return True, "OK", 200, record
+
+    # 2. SECONDARY FALLBACK: system_settings
+    # Allowed ONLY when canonical schema/query completed successfully AND canonical row was confirmed MISSING.
     try:
         import bot
         setting_key = f"subdub_upload:{clean_id}"
@@ -696,22 +741,51 @@ def get_staged_upload(upload_id: str, actor_id: str | int | None = None) -> tupl
             return False, "UPLOAD_NOT_FOUND", 404, {}
         record = json.loads(val)
     except Exception as exc:
-        logger.warning(f"Error reading staged upload {clean_id}: {exc}")
+        logger.warning(f"Error reading legacy staged upload {clean_id}: {exc}")
         return False, "UPLOAD_NOT_FOUND", 404, {}
 
     if not isinstance(record, dict) or record.get("upload_id") != clean_id:
         return False, "UPLOAD_NOT_FOUND", 404, {}
-
-    # Verify physical file existence
-    local_path = str(record.get("local_path") or "").strip()
-    if not local_path or not Path(local_path).is_file():
-        return False, "STAGED_FILE_MISSING", 404, {}
 
     # Enforce owner binding if actor_id provided
     if clean_actor:
         record_owner = str(record.get("owner_id") or "").strip()
         if clean_actor != record_owner:
             return False, "FORBIDDEN_CROSS_OWNER", 403, {}
+
+    # Verify physical file existence and containment
+    local_path = str(record.get("local_path") or "").strip()
+    if not local_path:
+        return False, "STAGED_FILE_MISSING", 404, {}
+    dest_file = Path(local_path).resolve()
+    try:
+        dest_file.relative_to(staging_dir)
+        if dest_file == staging_dir:
+            return False, "STAGED_FILE_PATH_INVALID", 400, {}
+    except ValueError:
+        return False, "STAGED_FILE_PATH_INVALID", 400, {}
+
+    if not dest_file.is_file():
+        return False, "STAGED_FILE_MISSING", 404, {}
+
+    # Physical size and SHA256 integrity verification for legacy record
+    try:
+        actual_size = dest_file.stat().st_size
+    except OSError:
+        return False, "STAGED_FILE_MISSING", 404, {}
+
+    legacy_size = record.get("size_bytes")
+    if legacy_size is not None and actual_size != int(legacy_size):
+        return False, "STAGED_FILE_SIZE_MISMATCH", 400, {}
+
+    try:
+        actual_sha = hashlib.sha256(dest_file.read_bytes()).hexdigest().lower()
+    except OSError:
+        return False, "STAGED_FILE_MISSING", 404, {}
+
+    legacy_sha = str(record.get("sha256") or "").strip().lower()
+    if legacy_sha and actual_sha != legacy_sha:
+        return False, "STAGED_FILE_SHA256_MISMATCH", 400, {}
 
     return True, "OK", 200, record
 

@@ -1298,14 +1298,17 @@ def test_23_canonical_ready_exists_compatibility_absent_get_passes():
 
 
 def test_24_concurrent_exact_replay_single_upload_id():
-    """Section 12: Concurrent attempts with same key + content yield exactly ONE upload_id and file."""
+    """Section 9 & 12: Concurrent attempts with same key + content yield exactly ONE upload_id and file."""
     import concurrent.futures
+    import threading
     from services.subdub_upload_staging import create_staged_upload, get_staging_directory
 
     actor = "30006"
     key = "concurrent-exact-key-006"
+    barrier = threading.Barrier(4)
 
     def do_upload():
+        barrier.wait()
         return create_staged_upload(
             file_bytes=SAMPLE_PNG_BYTES,
             file_name="avatar.png",
@@ -1334,16 +1337,32 @@ def test_24_concurrent_exact_replay_single_upload_id():
     files = list(dest_dir.glob("*"))
     assert len(files) == 1
 
+    # Canonical row count == 1, state == READY
+    import bot
+    conn = bot.db_connect()
+    rows = conn.execute(
+        "SELECT upload_id, sha256, state FROM staged_upload_idempotency WHERE actor_id = ? AND idempotency_key = ?",
+        (actor, key),
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == single_upload_id
+    assert rows[0][2] == "READY"
+    assert hashlib.sha256(files[0].read_bytes()).hexdigest().lower() == rows[0][1].lower()
+
 
 def test_25_concurrent_mismatched_payload_conflict():
-    """Section 13: Concurrent mismatch on same idempotency key -> exactly one wins, other 409 conflict."""
+    """Section 7: True concurrent mismatch on same idempotency key -> synchronized start, exactly one 200, one 409 conflict."""
     import concurrent.futures
-    from services.subdub_upload_staging import create_staged_upload
+    import threading
+    from services.subdub_upload_staging import create_staged_upload, get_staging_directory
 
     actor = "30007"
     key = "concurrent-mismatch-key-007"
+    barrier = threading.Barrier(2)
 
     def upload_png():
+        barrier.wait()
         return create_staged_upload(
             file_bytes=SAMPLE_PNG_BYTES,
             file_name="one.png",
@@ -1353,6 +1372,7 @@ def test_25_concurrent_mismatched_payload_conflict():
         )
 
     def upload_jpg():
+        barrier.wait()
         return create_staged_upload(
             file_bytes=SAMPLE_JPEG_BYTES,
             file_name="two.jpg",
@@ -1361,16 +1381,36 @@ def test_25_concurrent_mismatched_payload_conflict():
             idempotency_key=key,
         )
 
-    # First upload establishes canonical tuple
-    res1 = upload_png()
-    assert res1[0] is True
-    assert res1[2] == 200
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f1 = executor.submit(upload_png)
+        f2 = executor.submit(upload_jpg)
+        results = [f1.result(), f2.result()]
 
-    # Second upload with different payload on same key fails with 409
-    res2 = upload_jpg()
-    assert res2[0] is False
-    assert res2[2] == 409
-    assert res2[1] == "IDEMPOTENCY_CONFLICT"
+    successes = [r for r in results if r[0] is True and r[2] == 200]
+    conflicts = [r for r in results if r[0] is False and r[2] == 409 and r[1] == "IDEMPOTENCY_CONFLICT"]
+
+    assert len(successes) == 1, f"Expected 1 success, got {len(successes)}"
+    assert len(conflicts) == 1, f"Expected 1 conflict, got {len(conflicts)}"
+
+    winning_upload_id = successes[0][3]["upload_id"]
+
+    # Verify canonical table: exactly 1 row, 1 upload_id
+    import bot
+    conn = bot.db_connect()
+    rows = conn.execute(
+        "SELECT upload_id, sha256, state FROM staged_upload_idempotency WHERE actor_id = ? AND idempotency_key = ?",
+        (actor, key),
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][0] == winning_upload_id
+    assert rows[0][2] == "READY"
+
+    # Exactly 1 physical directory for winning upload_id
+    dest_dir = get_staging_directory() / winning_upload_id
+    assert dest_dir.is_dir()
+    files = list(dest_dir.glob("*"))
+    assert len(files) == 1
 
 
 def test_26_replay_cannot_create_second_physical_directory():
@@ -1446,3 +1486,371 @@ def test_28_header_and_body_idempotency_key_match_passes():
     assert resp.json()["ok"] is True
     assert resp.json()["upload_id"].startswith("upl_")
 
+
+def test_29_ready_correct_file_lookup_passes():
+    """Section 10.1: READY + correct file -> PASS."""
+    from services.subdub_upload_staging import create_staged_upload, get_staged_upload
+    actor = "30029"
+    key = "reg-ready-correct-029"
+    res = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="test.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res[0] is True
+    uid = res[3]["upload_id"]
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is True
+    assert code == 200
+    assert rec["upload_id"] == uid
+    assert rec["sha256"] == hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower()
+    assert rec["size_bytes"] == len(SAMPLE_PNG_BYTES)
+
+
+def test_30_ready_missing_file_lookup_blocks():
+    """Section 10.2: READY + missing file -> BLOCK with STAGED_FILE_MISSING."""
+    from services.subdub_upload_staging import create_staged_upload, get_staged_upload, get_staging_directory
+    actor = "30030"
+    key = "reg-ready-missing-030"
+    res = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="test.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res[0] is True
+    uid = res[3]["upload_id"]
+
+    target_file = get_staging_directory() / uid / "test.png"
+    if target_file.is_file():
+        target_file.unlink()
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 404
+    assert reason == "STAGED_FILE_MISSING"
+
+
+def test_31_ready_truncated_file_lookup_blocks():
+    """Section 10.3: READY + truncated file -> SHA/size BLOCK."""
+    from services.subdub_upload_staging import create_staged_upload, get_staged_upload, get_staging_directory
+    actor = "30031"
+    key = "reg-ready-truncated-031"
+    res = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="test.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res[0] is True
+    uid = res[3]["upload_id"]
+
+    target_file = get_staging_directory() / uid / "test.png"
+    target_file.write_bytes(SAMPLE_PNG_BYTES[:10])
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 400
+    assert reason in ("STAGED_FILE_SIZE_MISMATCH", "STAGED_FILE_SHA256_MISMATCH")
+
+
+def test_32_ready_same_size_modified_bytes_lookup_blocks():
+    """Section 10.4: READY + same-size modified bytes -> SHA BLOCK."""
+    from services.subdub_upload_staging import create_staged_upload, get_staged_upload, get_staging_directory
+    actor = "30032"
+    key = "reg-ready-modified-032"
+    res = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="test.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res[0] is True
+    uid = res[3]["upload_id"]
+
+    target_file = get_staging_directory() / uid / "test.png"
+    corrupt_bytes = b"X" * len(SAMPLE_PNG_BYTES)
+    target_file.write_bytes(corrupt_bytes)
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 400
+    assert reason == "STAGED_FILE_SHA256_MISMATCH"
+
+
+def test_33_ready_escaping_relative_path_lookup_blocks():
+    """Section 10.5: READY + wrong relative_path escaping staging root -> BLOCK."""
+    import sqlite3
+    from services.subdub_upload_staging import ensure_staged_upload_idempotency_schema, get_staged_upload
+    import bot
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    uid = "upl_escape_033"
+    actor = "30033"
+    now_utc = "2026-10-14 00:00:00"
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)
+        """,
+        (actor, "escape-key-033", uid, "deadbeef", "pic.png", "image/png", 100, "../../escaped.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 400
+    assert reason == "STAGED_FILE_PATH_INVALID"
+
+
+def test_34_canonical_reserved_beats_legacy_ready_blocks():
+    """Section 10.6: canonical RESERVED + legacy READY same upload_id -> canonical RESERVED wins, BLOCK."""
+    from services.subdub_upload_staging import ensure_staged_upload_idempotency_schema, get_staged_upload, get_staging_directory
+    import bot
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    uid = "upl_reserved_win_034"
+    actor = "30034"
+    now_utc = "2026-10-14 00:00:00"
+    # Canonical row is RESERVED
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESERVED', ?, ?)
+        """,
+        (actor, "reserved-key-034", uid, "some_sha", "pic.png", "image/png", 50, f"{uid}/pic.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    # Legacy setting claims it is staged/ready
+    job_dir = get_staging_directory() / uid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    f = job_dir / "pic.png"
+    f.write_bytes(SAMPLE_PNG_BYTES)
+    legacy_rec = {
+        "upload_id": uid,
+        "owner_id": actor,
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "size_bytes": len(SAMPLE_PNG_BYTES),
+        "sha256": hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower(),
+        "local_path": str(f),
+        "status": "staged",
+    }
+    bot.set_system_setting(f"subdub_upload:{uid}", json.dumps(legacy_rec))
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 404
+    assert reason == "UPLOAD_NOT_READY"
+
+
+def test_35_canonical_corrupt_ready_blocks_without_legacy_fallback():
+    """Section 10.7: canonical corrupt READY + legacy valid record -> BLOCK, no fallback."""
+    from services.subdub_upload_staging import ensure_staged_upload_idempotency_schema, get_staged_upload, get_staging_directory
+    import bot
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    uid = "upl_corrupt_canon_035"
+    actor = "30035"
+    now_utc = "2026-10-14 00:00:00"
+    job_dir = get_staging_directory() / uid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    f = job_dir / "pic.png"
+    f.write_bytes(b"CORRUPT")
+    # Canonical row says size is 1000, sha is deadbeef
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)
+        """,
+        (actor, "corrupt-key-035", uid, "deadbeef", "pic.png", "image/png", 1000, f"{uid}/pic.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    # Legacy record points to something valid
+    legacy_rec = {
+        "upload_id": uid,
+        "owner_id": actor,
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "size_bytes": len(SAMPLE_PNG_BYTES),
+        "sha256": hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower(),
+        "local_path": str(f),
+        "status": "staged",
+    }
+    bot.set_system_setting(f"subdub_upload:{uid}", json.dumps(legacy_rec))
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 400
+    assert reason in ("STAGED_FILE_SIZE_MISMATCH", "STAGED_FILE_SHA256_MISMATCH")
+
+
+def test_36_canonical_db_exception_blocks_without_legacy_fallback(monkeypatch):
+    """Section 10.8: canonical DB/query forced exception + legacy valid record -> BLOCK with CANONICAL_STORAGE_ERROR."""
+    import sqlite3
+    from services.subdub_upload_staging import get_staged_upload, get_staging_directory
+    import bot
+    uid = "upl_db_err_036"
+    actor = "30036"
+
+    # Put a valid legacy record
+    job_dir = get_staging_directory() / uid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    f = job_dir / "pic.png"
+    f.write_bytes(SAMPLE_PNG_BYTES)
+    legacy_rec = {
+        "upload_id": uid,
+        "owner_id": actor,
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "size_bytes": len(SAMPLE_PNG_BYTES),
+        "sha256": hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower(),
+        "local_path": str(f),
+        "status": "staged",
+    }
+    bot.set_system_setting(f"subdub_upload:{uid}", json.dumps(legacy_rec))
+
+    # Force DB error on canonical read
+    def bad_db_connect():
+        raise sqlite3.OperationalError("DATABASE_DISK_I_O_ERROR")
+    monkeypatch.setattr(bot, "db_connect", bad_db_connect)
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is False
+    assert code == 500
+    assert reason == "CANONICAL_STORAGE_ERROR"
+
+
+def test_37_canonical_confirmed_no_row_legacy_compat_passes():
+    """Section 10.9: canonical confirmed no-row + valid legacy pre-FIX2 record -> legacy compatibility PASS."""
+    from services.subdub_upload_staging import ensure_staged_upload_idempotency_schema, get_staged_upload, get_staging_directory
+    import bot
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    uid = "upl_legacy_compat_037"
+    actor = "30037"
+    # Ensure no row in canonical table
+    conn.execute("DELETE FROM staged_upload_idempotency WHERE upload_id = ?", (uid,))
+    conn.commit()
+    conn.close()
+
+    # Valid legacy record
+    job_dir = get_staging_directory() / uid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    f = job_dir / "pic.png"
+    f.write_bytes(SAMPLE_PNG_BYTES)
+    sha = hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower()
+    legacy_rec = {
+        "upload_id": uid,
+        "owner_id": actor,
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "size_bytes": len(SAMPLE_PNG_BYTES),
+        "sha256": sha,
+        "local_path": str(f),
+        "status": "staged",
+    }
+    bot.set_system_setting(f"subdub_upload:{uid}", json.dumps(legacy_rec))
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=actor)
+    assert ok is True
+    assert code == 200
+    assert rec["upload_id"] == uid
+    assert rec["sha256"] == sha
+
+
+def test_38_cross_owner_canonical_row_blocks_matching_legacy():
+    """Section 10.10: cross-owner canonical row + matching legacy record -> cross-owner BLOCK."""
+    from services.subdub_upload_staging import ensure_staged_upload_idempotency_schema, get_staged_upload, get_staging_directory
+    import bot
+    conn = bot.db_connect()
+    ensure_staged_upload_idempotency_schema(conn)
+    uid = "upl_cross_owner_038"
+    owner_actor = "30038_OWNER"
+    intruder_actor = "30038_INTRUDER"
+    now_utc = "2026-10-14 00:00:00"
+
+    job_dir = get_staging_directory() / uid
+    job_dir.mkdir(parents=True, exist_ok=True)
+    f = job_dir / "pic.png"
+    f.write_bytes(SAMPLE_PNG_BYTES)
+    sha = hashlib.sha256(SAMPLE_PNG_BYTES).hexdigest().lower()
+
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO staged_upload_idempotency
+        (actor_id, idempotency_key, upload_id, sha256, file_name, content_type, size_bytes, relative_path, state, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?)
+        """,
+        (owner_actor, "cross-key-038", uid, sha, "pic.png", "image/png", len(SAMPLE_PNG_BYTES), f"{uid}/pic.png", now_utc, now_utc),
+    )
+    conn.commit()
+    conn.close()
+
+    # Legacy record exists for intruder or owner
+    legacy_rec = {
+        "upload_id": uid,
+        "owner_id": intruder_actor,
+        "file_name": "pic.png",
+        "content_type": "image/png",
+        "size_bytes": len(SAMPLE_PNG_BYTES),
+        "sha256": sha,
+        "local_path": str(f),
+        "status": "staged",
+    }
+    bot.set_system_setting(f"subdub_upload:{uid}", json.dumps(legacy_rec))
+
+    ok, reason, code, rec = get_staged_upload(uid, actor_id=intruder_actor)
+    assert ok is False
+    assert code == 403
+    assert reason == "FORBIDDEN_CROSS_OWNER"
+
+
+def test_39_prepare_endpoint_blocks_on_corrupted_ready_file():
+    """Section 4: Prepare endpoint blocks on corrupted READY file; never reaches provider."""
+    from services.subdub_upload_staging import create_staged_upload, get_staging_directory
+    client = TestClient(bot.fastapi_app)
+    actor = "30039"
+    key = "prep-corrupt-039"
+    res = create_staged_upload(
+        file_bytes=SAMPLE_PNG_BYTES,
+        file_name="pic.png",
+        content_type="image/png",
+        actor_id=actor,
+        idempotency_key=key,
+    )
+    assert res[0] is True
+    uid = res[3]["upload_id"]
+
+    # Corrupt physical file on disk (truncate)
+    target_file = get_staging_directory() / uid / "pic.png"
+    target_file.write_bytes(SAMPLE_PNG_BYTES[:10])
+
+    # Call prepare route
+    payload = {
+        "upload_id": uid,
+        "prompt": "make it cinematic",
+        "transform_instruction": "make it cinematic",
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    headers = make_auth_headers("POST", "/internal/v1/web-image-transform/prepare", raw, actor_id=actor)
+
+    resp = client.post("/internal/v1/web-image-transform/prepare", content=raw, headers=headers)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["ok"] is False
+    assert data["error_code"] in ("STAGED_FILE_SIZE_MISMATCH", "STAGED_FILE_SHA256_MISMATCH")
