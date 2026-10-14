@@ -633,6 +633,59 @@ def _create_owner_live_authorization_test_fixture(
     return auth_id
 
 
+def create_test_callback_ownership_receipt(
+    *,
+    telegram_update_id: int | str = 0,
+    callback_query_id: str = "",
+    chat_id: int | str = "",
+    user_id: int | str = "",
+    job_id: int | str = "",
+    request_id: str = "",
+    owner_receipt: str = "",
+    callsite: str = "bot.py:handle_owner_authorized_live_test_confirm",
+    caller_role: str = "bot",
+    provenance: str = "REGISTERED_CALLBACK_VALIDATION",
+) -> dict[str, Any]:
+    """Test-only fixture helper to construct callback ownership receipts for unit testing."""
+    from services.video_trace_state import _compute_callback_ownership_signature
+    import secrets
+    import datetime
+    clean_rcpt = str(owner_receipt or "").strip()
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    cbq_id = str(callback_query_id or "").strip()
+    c_chat = str(chat_id or "").strip()
+    c_user = str(user_id or "").strip()
+    c_job = str(job_id or "").strip()
+    c_req = str(request_id or "").strip()
+
+    receipt_id = f"cbor_test_{secrets.token_hex(12)}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rcpt = {
+        "ok": True,
+        "receipt_id": receipt_id,
+        "status": "VALIDATED",
+        "validator": "tests.test_p0_paid_spend_guard_and_bot_origin:create_test_callback_ownership_receipt",
+        "callsite": str(callsite or "").strip(),
+        "caller_role": str(caller_role or "").strip(),
+        "telegram_update_id": up_id,
+        "callback_query_id": cbq_id,
+        "chat_id": c_chat,
+        "user_id": c_user,
+        "job_id": c_job,
+        "request_id": c_req,
+        "owner_receipt": clean_rcpt,
+        "created_at": now_iso,
+        "validated_at": now_iso,
+        "provenance": str(provenance or "TEST_ONLY"),
+        "hmac_role": "INTEGRITY_ONLY",
+    }
+    rcpt["signature"] = _compute_callback_ownership_signature(rcpt)
+    return rcpt
+
+
 def insert_test_canonical_owner_auth(
     db_path: str,
     *,
@@ -10837,7 +10890,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
 
     # 1. Authentic callback ownership receipt generation and verification
     def test_n21ae_01_canonical_callback_ownership_receipt_generation_and_verification(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=101,
             callback_query_id="cbq_real_101",
             chat_id="chat_101",
@@ -10847,7 +10900,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             owner_receipt="COA-receipt_101",
             callsite="bot.py:handle_product_video_owner_live_accept_callback",
             caller_role="bot",
-            is_test_fixture=True,
         )
         self.assertTrue(rcpt.get("ok"))
         self.assertEqual(rcpt.get("status"), "VALIDATED")
@@ -10868,7 +10920,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
 
     # 2. Tampered HMAC signature or altered fields blocked
     def test_n21ae_02_tampered_callback_ownership_receipt_hmac_blocked(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=102,
             callback_query_id="cbq_real_102",
             chat_id="chat_102",
@@ -10878,7 +10930,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             owner_receipt="COA-receipt_102",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
             caller_role="bot",
-            is_test_fixture=True,
         )
         # Tampered signature
         tampered_sig = dict(rcpt)
@@ -11008,7 +11059,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             user_id="user_105",
             env=self.standard_env,
         )
-        cb_rcpt = create_canonical_callback_ownership_receipt(
+        cb_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=105,
             callback_query_id="cbq_real_105",
             chat_id="chat_105",
@@ -11017,7 +11068,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_105",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         rec = record_owner_live_callback_origin_in_trace(
             tid,
@@ -11081,7 +11131,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        cb_rcpt = create_canonical_callback_ownership_receipt(
+        cb_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=107,
             callback_query_id="cbq_real_107",
             chat_id="chat_107",
@@ -11090,7 +11140,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_107",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11106,7 +11155,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
         )
 
         # Caller provides receipt with mismatched update_id
-        diff_rcpt = create_canonical_callback_ownership_receipt(
+        diff_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=999,
             callback_query_id="cbq_real_107",
             chat_id="chat_107",
@@ -11115,7 +11164,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_107",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
             with self.assertRaises(PermissionError):
@@ -11148,7 +11196,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        cb_rcpt = create_canonical_callback_ownership_receipt(
+        cb_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=108,
             callback_query_id="cbq_real_108",
             chat_id="chat_108",
@@ -11157,7 +11205,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_108",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11256,7 +11303,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        cb_rcpt = create_canonical_callback_ownership_receipt(
+        cb_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=110,
             callback_query_id="cbq_real_110",
             chat_id="chat_110",
@@ -11265,7 +11312,6 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_110",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11641,7 +11687,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             self.assertEqual(status["present"], "NO")
             self.assertEqual(status["length"], 0)
             with self.assertRaises(PermissionError) as cm:
-                create_canonical_callback_ownership_receipt(
+                create_test_callback_ownership_receipt(
                     telegram_update_id=207,
                     callback_query_id="cbq_real_207",
                     chat_id="chat_207",
@@ -11650,7 +11696,6 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
                     request_id="req_207",
                     owner_receipt="COA-rcpt-207",
                     callsite="bot.py:handle_owner_authorized_live_test_confirm",
-                    is_test_fixture=True,
                 )
             self.assertIn("CALLBACK_HMAC_HARDCODED_FALLBACK=ABSENT", str(cm.exception))
             self.assertFalse(verify_canonical_callback_ownership_receipt({"status": "VALIDATED"}))
@@ -11790,7 +11835,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
 
     # 16. wrong user -> BLOCK
     def test_n21af_16_wrong_user_blocked(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=216,
             callback_query_id="cbq_real_216",
             chat_id="chat_216",
@@ -11799,7 +11844,6 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_216",
             owner_receipt="COA-rcpt-216",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         self.assertFalse(
             verify_canonical_callback_ownership_receipt(
@@ -11816,7 +11860,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
 
     # 17. wrong chat -> BLOCK
     def test_n21af_17_wrong_chat_blocked(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=217,
             callback_query_id="cbq_real_217",
             chat_id="chat_correct_217",
@@ -11825,7 +11869,6 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_217",
             owner_receipt="COA-rcpt-217",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         self.assertFalse(
             verify_canonical_callback_ownership_receipt(
@@ -11842,7 +11885,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
 
     # 18. wrong job -> BLOCK
     def test_n21af_18_wrong_job_blocked(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=218,
             callback_query_id="cbq_real_218",
             chat_id="chat_218",
@@ -11851,7 +11894,6 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_218",
             owner_receipt="COA-rcpt-218",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         self.assertFalse(
             verify_canonical_callback_ownership_receipt(
@@ -11868,7 +11910,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
 
     # 19. wrong request -> BLOCK
     def test_n21af_19_wrong_request_blocked(self):
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=219,
             callback_query_id="cbq_real_219",
             chat_id="chat_219",
@@ -11877,7 +11919,6 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_219",
             owner_receipt="COA-rcpt-219",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
         )
         self.assertFalse(
             verify_canonical_callback_ownership_receipt(
@@ -11903,7 +11944,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        cb_rcpt = create_canonical_callback_ownership_receipt(
+        cb_rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=220,
             callback_query_id="cbq_real_220",
             chat_id="chat_220",
@@ -11912,7 +11953,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_n21af_20",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
+            provenance="REGISTERED_CALLBACK_VALIDATION",
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11977,7 +12018,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=221,
             callback_query_id="cbq_real_221",
             chat_id="chat_221",
@@ -11986,7 +12027,7 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             request_id="req_n21af_21",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
+            provenance="TEST_ONLY",
         )
         self.assertEqual(rcpt.get("provenance"), "TEST_ONLY")
         record_owner_live_callback_origin_in_trace(
@@ -12311,7 +12352,7 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
                 owner_receipt="COA-rcpt-307",
                 callsite="bot.py:handle_owner_authorized_live_test_confirm",
             )
-        fixture = create_canonical_callback_ownership_receipt(
+        fixture = create_test_callback_ownership_receipt(
             telegram_update_id=307,
             callback_query_id="cbq_real_authentic_looking_307",
             chat_id="chat_307",
@@ -12320,7 +12361,7 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
             request_id="req_n21ag_07",
             owner_receipt="COA-rcpt-307",
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
+            provenance="TEST_ONLY",
         )
         self.assertEqual(fixture.get("provenance"), "TEST_ONLY")
         self.assertEqual(CALLBACK_OWNERSHIP_RECEIPT_PROVENANCE, "NOT_PROVEN")
@@ -12751,7 +12792,7 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
             operation="create_video_task",
             env=self.standard_env,
         )
-        rcpt = create_canonical_callback_ownership_receipt(
+        rcpt = create_test_callback_ownership_receipt(
             telegram_update_id=324,
             callback_query_id="cbq_real_324",
             chat_id="chat_324",
@@ -12760,7 +12801,7 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
             request_id="req_n21ag_24",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
-            is_test_fixture=True,
+            provenance="TEST_ONLY",
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -12774,31 +12815,26 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
             callback_ownership_receipt=rcpt,
             db_path=self.db_path,
         )
-        old_test_var = os.environ.pop("PYTEST_CURRENT_TEST", None)
-        try:
-            with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
-                with self.assertRaises(PermissionError) as cm:
-                    issue_bot_mint_authority(
-                        callsite="bot.py:handle_owner_authorized_live_test_confirm",
-                        telegram_update_id=324,
-                        callback_query_id="cbq_real_324",
-                        chat_id="chat_324",
-                        user_id="user_324",
-                        job_id="324",
-                        request_id="req_n21ag_24",
-                        action="create_video_task",
-                        purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
-                        owner_receipt=tid,
-                        callback_ownership_receipt=rcpt,
-                        validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
-                        validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
-                        validated_ownership=True,
-                        db_path=self.db_path,
-                    )
-                self.assertIn("TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO", str(cm.exception))
-        finally:
-            if old_test_var is not None:
-                os.environ["PYTEST_CURRENT_TEST"] = old_test_var
+        with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
+            with self.assertRaises(PermissionError) as cm:
+                issue_bot_mint_authority(
+                    callsite="bot.py:handle_owner_authorized_live_test_confirm",
+                    telegram_update_id=324,
+                    callback_query_id="cbq_real_324",
+                    chat_id="chat_324",
+                    user_id="user_324",
+                    job_id=324,
+                    request_id="req_n21ag_24",
+                    action="create_video_task",
+                    purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                    owner_receipt=tid,
+                    callback_ownership_receipt=rcpt,
+                    validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                    validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                    validated_ownership=True,
+                    db_path=self.db_path,
+                )
+            self.assertIn("TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO", str(cm.exception))
 
     # 25. provider network call count remains 0
     def test_n21ag_25_provider_network_call_count_remains_zero(self):
@@ -12806,6 +12842,130 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
         self.assertFalse(CALLER_BOT_ORIGIN_METADATA_TRUSTED)
         self.assertEqual(PRODUCTION_READY, "NO")
         self.assertEqual(PRODUCTION_READY, "NO")
+
+    # N21AH Negative Tests:
+    # 1. Production issuer rejects caller-supplied is_test_fixture (doesn't exist)
+    def test_n21ah_01_production_issuer_rejects_is_test_fixture_keyword(self):
+        """Negative test 1: Production callback receipt issuer rejects caller-supplied is_test_fixture (doesn't exist)."""
+        with self.assertRaises(TypeError) as cm:
+            create_canonical_callback_ownership_receipt(
+                telegram_update_id=401,
+                callback_query_id="cbq_real_401",
+                chat_id="chat_401",
+                user_id="user_401",
+                job_id="401",
+                request_id="req_n21ah_01",
+                owner_receipt="COA-rcpt-401",
+                callsite="bot.py:handle_owner_authorized_live_test_confirm",
+                is_test_fixture=True,
+            )
+        self.assertIn("is_test_fixture", str(cm.exception))
+
+    # 2. Production mint rejects TEST_ONLY provenance
+    def test_n21ah_02_production_mint_rejects_test_only_provenance(self):
+        """Negative test 2: Production mint rejects TEST_ONLY provenance unconditionally."""
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_n21ah_02",
+            job_id=402,
+            request_id="req_n21ah_02",
+            user_id="user_402",
+            operation="create_video_task",
+            env=self.standard_env,
+        )
+        rcpt = create_test_callback_ownership_receipt(
+            telegram_update_id=402,
+            callback_query_id="cbq_real_402",
+            chat_id="chat_402",
+            user_id="user_402",
+            job_id=402,
+            request_id="req_n21ah_02",
+            owner_receipt=tid,
+            callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="TEST_ONLY",
+        )
+        record_owner_live_callback_origin_in_trace(
+            tid,
+            telegram_update_id=402,
+            callback_query_id="cbq_real_402",
+            chat_id="chat_402",
+            user_id="user_402",
+            job_id=402,
+            request_id="req_n21ah_02",
+            callback_ownership_validated=True,
+            callback_ownership_receipt=rcpt,
+            db_path=self.db_path,
+        )
+        with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
+            with self.assertRaises(PermissionError) as cm:
+                issue_bot_mint_authority(
+                    callsite="bot.py:handle_owner_authorized_live_test_confirm",
+                    telegram_update_id=402,
+                    callback_query_id="cbq_real_402",
+                    chat_id="chat_402",
+                    user_id="user_402",
+                    job_id=402,
+                    request_id="req_n21ah_02",
+                    action="create_video_task",
+                    purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                    owner_receipt=tid,
+                    callback_ownership_receipt=rcpt,
+                    validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                    validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                    validated_ownership=True,
+                    db_path=self.db_path,
+                )
+            self.assertIn("TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO", str(cm.exception))
+
+    # 3. Production mint rejects raw callback query ID without registered update provenance record
+    def test_n21ah_03_production_mint_rejects_raw_cbq_without_registered_update_record(self):
+        """Negative test 3: Production mint rejects raw callback query ID without registered update provenance record."""
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_n21ah_03",
+            job_id=403,
+            request_id="req_n21ah_03",
+            user_id="user_403",
+            operation="create_video_task",
+            env=self.standard_env,
+        )
+        with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
+            with self.assertRaises(PermissionError) as cm:
+                issue_bot_mint_authority(
+                    callsite="bot.py:handle_owner_authorized_live_test_confirm",
+                    telegram_update_id=403,
+                    callback_query_id="cbq_real_403",
+                    chat_id="chat_403",
+                    user_id="user_403",
+                    job_id="403",
+                    request_id="req_n21ah_03",
+                    action="create_video_task",
+                    purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                    owner_receipt=tid,
+                    validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                    validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                    validated_ownership=True,
+                    db_path=self.db_path,
+                )
+            self.assertIn("OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL", str(cm.exception))
+
+    # 4. Unanchored weekly reset rule evaluates to NOT available
+    def test_n21ah_04_unanchored_weekly_reset_rule_evaluates_to_not_available(self):
+        """Negative test 4: Unanchored weekly reset rule evaluates to NOT available."""
+        from services.provider_spend_guard import (
+            is_paid_live_test_available,
+            get_current_spend_week_id,
+            OWNER_POLICY_RESET_RULE_UNSPECIFIED,
+        )
+        self.assertEqual(OWNER_POLICY_RESET_RULE_UNSPECIFIED, "YES")
+        avail, blocker, data = is_paid_live_test_available(env={})
+        self.assertFalse(avail)
+        self.assertEqual(blocker, "OWNER_POLICY_RESET_RULE_UNSPECIFIED")
+        self.assertEqual(data.get("PAID_LIVE_TEST_AVAILABLE"), "NO")
+        self.assertEqual(data.get("OWNER_POLICY_RESET_RULE_UNSPECIFIED"), "YES")
+        with self.assertRaises(ValueError) as cm:
+            get_current_spend_week_id(env={})
+        self.assertIn("Spend cap reset rule is not configured", str(cm.exception))
 
 
 if __name__ == "__main__":

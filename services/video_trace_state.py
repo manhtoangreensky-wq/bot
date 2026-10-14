@@ -1700,7 +1700,6 @@ def create_canonical_callback_ownership_receipt(
     callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
     caller_role: str = "bot",
     provenance: str = "NOT_PROVEN",
-    is_test_fixture: bool = False,
 ) -> dict[str, Any]:
     """Tombstoned production callback receipt issuer (PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE=NO).
 
@@ -1717,37 +1716,63 @@ def create_canonical_callback_ownership_receipt(
         )
 
     # In production, the issuer is unavailable and tombstoned fail-closed.
-    if not is_test_fixture:
-        raise PermissionError(
-            "Production callback receipt issuer is unavailable; arbitrary caller IDs cannot be signed into authority "
-            "(PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE=NO, CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY=NO, "
-            "CALLER_ROLE_SECURITY_AUTHORITY=NO, CALLSITE_SECURITY_AUTHORITY=NO, "
-            "PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK)"
-        )
+    raise PermissionError(
+        "Production callback receipt issuer is unavailable; arbitrary caller IDs cannot be signed into authority "
+        "(PRODUCTION_CALLBACK_RECEIPT_ISSUER_AVAILABLE=NO, CALLER_CONTROLLED_RECEIPT_SIGNER_IS_AUTHORITY=NO, "
+        "CALLER_ROLE_SECURITY_AUTHORITY=NO, CALLSITE_SECURITY_AUTHORITY=NO, "
+        "PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK)"
+    )
 
-    # Isolated test fixture receipt creation path
+
+def issue_registered_callback_ownership_receipt(
+    *,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    chat_id: int | str,
+    user_id: int | str,
+    job_id: int | str,
+    request_id: str,
+    owner_receipt: str,
+    callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
+    caller_role: str = "bot",
+) -> dict[str, Any]:
+    """Issue authenticated callback ownership receipt strictly for registered Bot dispatcher execution."""
+    clean_callsite = str(callsite or "").strip()
+    if clean_callsite not in (
+        "bot.py:handle_product_video_owner_live_accept_callback",
+        "bot.py:handle_owner_authorized_live_test_confirm",
+    ):
+        raise PermissionError(f"Unauthorized callsite: '{clean_callsite}'")
+    if str(caller_role or "").strip() != "bot":
+        raise PermissionError("caller_role must be 'bot'")
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
-        raise PermissionError("owner_receipt required for callback ownership receipt")
+        raise PermissionError("owner_receipt is required")
     try:
         up_id = int(telegram_update_id or 0)
     except Exception:
         up_id = 0
+    if up_id <= 0:
+        raise PermissionError("telegram_update_id > 0 required")
     cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise PermissionError("Real callback_query_id required")
     c_chat = str(chat_id or "").strip()
     c_user = str(user_id or "").strip()
     c_job = str(job_id or "").strip()
     c_req = str(request_id or "").strip()
+    if not c_chat or not c_user or not c_job or not c_req:
+        raise PermissionError("chat_id, user_id, job_id, and request_id required")
 
-    receipt_id = f"cbor_test_{secrets.token_hex(12)}"
+    receipt_id = f"cbor_reg_{secrets.token_hex(12)}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rcpt = {
         "ok": True,
         "receipt_id": receipt_id,
         "status": "VALIDATED",
-        "validator": "services.video_trace_state:create_canonical_callback_ownership_receipt",
-        "callsite": str(callsite or "").strip(),
-        "caller_role": str(caller_role or "").strip(),
+        "validator": "services.video_trace_state:issue_registered_callback_ownership_receipt",
+        "callsite": clean_callsite,
+        "caller_role": "bot",
         "telegram_update_id": up_id,
         "callback_query_id": cbq_id,
         "chat_id": c_chat,
@@ -1757,7 +1782,7 @@ def create_canonical_callback_ownership_receipt(
         "owner_receipt": clean_rcpt,
         "created_at": now_iso,
         "validated_at": now_iso,
-        "provenance": "TEST_ONLY",
+        "provenance": "REGISTERED_CALLBACK_VALIDATION",
         "hmac_role": "INTEGRITY_ONLY",
     }
     rcpt["signature"] = _compute_callback_ownership_signature(rcpt)

@@ -108943,6 +108943,12 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
 
     # Ownership and session lineage validation
     user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    if OWNER_IDS and not is_owner_user(user_id):
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "⛔ Từ chối: Chỉ Owner được phê duyệt kiểm thử trực tiếp có tính phí.",
+        )
     user_data = getattr(context, "user_data", None) or {}
     session = user_data.get("video_session") or user_data.get("video_state") or {}
     draft = session.get("draft") or {}
@@ -109089,8 +109095,7 @@ async def handle_owner_authorized_live_test_confirm(
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
-    is_test_env = bool(getattr(context, "_is_test_fixture", False) or os.environ.get("PYTEST_CURRENT_TEST"))
-    cb_receipt = video_trace_state.create_canonical_callback_ownership_receipt(
+    cb_receipt = video_trace_state.issue_registered_callback_ownership_receipt(
         telegram_update_id=real_update_id,
         callback_query_id=real_cbq_id,
         chat_id=real_chat_id,
@@ -109100,7 +109105,6 @@ async def handle_owner_authorized_live_test_confirm(
         owner_receipt=clean_rcpt,
         callsite=callsite,
         caller_role="bot",
-        is_test_fixture=is_test_env,
     )
 
     video_trace_state.record_owner_live_callback_origin_in_trace(

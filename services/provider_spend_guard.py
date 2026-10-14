@@ -360,6 +360,7 @@ QUEUE_WORKER_LINEAGE: str = "PASS"
 CANONICAL_OWNER_AUTH_ISSUANCE_SOURCE: str = "NOT_PROVEN_IN_BOT_REPO_OR_WEB_ACCEPTANCE_BRIDGE_ONLY"
 OWNER_AUTH_ISSUANCE_SEAM: str = "NOT_PROVEN"
 PAID_LIVE_TEST_AVAILABLE: str = "NO"
+OWNER_POLICY_RESET_RULE_UNSPECIFIED: str = "YES"
 
 # N21AC-FIX1 explicit additions
 PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH: str = "NO"
@@ -369,6 +370,89 @@ SPEND_GUARD_AUTHORITY_ROLE: str = "VALIDATE_AND_CONSUME_EXISTING_AUTHORITY_ONLY"
 TEST_AUTH_FIXTURE_LOCATION: str = "TESTS_ONLY"
 PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT: int = 0
 AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH: str = "ABSENT"
+
+
+def is_paid_live_test_available(
+    *,
+    env: dict[str, str] | None = None,
+    db_path: str | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Dynamically evaluate whether paid live testing is available fail-closed.
+
+    Requires:
+    1. Global kill switch / real provider calls allowed.
+    2. Explicit Owner-approved weekly spend reset policy (reset rule and timezone).
+       If reset rule or timezone is not explicitly configured, fails closed with
+       OWNER_POLICY_RESET_RULE_UNSPECIFIED=YES.
+    3. Canonical owner authorization issuance seam proven.
+    4. Durable database available.
+    """
+    effective_env = os.environ if env is None else env
+    rule = (
+        effective_env.get(RESET_RULE_ENV)
+        or effective_env.get(RESET_RULE_ALIAS_ENV)
+        or ""
+    ).strip().upper()
+    tz = (
+        effective_env.get(TIMEZONE_ENV)
+        or effective_env.get(TIMEZONE_ALIAS_ENV)
+        or ""
+    ).strip().upper()
+
+    if not rule or not tz:
+        return False, "OWNER_POLICY_RESET_RULE_UNSPECIFIED", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule or "UNSPECIFIED",
+            "timezone": tz or "UNSPECIFIED",
+        }
+
+    if rule not in ("MONDAY_0000_UTC", "ISO_WEEK_UTC"):
+        return False, "OWNER_POLICY_RESET_RULE_INVALID", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule,
+            "timezone": tz,
+        }
+
+    if tz != "UTC":
+        return False, "OWNER_POLICY_RESET_RULE_INVALID", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "YES",
+            "rule": rule,
+            "timezone": tz,
+        }
+
+    if str(effective_env.get("PROVIDER_SPEND_KILL_SWITCH") or "").strip() == "1":
+        return False, "KILL_SWITCH_ACTIVE", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if str(effective_env.get(REAL_PROVIDER_CALLS_ENV) or "0").strip() != "1":
+        return False, "REAL_PROVIDER_CALLS_DISABLED", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if OWNER_AUTH_ISSUANCE_SEAM != "PROVEN":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    return True, "", {
+        "PAID_LIVE_TEST_AVAILABLE": "YES",
+        "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        "rule": rule,
+        "timezone": tz,
+    }
 
 # N21AD explicit additions
 DURABLE_BOT_EVENT_AUTHORITY: str = "PROVEN"
@@ -1120,15 +1204,24 @@ def issue_bot_mint_authority(
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
                 )
 
+            t_prov = str(t_cb_rcpt.get("provenance") if isinstance(t_cb_rcpt, dict) else "").strip()
+            if t_prov != "REGISTERED_CALLBACK_VALIDATION":
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(
+                    f"Durable Bot event callback receipt provenance '{t_prov}' cannot authorize real transport "
+                    "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                )
+
             if callback_ownership_receipt is not None:
-                if callback_ownership_receipt.get("provenance") == "TEST_ONLY":
-                    if os.environ.get("PYTEST_CURRENT_TEST") is None:
-                        if should_close:
-                            active_conn.rollback()
-                        raise PermissionError(
-                            "TEST_ONLY callback receipt cannot authorize real transport "
-                            "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
-                        )
+                c_prov = str(callback_ownership_receipt.get("provenance") or "").strip()
+                if c_prov != "REGISTERED_CALLBACK_VALIDATION":
+                    if should_close:
+                        active_conn.rollback()
+                    raise PermissionError(
+                        "TEST_ONLY callback receipt cannot authorize real transport "
+                        "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                    )
                 if not verify_canonical_callback_ownership_receipt(
                     callback_ownership_receipt,
                     telegram_update_id=up_id,
