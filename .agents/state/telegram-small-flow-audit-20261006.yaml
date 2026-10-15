@@ -8663,7 +8663,7 @@ S12_35_504_post_delivery_evidence_closure_20261015:
   production_data_writes: 0
 
 S12_35_505_admin_root_stale_suffixes_20261016:
-  status: locally_verified_green_delivery_pending
+  status: merged_deployed_runtime_verified_a7_open
   contract: >-
     Dispatch the Admin menu's emitted menu|admin_support and
     menu|admin_broadcast_lite roots plus stale suffixes through the exact
@@ -8703,8 +8703,29 @@ S12_35_505_admin_root_stale_suffixes_20261016:
   wallet_mutations: 0
   production_data_writes: 0
   delivery: >-
-    Local candidate only in this continuation; GitHub CI, push, merge, deploy
-    and live verification remain separate gates. A7 remains open.
+    PR #1434 is merged at 3d17231cdfbffecdf999b3398c189bb83f36558e. Exact
+    bot-only deploy workflow 38784324561 completed SUCCESS with
+    deploy_workers=false. Read-only VPS verification reports the same BOT_SHA,
+    bot/web/nginx active, NRestarts=0, and /health status=ok. Worker remains
+    f3fe738f3764e61a7edc85c386c917f167fd8d8d. A7 remains open because no
+    exact anonymous event is correlated to the Owner's Account -> Back click.
+
+S12_35_505_post_delivery_20261016:
+  status: closed_runtime_evidence_recorded
+  contract: >-
+    Record the one approved post-merge bot-only delivery and keep the protected
+    product/engine boundary explicit. Do not create another code PR or repeat
+    the deploy for the same stale-root fix.
+  evidence: >-
+    Main and VPS are aligned at 3d17231cdfbffecdf999b3398c189bb83f36558e.
+    Workflow 38784324561 is SUCCESS with deploy_workers=false; bot.py blob is
+    74335a9b49a8c9b5ac1256c527d2fce1aee6d2e6; bot/web/nginx are active,
+    NRestarts=0, and /health is ok. Worker SHA is unchanged. Provider calls,
+    wallet mutations, production writes and real Telegram sends are 0.
+  remaining_gate: >-
+    A7 is explicitly deferred/open: the manual <1s observations for tested
+    routes do not correlate the Owner's Account -> Back 2-3s report to an
+    anonymous server event, so no client/network/device/VPS cause is inferred.
 
 current_continuation_recheck_admin_growth_20261016:
   status: locally_verified_no_new_red

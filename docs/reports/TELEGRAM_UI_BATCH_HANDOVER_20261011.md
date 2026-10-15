@@ -95,3 +95,11 @@ client smoothness or product-output success.
   to polish a passing route. A7 remains partial because Account → Back has no
   exact click-correlated anonymous event. Do not infer network/device/VPS cause
   or all-button smoothness from the current server samples.
+
+### Superseding handover — 16/10/2026
+
+The continuation is delivered and runtime-verified: PR #1434 merged at
+`3d17231cdfbffecdf999b3398c189bb83f36558e`; workflow `38784324561` succeeded
+with `deploy_workers=false`; VPS SHA/services/health match. S12.35.505 is
+closed as live evidence. Keep A7 explicitly deferred and do not reopen the
+already-verified callback code without a new RED and Owner scope decision.

@@ -3785,3 +3785,22 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   either collected or explicitly deferred by the Owner.
 - S12.35.505 is locally GREEN but not yet delivered to GitHub/runtime in this
   continuation; keep merge/deploy status separate from the fixture result.
+
+### Superseding post-delivery readback — 16/10/2026
+
+- S12.35.505 is now **MERGED, DEPLOYED and LIVE-VERIFIED**. PR #1434 merged at
+  `3d17231cdfbffecdf999b3398c189bb83f36558e`; the single bot-only workflow
+  [38784324561](https://github.com/manhtoangreensky-wq/bot/actions/runs/38784324561)
+  completed `SUCCESS` with `deploy_workers=false`.
+- Read-only VPS evidence: `BOT_SHA=3d17231cdfbffecdf999b3398c189bb83f36558e`,
+  `bot.py` blob `74335a9b49a8c9b5ac1256c527d2fce1aee6d2e6`, bot/web/nginx
+  `active`, `NRestarts=0`, and `/health` returned `status=ok`. The worker
+  remained at `f3fe738f3764e61a7edc85c386c917f167fd8d8d`.
+- Protected-scope comparator remains clean: no Product/Edit/Image/Video/SubDub/
+  Voice/Music route or engine, provider, worker, AutoPost, wallet/PayOS,
+  ENV/secret or production-data logic changed in this continuation. Provider
+  calls, wallet mutations, production writes and real Telegram sends are `0`.
+- A7 remains explicitly open/deferred. Manual `<1s` results for tested routes
+  do not correlate the Owner's Account → Back report to an anonymous event and
+  do not identify a network/device/VPS cause; no speculative latency patch or
+  hardware purchase is justified.
