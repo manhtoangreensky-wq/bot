@@ -116,22 +116,29 @@ language lookup/render path, while the too-few-files alert remains the sole ACK.
 Document processing, file delivery, charging, wallet, provider, engine and
 AutoPost paths are unchanged.
 
-## 4. Release gates still open
+## 4. Release-gate result and remaining evidence
 
-- Full `bot.py` compile emitted `COMPILE_START` but no completion marker during
-  a bounded ~300s observation and was stopped with Ctrl+C; status is
-  `NOT_VERIFIED` locally, not a syntax failure. Exact-head CI later verified
-  `Compile Complete Bot Source` and `Python Compile Guard` successfully in run
-  `38700321728`.
+- Full `bot.py` compile was not counted locally because the bounded Windows
+  observation emitted no completion marker; this is `NOT_VERIFIED`, not a
+  syntax failure. The exact-head Ubuntu source-compile run `38758593047`
+  completed SUCCESS and verified the source compile/tokenize guards.
 - The broader Admin child/Back regression runner did not return a completion
   marker in the bounded local observation window; it is `NOT_VERIFIED`, not a
   product failure or pass, and is not being repeated unchanged.
-- Exact-head CI run `38755547063` for PR #1432 at head
-  `586b7004430878a77ede435bc62c4ff3c131af29` completed SUCCESS, including the
-  new Document Tools ACK-order regression; the independent source-compile run
-  `38755547047` also completed SUCCESS. All selected Admin/customer, stale-root,
-  PayOS ACK and workflow-hygiene steps were green.
-- Protected-scope comparator must show no route/engine/provider/worker delta.
-- No provider call, wallet mutation, production DB write or real Telegram send.
-- Merge, deploy, restart and live-client latency claims remain separate owner
-  gates; focused fixture GREEN is not LIVE evidence.
+- PR #1432 is merged: head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7`, merge
+  commit `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`. Exact-head full
+  hygiene/regression CI `38758593472` and source-compile CI `38758593047` are
+  SUCCESS; selected stale-root, Admin/customer, ACK and workflow gates are
+  green.
+- The one approved bot-only deploy `38761999018` is SUCCESS with
+  `deploy_workers=false`. Read-only VPS verification reports BOT_SHA
+  `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`, all three services active,
+  `NRestarts=0`, and `/health` status `ok`.
+- Protected-scope review remains clean: no Product/Edit/Image/Video/SubDub/
+  Voice/Music route or engine, provider, worker, AutoPost, wallet/PayOS,
+  ENV/secret or production-data change was introduced. Provider calls, wallet
+  mutations, production DB writes and real Telegram sends are all `0`.
+- Remaining gate is A7 only: Account → Back has no exact anonymous server event
+  correlated to the Owner's click timestamp. Therefore client/network cause,
+  device diagnosis and “all buttons are smooth” are not claimed; no hardware or
+  latency patch is justified without that evidence.
