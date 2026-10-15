@@ -43705,10 +43705,9 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Xử lý sinh hóa đơn và link QR Động từ PayOS khi khách click chọn gói"""
     expire_old_payos_orders()
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3:
-        return
+        return await query.answer()
     _, pkg_key, uid_str = parts
     uid = int(uid_str)
     lang = get_user_language(uid) or "vi"
@@ -43718,11 +43717,11 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     deep_copy = public_topup_deep_copy(lang)
 
     if query.from_user.id != uid:
-        await query.answer(
+        return await query.answer(
             "⚠️ Không phải yêu cầu của bạn!" if locale == "vi" else f"⚠️ {hub_copy['common_failed']}",
             show_alert=True,
         )
-        return
+    await query.answer()
 
     if pkg_key.startswith("manual_"):
         manual_key = pkg_key.replace("manual_", "", 1)

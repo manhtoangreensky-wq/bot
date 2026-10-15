@@ -8256,6 +8256,7 @@ S12_35_252_archive_view_file_local_test_rerun:
       - S12.35.491_billing_root_suffix
       - S12.35.492_main_docs_root_suffix
       - S12.35.493_admin_submenu_exact_root_matrix
+      - S12.35.494_payos_package_ownership_ack
     closed_without_patch:
       - S12.35.484_main_topup_existing_origin_guard
     not_open:
@@ -8277,6 +8278,7 @@ S12_35_252_archive_view_file_local_test_rerun:
       use distinct callback roots. This is not live Telegram evidence.
     allowed_scope:
       - bot.py handle_menu_callback stale-root guards only
+      - bot.py handle_package_choice ACK order only
       - focused current-main callback tests
       - .github/workflows/ci-main.yml test-only stale-root gate
       - tester plan/checklist/state evidence
@@ -8297,3 +8299,27 @@ S12_35_252_archive_view_file_local_test_rerun:
     delivery: >-
       Branch pushed and PR #1432 opened at head e7fde4ee. Merge, deploy and
       restart remain intentionally unperformed; CI/exact-head gates are open.
+
+  S12_35_494_payos_package_ownership_ack:
+    status: local_green
+    contract: >-
+      Dispatch the emitted payos_package_callback_data("50k", uid) through the
+      exact registered handle_package_choice route. Unauthorized owner-token
+      taps must receive one alert ACK; authorized taps keep one normal early ACK.
+      Payment, PayOS, wallet/Xu, price and provider work are out of scope.
+    red: >-
+      The handler ACKed normally before checking query.from_user.id and then
+      ACKed the unauthorized alert, so one callback received two answers.
+    change: >-
+      Moved the normal ACK after the owner gate; malformed callback shape keeps
+      one normal ACK and unauthorized callbacks return the single alert.
+    green: >-
+      Registered producer/handler source contract test returned 1 test in
+      0.194s OK; changed test py_compile and git diff --check returned exit 0.
+    protected_scope: >-
+      No order creation, PayOS request, wallet/Xu, pricing, provider, job,
+      Product Video, Image, Music, Voice, SubDub, AutoPost or route-engine body
+      changed.
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0

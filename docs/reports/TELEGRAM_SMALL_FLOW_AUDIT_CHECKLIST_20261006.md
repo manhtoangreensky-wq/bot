@@ -3369,6 +3369,24 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Runtime newer than target or an unapproved protected delta stops that deploy.
 - Status: review/delivery preparation; client visual/latency remains deferred.
 
+### S12.35.494 — PayOS package ownership callback ACK
+
+- Contract: use the emitted `payos_package_callback_data("50k", uid)` and the
+  exact registered `handle_package_choice` route. An unauthorized tap must
+  produce one alert ACK and no payment/UI action. The authorized path keeps one
+  normal early ACK. Do not create an order, call PayOS, mutate wallet/Xu or
+  change pricing.
+- RED: the registered handler acknowledged once before ownership validation and
+  then acknowledged the unauthorized alert, producing two callback answers.
+- Minimal fix: move the normal ACK after the owner gate; malformed callbacks
+  retain one normal ACK and unauthorized callbacks return the single alert.
+- GREEN: `python -m unittest -v tests.test_package_choice_ack_only` → `Ran 1
+  test in 0.194s — OK`; changed test `py_compile` and `git diff --check` exit 0.
+- Protected review: only the ACK order in `handle_package_choice`, its focused
+  test, CI gate and audit docs changed; order, PayOS, wallet, price and provider
+  code were untouched. No external call, DB write, wallet mutation or Telegram
+  send occurred.
+
 ### S12.35.292 — Admin Finance Audit Back origin
 
 - Contract: from Admin `menu|finance_tax_vat`, activate the actual emitted
