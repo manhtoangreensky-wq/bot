@@ -3423,6 +3423,24 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Telegram. Batch CI/release and live performance remain open.
 - Status: locally verified; final batch CI/delivery pending.
 
+### S12.35.495 — Manual package admin callback ACK
+
+- Contract: use the emitted `manual_package_callback_data("50k", uid)` and
+  the exact registered `handle_manual_package_choice` route. A non-admin tap
+  on `manual|approve...`, `reject` or `confirm` must produce one denial alert;
+  an authorized admin gets one normal ACK before the existing branch. No
+  pending-deposit read/write, Xu mutation, PayOS call or approval action runs.
+- RED: the handler issued a normal ACK before its admin gate, then issued the
+  denial alert, yielding two answers for one unauthorized callback.
+- Minimal fix: malformed callbacks return one normal ACK; admin actions check
+  admin first and ACK once only after authorization; non-admin actions keep one
+  normal ACK before their existing owner/state checks.
+- GREEN: `python -m unittest -v tests.test_manual_package_choice_ack_only` →
+  `Ran 1 test in 0.190s — OK`; changed-test `py_compile` and `git diff --check`
+  exit 0.
+- Protected review: only ACK ordering, focused test, CI gate and audit docs
+  changed; approval/payment/wallet/provider/engine code is untouched.
+
 ### S12.35.291 — Admin tax report selector Back origin
 
 - Contract: enter the Admin VAT/CIT module through `menu|finance_tax_vat`, open its emitted VAT/CIT report selector, and dispatch that selector's emitted Back through the registered `menu|` handler. Back must restore the immediate tax module, not Finance root; public access must be rejected before report helpers.

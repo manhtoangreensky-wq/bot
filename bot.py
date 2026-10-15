@@ -44017,14 +44017,14 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_manual_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = (query.data or "").split("|")
     if len(parts) < 2:
-        return
+        return await query.answer()
     action = parts[1]
     if action in {"approve", "approve_expected", "approve_custom", "reject", "confirm"}:
         if not is_admin_user(query.from_user.id):
             return await query.answer("Bạn không có quyền duyệt bill.", show_alert=True)
+        await query.answer()
         if action in {"approve", "approve_expected", "approve_custom"} and len(parts) == 3 and str(parts[2]).isdigit():
             deposit_id = int(parts[2])
             conn = db_connect()
@@ -44093,6 +44093,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             finally:
                 context.args = old_args
         return
+    await query.answer()
     lang = get_user_language(query.from_user.id) or "vi"
     copy = public_hub_copy(lang)
     account_copy = public_account_flow_copy(lang)

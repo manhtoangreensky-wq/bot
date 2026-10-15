@@ -55,6 +55,7 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.492 | `menu|main_docs` stale suffix | TARGETED GREEN | exact current-main RED, focused regression OK; document processing untouched |
 | S12.35.493 | exact Admin submenu roots (11 producers) | TARGETED GREEN | matrix RED→GREEN (`Ran 1 test` with 11 subtests); child-origin maps remain unchanged |
 | S12.35.494 | registered PayOS package ownership ACK | LOCKED GREEN | RED: unauthorized `payos_pkg|...` received normal ACK then alert; GREEN: producer/registration contract passes with alert-only denial; payment branches unchanged |
+| S12.35.495 | registered manual package admin ownership ACK | LOCKED GREEN | RED: non-admin `manual|approve...` received normal ACK then denial alert; GREEN: admin gate precedes normal ACK; approval/payment branches unchanged |
 
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
@@ -66,6 +67,11 @@ S12.35.494 changes only the ACK order in `handle_package_choice`: malformed
  callbacks keep one normal ACK, an unauthorized owner token gets one alert ACK,
  and an authorized owner gets one early normal ACK before the existing payment
  flow. No order, wallet, PayOS request, price or provider branch changes.
+
+S12.35.495 applies the same ACK-only contract to `handle_manual_package_choice`:
+malformed controls receive one normal ACK, non-admin approval actions receive
+one denial alert, and authorized admin actions receive one normal ACK before
+the existing read/approval branch.
 
 ## 4. Release gates still open
 

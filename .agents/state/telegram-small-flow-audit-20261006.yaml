@@ -8257,6 +8257,7 @@ S12_35_252_archive_view_file_local_test_rerun:
       - S12.35.492_main_docs_root_suffix
       - S12.35.493_admin_submenu_exact_root_matrix
       - S12.35.494_payos_package_ownership_ack
+      - S12.35.495_manual_package_admin_ownership_ack
     closed_without_patch:
       - S12.35.484_main_topup_existing_origin_guard
     not_open:
@@ -8279,6 +8280,7 @@ S12_35_252_archive_view_file_local_test_rerun:
     allowed_scope:
       - bot.py handle_menu_callback stale-root guards only
       - bot.py handle_package_choice ACK order only
+      - bot.py handle_manual_package_choice ACK order only
       - focused current-main callback tests
       - .github/workflows/ci-main.yml test-only stale-root gate
       - tester plan/checklist/state evidence
@@ -8327,6 +8329,32 @@ S12_35_252_archive_view_file_local_test_rerun:
       No order creation, PayOS request, wallet/Xu, pricing, provider, job,
       Product Video, Image, Music, Voice, SubDub, AutoPost or route-engine body
       changed.
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+
+  S12_35_495_manual_package_admin_ownership_ack:
+    status: local_green
+    contract: >-
+      Dispatch emitted manual_package_callback_data("50k", uid) through the
+      exact registered handle_manual_package_choice route. Non-admin admin
+      actions receive one denial alert; authorized admins receive one normal
+      ACK before the existing branch. Payment, approval, wallet/Xu and data
+      work are out of scope.
+    red: >-
+      The handler ACKed normally before is_admin_user and then ACKed the
+      denial alert, producing two answers for one unauthorized callback.
+    change: >-
+      Malformed controls keep one normal ACK; admin actions check authorization
+      before normal ACK; non-admin actions retain one normal ACK before their
+      existing state/owner checks.
+    green: >-
+      Registered producer/handler source contract test returned 1 test in
+      0.190s OK; changed test py_compile and git diff --check returned exit 0.
+    protected_scope: >-
+      No pending-deposit read/write, approval, PayOS, wallet/Xu, pricing,
+      provider, job, Product Video, Image, Music, Voice, SubDub, AutoPost or
+      route-engine body changed.
     provider_calls: 0
     wallet_mutations: 0
     production_data_writes: 0
