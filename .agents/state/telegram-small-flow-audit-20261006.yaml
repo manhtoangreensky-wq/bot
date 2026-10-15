@@ -8268,9 +8268,13 @@ S12_35_252_archive_view_file_local_test_rerun:
       ACK, so its speculative duplicate guard was removed.
     green: >-
       Focused registered-handler unittest batch returned `Ran 19 tests in
-      3.172s -- OK` after the minimal guards (the Admin matrix contains 11
+      3.392s -- OK` after the minimal guards (the Admin matrix contains 11
       producer-root subtests). No external I/O, provider call,
       wallet mutation, production data write or real Telegram send occurred.
+    producer_inventory: >-
+      Read-only source inventory found no emitted menu|<guarded-root>|... value
+      beyond the explicit main_memory|freehub allowlist; valid child screens
+      use distinct callback roots. This is not live Telegram evidence.
     allowed_scope:
       - bot.py handle_menu_callback stale-root guards only
       - focused current-main callback tests
@@ -8283,7 +8287,7 @@ S12_35_252_archive_view_file_local_test_rerun:
     production_data_writes: 0
     full_compile: >-
       NOT_VERIFIED: COMPILE_START emitted, no completion marker in a bounded
-      ~270s observation, stopped with Ctrl+C; not classified as syntax failure.
+      ~300s observation, stopped with Ctrl+C; not classified as syntax failure.
     broader_admin_child_runner: NOT_VERIFIED
     protected_code_comparator_exit: 0
     changed_file_scope_exit: 0

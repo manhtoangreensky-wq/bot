@@ -3240,11 +3240,11 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 
 - [x] Exact current-main baseline probes were run through the registered Menu
   handler with inert cleanup/render seams and no I/O.
-- [x] Focused unittest batch: `Ran 19 tests in 3.172s`, `OK` (Admin matrix
+- [x] Focused unittest batch: `Ran 19 tests in 3.392s`, `OK` (Admin matrix
   contains 11 producer-root subtests).
 - [x] Changed test modules compile: `TEST_MODULE_COMPILE_EXIT=0`.
 - [ ] Full `bot.py` compile emitted `COMPILE_START` but no completion marker
-  during a bounded ~270s observation and was stopped with Ctrl+C;
+  during a bounded ~300s observation and was stopped with Ctrl+C;
   `FULL_SOURCE_COMPILE=NOT_VERIFIED` (not interpreted as a syntax failure).
 - [x] `git diff --check`: `DIFF_CHECK_EXIT=0`.
 - [x] Added `bot.py` executable lines contain no protected provider/worker/
@@ -3255,6 +3255,10 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   `NO_HANDLER_ENTRY_EXIT=0`.
 - [x] All public/admin main-menu callback patterns across configured locales:
   `ALL_LOCALE_HANDLER_MAP_EXIT=0` (1 test, 2.768s).
+- [x] Read-only producer inventory found no emitted `menu|<guarded-root>|...`
+  values beyond the explicit `main_memory|freehub` allowlist; valid child
+  screens use distinct callback roots. This is source inventory evidence only,
+  not live Telegram evidence.
 - [ ] No PR/push/merge/deploy/restart is claimed by this checklist yet.
 - [ ] Broader Admin child/Back runner: `NOT_VERIFIED` (no completion marker;
   not interpreted as a product failure or pass).
