@@ -56,6 +56,7 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.493 | exact Admin submenu roots (11 producers) | TARGETED GREEN | matrix RED→GREEN (`Ran 1 test` with 11 subtests); child-origin maps remain unchanged |
 | S12.35.494 | registered PayOS package ownership ACK | LOCKED GREEN | RED: unauthorized `payos_pkg|...` received normal ACK then alert; GREEN: producer/registration contract passes with alert-only denial; payment branches unchanged |
 | S12.35.495 | registered manual package admin ownership ACK | LOCKED GREEN | RED: non-admin `manual|approve...` received normal ACK then denial alert; GREEN: admin gate precedes normal ACK; approval/payment branches unchanged |
+| S12.35.496 | malformed provider-choice UID | DEFERRED BY PROTECTED SCOPE | `provider_keyboard()` emits `prov|voice/image|...|<uid>` and exact `^prov\\|` registration reaches `handle_provider_choice`; malformed UID reaches `int(uid_str)` before ACK. No patch is authorized in this UI-only batch because this is the protected Voice/Image provider-choice boundary. |
 
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
@@ -72,6 +73,10 @@ S12.35.495 applies the same ACK-only contract to `handle_manual_package_choice`:
 malformed controls receive one normal ACK, non-admin approval actions receive
 one denial alert, and authorized admin actions receive one normal ACK before
 the existing read/approval branch.
+
+S12.35.496 is a follow-up item only. Reopening it requires explicit Owner
+permission for a narrow malformed-UID guard at the protected provider-choice
+boundary; no permission is inferred from this UI audit.
 
 ## 4. Release gates still open
 

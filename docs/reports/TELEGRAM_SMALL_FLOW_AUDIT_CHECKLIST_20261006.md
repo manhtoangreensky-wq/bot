@@ -3441,6 +3441,18 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - Protected review: only ACK ordering, focused test, CI gate and audit docs
   changed; approval/payment/wallet/provider/engine code is untouched.
 
+### S12.35.496 — Provider-choice malformed UID (deferred)
+
+- Evidence: `provider_keyboard()` emits the real `prov|voice|...|uid` and
+  `prov|image|...|uid` values; registration is the exact `^prov\|` handler.
+  The current handler parses `uid = int(uid_str)` before `query.answer()`, so a
+  stale/malformed UID can raise before a safe callback alert.
+- Scope decision: deferred. This is the protected Voice/Image provider-choice
+  boundary. No patch, test gate, provider call, wallet mutation or engine
+  change is made in the UI-only batch.
+- Reopen condition: explicit Owner approval for a narrow malformed-UID guard at
+  this provider-choice boundary, with no changes to provider/voice/image work.
+
 ### S12.35.291 — Admin tax report selector Back origin
 
 - Contract: enter the Admin VAT/CIT module through `menu|finance_tax_vat`, open its emitted VAT/CIT report selector, and dispatch that selector's emitted Back through the registered `menu|` handler. Back must restore the immediate tax module, not Finance root; public access must be rejected before report helpers.

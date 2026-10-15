@@ -8358,3 +8358,18 @@ S12_35_252_archive_view_file_local_test_rerun:
     provider_calls: 0
     wallet_mutations: 0
     production_data_writes: 0
+
+  S12_35_496_provider_choice_malformed_uid:
+    status: deferred_protected_scope
+    evidence: >-
+      provider_keyboard emits prov|voice/image|...|uid and exact ^prov\|
+      registration reaches handle_provider_choice. The handler parses
+      int(uid_str) before query.answer(), so malformed stale UID can raise
+      before a safe alert. No production call was made.
+    decision: >-
+      Do not patch in this UI-only batch: this is the protected Voice/Image
+      provider-selection boundary. Reopen only with explicit Owner permission
+      for a narrow malformed-UID guard.
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
