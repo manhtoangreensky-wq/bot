@@ -28,8 +28,8 @@ spec admission callback S12.35.497–S12.35.502 trên
   ALL_OK` cho Vault; test-file `py_compile` và `git diff --check` đều exit `0`.
 - S12.35.503 khóa ACK của `docflow|confirm`: state/config/minimum-file admission
   nội bộ xong trước, ACK đúng một lần, rồi mới lookup ngôn ngữ/render. Regression
-  giữ alert một lần khi thiếu file; PR #1432 CI run `38752240110` và source
-  compile run `38752240014` đều SUCCESS.
+  giữ alert một lần khi thiếu file; PR #1432 exact head `586b7004430878a77ede435bc62c4ff3c131af29`
+  đã đạt CI run `38755547063` và source-compile run `38755547047` đều SUCCESS.
 - Chưa deploy, chưa restart, chưa gọi provider, chưa gửi Telegram thật, chưa
   ghi DB/wallet và chưa chốt full `bot.py` compile local; CI/merge/deploy vẫn
   là gate riêng.

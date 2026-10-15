@@ -8600,9 +8600,10 @@ S12_35_252_archive_view_file_local_test_rerun:
       Focused regression added to tests/test_doc_tool_callback_single_ack.py
       records the event order ACK then language for a valid confirm and keeps
       the existing one-alert too-few-files assertion. Changed test py_compile
-      exited 0; git diff --check exited 0. PR #1432 exact head 03809988 was
-      CI-verified by run 38752240110 (SUCCESS) and source-compile run
-      38752240014 (SUCCESS), including the registered Document Tools regression.
+      exited 0; git diff --check exited 0. PR #1432 exact head
+      586b7004430878a77ede435bc62c4ff3c131af29 was CI-verified by run
+      38755547063 (SUCCESS) and source-compile run 38755547047 (SUCCESS),
+      including the registered Document Tools regression.
     allowed_scope:
       - bot.py handle_doc_tool_callback ACK/language ordering only
       - tests/test_doc_tool_callback_single_ack.py
@@ -8618,9 +8619,9 @@ S12_35_252_archive_view_file_local_test_rerun:
     production_data_writes: 0
 
 latest_pr_1432_release_gate_readback_20261015: >-
-  PR #1432 is OPEN/MERGEABLE at exact head 03809988fb22e4619a50cf54591f362587fcb436.
-  Exact-head CI run 38752240110 (full hygiene/regression) and source-compile run
-  38752240014 both completed SUCCESS. Read-only VPS runtime remains
+  PR #1432 is OPEN/MERGEABLE at exact head 586b7004430878a77ede435bc62c4ff3c131af29.
+  Exact-head CI run 38755547063 (full hygiene/regression) and source-compile run
+  38755547047 both completed SUCCESS. Read-only VPS runtime remains
   f3fe738f3764e61a7edc85c386c917f167fd8d8d; bot.py SHA-256 is
   24954ca64335283b9b64cd9f519e60fe682f79ac17565bc25a6835fbb0b83a43, all three
   services are active/running with NRestarts=0, and internal 127.0.0.1:8080/health

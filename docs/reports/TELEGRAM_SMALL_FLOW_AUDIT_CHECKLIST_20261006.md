@@ -3669,7 +3669,8 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   locks event order `ACK -> language` for a valid emitted callback; the existing
   too-few-files regression still asserts one alert and no render. Changed-test
   `py_compile` exited `0`; `git diff --check` exited `0`. PR #1432 exact head
-  `03809988` passed CI run `38752240110` and source-compile run `38752240014`.
+  `586b7004430878a77ede435bc62c4ff3c131af29` passed CI run `38755547063` and
+  source-compile run `38755547047`.
 - Protected review/limits: only `bot.py` callback ordering and its focused
   regression changed. No provider, wallet, job, production DB, Telegram send,
   Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, merge, deploy or
@@ -3678,13 +3679,14 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 
 ### Batch release gate recheck — 15/10/2026
 
-- PR #1432 is OPEN and MERGEABLE at exact head `03809988`; the branch-introduced
+- PR #1432 is OPEN and MERGEABLE at exact head
+  `586b7004430878a77ede435bc62c4ff3c131af29`; the branch-introduced
   diff from its merge base contains no `services/`, `providers/`, worker,
   `remote_worker`, config, wallet or AutoPost files. The two main-only commits
   (`f3fe738f` and `358e28de`) are not part of the branch patch and remain on
   current main.
 - CI is GREEN for the exact head: full hygiene/regression run
-  `38752240110` and source-compile/tokenize run `38752240014`. The latter ran
+  `38755547063` and source-compile/tokenize run `38755547047`. The latter ran
   `py_compile bot.py`, tokenize and the complete-source guard on Ubuntu.
 - Read-only VPS recheck remains runtime SHA `f3fe738f3764e61a7edc85c386c917f167fd8d8d`,
   `toanaas-bot.service`, `toanaas-web.service` and `nginx.service` all

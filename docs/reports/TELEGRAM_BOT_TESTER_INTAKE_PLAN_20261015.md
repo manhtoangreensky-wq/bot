@@ -126,9 +126,10 @@ AutoPost paths are unchanged.
 - The broader Admin child/Back regression runner did not return a completion
   marker in the bounded local observation window; it is `NOT_VERIFIED`, not a
   product failure or pass, and is not being repeated unchanged.
-- Exact-head CI run `38752240110` for PR #1432 completed SUCCESS, including the
+- Exact-head CI run `38755547063` for PR #1432 at head
+  `586b7004430878a77ede435bc62c4ff3c131af29` completed SUCCESS, including the
   new Document Tools ACK-order regression; the independent source-compile run
-  `38752240014` also completed SUCCESS. All selected Admin/customer, stale-root,
+  `38755547047` also completed SUCCESS. All selected Admin/customer, stale-root,
   PayOS ACK and workflow-hygiene steps were green.
 - Protected-scope comparator must show no route/engine/provider/worker delta.
 - No provider call, wallet mutation, production DB write or real Telegram send.
