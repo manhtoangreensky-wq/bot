@@ -9,20 +9,19 @@ objective: >-
   narrow defects; preserve AutoPost WIP and stable Product/Edit/SubDub/Voice/Music
   engines. Do not change secrets, wallets, production data, call paid providers,
   send real Telegram messages, or merge/deploy/restart without authorization.
-current_spec: S12.35.503-document-confirm-ack-order
+current_spec: S12.35.504-post-delivery-evidence-closure
 current_spec_contract: >-
-  Verify the Document Tools confirm callback's ACK-before-language ordering with
-  a focused registered-handler regression, changed-test compilation,
-  diff/scope comparison and the existing consolidated PR CI gate. Keep full
-  source compile and runtime delivery explicitly separate until empirical
-  evidence exists.
-current_branch: fix/telegram-stale-root-callbacks-20261015
-current_base_sha: 7cd336dedd6f3946cd3fe0772b4793bf47935747
+  Reconcile checklist, tester plan, operational report and durable state after
+  the single PR #1432 merge and bot-only deployment. Keep A7 client-correlation
+  evidence explicitly open until a precise click timestamp matches an anonymous
+  route event; do not add speculative callback code.
+current_branch: docs/ui-callback-evidence-20261015
+current_base_sha: 55abb1d0701a2e6f7e399d6583a2ad2b91687afc
 release_cadence: >-
   Keep the remaining specs on one batch branch. Do not create a PR, merge, deploy,
   or restart per spec; complete the ordered checklist and final CI first, then
   deliver one batch PR and one merge/deploy cycle with runtime verification.
-branch: fix/telegram-stale-root-callbacks-20261015
+branch: docs/ui-callback-evidence-20261015
 allowed_scope:
   - Checklist-ordered small-flow emitted-control, callback, pending-state and UI evidence with inert fixtures
   - Narrow fixes only after a reproducible UX/callback/pending failure; no speculative edits
@@ -8619,13 +8618,46 @@ S12_35_252_archive_view_file_local_test_rerun:
     production_data_writes: 0
 
 latest_pr_1432_release_gate_readback_20261015: >-
-  PR #1432 is OPEN/MERGEABLE at exact head 586b7004430878a77ede435bc62c4ff3c131af29.
-  Exact-head CI run 38755547063 (full hygiene/regression) and source-compile run
-  38755547047 both completed SUCCESS. Read-only VPS runtime remains
-  f3fe738f3764e61a7edc85c386c917f167fd8d8d; bot.py SHA-256 is
-  24954ca64335283b9b64cd9f519e60fe682f79ac17565bc25a6835fbb0b83a43, all three
-  services are active/running with NRestarts=0, and internal 127.0.0.1:8080/health
-  returns status=ok. PR #1432 is not merged/deployed and no restart occurred.
-  Branch-introduced protected-scope comparator found no services/providers/worker/
-  remote_worker/config/wallet/AutoPost file changes; A7 live client correlation
-  remains partial.
+  PR #1432 is MERGED at head 44156d7a7952cb27e698c0be4cbe6c3daf47fcc7 with merge
+  commit 55abb1d0701a2e6f7e399d6583a2ad2b91687afc. Exact-head CI runs
+  38758593472 (full hygiene/regression) and 38758593047 (source compile) both
+  completed SUCCESS. Bot-only deploy run 38761999018 completed SUCCESS with
+  target_sha=55abb1d0701a2e6f7e399d6583a2ad2b91687afc and deploy_workers=false.
+  Read-only VPS verification at 2026-10-15 22:56:06 +07 reports BOT_SHA=
+  55abb1d0701a2e6f7e399d6583a2ad2b91687afc, toanaas-bot.service,
+  toanaas-web.service and nginx.service active, NRestarts=0, and /health
+  status=ok. The protected comparator remains clean for services/providers/
+  workers/engines/config/wallet/AutoPost; provider_calls=0, wallet_mutations=0
+  and production_data_writes=0. A7 remains partial: no exact anonymous event
+  is correlated to the Owner's Account -> Back click, so client/network cause
+  and all-button smoothness are not claimed.
+
+S12_35_504_post_delivery_evidence_closure_20261015:
+  status: docs_verified_runtime_live_a7_open
+  contract: >-
+    Reconcile the current UI/callback checklist, tester plan and operational
+    report after PR #1432 delivery. Every current claim must distinguish merged,
+    deployed and live evidence; stale pre-merge wording is superseded without
+    changing historical entries. Keep Account -> Back latency and client
+    smoothness explicitly open until a click-correlated event exists.
+  evidence: >-
+    Current GitHub main and VPS BOT_SHA are both
+    55abb1d0701a2e6f7e399d6583a2ad2b91687afc. PR #1432 is MERGED; CI runs
+    38758593472 and 38758593047 are SUCCESS; deploy run 38761999018 is SUCCESS
+    with deploy_workers=false. VPS services are active and /health is ok with
+    NRestarts=0. The updated docs identify the remaining A7 evidence gap and
+    retain provider/wallet/production-write counts at zero.
+  allowed_scope:
+    - .agents/state/telegram-small-flow-audit-20261006.yaml
+    - docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md
+    - docs/reports/TELEGRAM_BOT_TESTER_INTAKE_PLAN_20261015.md
+    - docs/reports/TELEGRAM_UI_BATCH_CLOSURE_20261008.md
+    - docs/reports/TELEGRAM_UI_BATCH_HANDOVER_20261011.md
+    - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
+  protected_scope:
+    - bot.py callback and navigation behavior
+    - Product/Edit/Image/Video/SubDub/Voice/Music routes and engines
+    - providers, workers, AutoPost, wallet/PayOS, ENV/secrets and production data
+  provider_calls: 0
+  wallet_mutations: 0
+  production_data_writes: 0

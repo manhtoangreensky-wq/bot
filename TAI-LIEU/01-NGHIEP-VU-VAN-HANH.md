@@ -1780,3 +1780,22 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Chưa kiểm tra viewport/wrapping và độ mượt mọi nút trên Telegram client. Hành vi category-picker “Tạo Ticket” vẫn là lựa chọn UX chưa chốt. Report/action terminals, payment/provider và các engine giữ ngoài phạm vi UI audit.
 - Lần giao hàng đã xác minh trước batch này: PR #1415 merge và deploy bot-only run #37849493306 tại SHA `4dc0c31bab44d2c0427a7d4ab38b28b1e72693ec`; service readback/health bằng chứng được gắn ở comment PR #1415. Batch hiện tại vẫn local, chưa push/PR/merge/deploy. Chỉ chạy một chu kỳ giao hàng sau rebase một lần, exact diff review, CI xanh và protected-scope comparator.
 - Không tìm thấy mô tả baseline riêng về TTL của Storage Add-on custom input trong `TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md`; vì đây là chỉnh sửa expiry UX cho flow hiện hữu, không suy ra thay đổi engine hay sản phẩm gốc.
+
+## Current Telegram UI/callback delivery readback — 15/10/2026
+
+- PR #1432 đã MERGED: head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7`, merge
+  commit `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`. CI exact-head
+  `38758593472` (hygiene/regression) và `38758593047` (source compile) đều
+  SUCCESS.
+- Deploy bot-only `38761999018` đã SUCCESS với `deploy_workers=false`. VPS
+  đang chạy đúng `BOT_SHA=55abb1d0701a2e6f7e399d6583a2ad2b91687afc`;
+  `toanaas-bot.service`, `toanaas-web.service`, `nginx.service` active,
+  `NRestarts=0`, health `status=ok`.
+- Batch này chỉ khóa các lỗi UI/callback đã tái hiện (stale root, ACK order,
+  bounded ID). Không có thay đổi route/engine Product/Edit/Image/Video/SubDub/
+  Voice/Music, provider/worker, AutoPost, ví/PayOS, ENV/secrets hay dữ liệu
+  production; provider call, wallet mutation và production write đều bằng `0`.
+- A7 vẫn là việc treo: chưa có event ẩn danh khớp chính xác lần bấm
+  Account → Quay lại, nên chưa được kết luận nguyên nhân do bot, Telegram,
+  mạng, thiết bị hay VPS và chưa được tuyên bố mọi nút đều mượt. Chỉ đóng A7
+  khi có click timestamp + route event tương ứng hoặc Owner quyết định hoãn.

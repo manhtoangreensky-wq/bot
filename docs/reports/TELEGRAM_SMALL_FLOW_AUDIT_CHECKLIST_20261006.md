@@ -3677,9 +3677,9 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   restart was performed. This closes the callback ordering defect; live client
   latency remains a separate A7 gate.
 
-### Batch release gate recheck — 15/10/2026
+### Batch release gate recheck — 15/10/2026 (pre-delivery snapshot)
 
-- PR #1432 is OPEN and MERGEABLE at exact head
+- At the time of this snapshot PR #1432 was OPEN and MERGEABLE at exact head
   `586b7004430878a77ede435bc62c4ff3c131af29`; the branch-introduced
   diff from its merge base contains no `services/`, `providers/`, worker,
   `remote_worker`, config, wallet or AutoPost files. The two main-only commits
@@ -3688,10 +3688,36 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - CI is GREEN for the exact head: full hygiene/regression run
   `38755547063` and source-compile/tokenize run `38755547047`. The latter ran
   `py_compile bot.py`, tokenize and the complete-source guard on Ubuntu.
-- Read-only VPS recheck remains runtime SHA `f3fe738f3764e61a7edc85c386c917f167fd8d8d`,
+- Read-only VPS recheck at that time remained runtime SHA `f3fe738f3764e61a7edc85c386c917f167fd8d8d`,
   `toanaas-bot.service`, `toanaas-web.service` and `nginx.service` all
   `active/running`, `NRestarts=0`, and internal `127.0.0.1:8080/health` returns
   `status=ok`. PR #1432 is not deployed; no restart occurred.
-- Merge/deploy and manual Telegram-client latency remain owner gates. A7 is
-  still partial because the reported click-to-screen duration has no matching
-  anonymous server event; no hardware/network cause is inferred.
+- The merge/deploy state in this historical snapshot is superseded by the
+  post-delivery readback below. A7 was, and remains, partial because the
+  reported click-to-screen duration has no matching anonymous server event;
+  no hardware/network cause is inferred.
+
+### Post-delivery closure — 15/10/2026
+
+- PR #1432 is **MERGED**: head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7`,
+  merge commit `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`. Exact-head CI runs
+  `38758593472` (full hygiene/regression) and `38758593047` (source compile)
+  both completed `SUCCESS`.
+- The single approved bot-only deploy `38761999018` completed `SUCCESS` with
+  `target_sha=55abb1d0701a2e6f7e399d6583a2ad2b91687afc` and
+  `deploy_workers=false`. Read-only VPS verification reports the same
+  `BOT_SHA`, `toanaas-bot.service`, `toanaas-web.service` and `nginx.service`
+  `active`, `NRestarts=0`, and `/health` `status=ok`.
+- The protected comparator remains clean: no Product/Edit/Image/Video/SubDub/
+  Voice/Music route or engine, provider/worker, AutoPost, wallet/PayOS,
+  ENV/secret or production-data change was introduced in this UI/callback
+  delivery. Provider calls, wallet mutations and production writes: `0`.
+- Locked-green specs S12.35.477–S12.35.503 are now delivered and runtime
+  aligned. This closes the reproduced stale-root, ACK-order and bounded-ID
+  defects; it does **not** turn fixture coverage into proof of every Telegram
+  viewport or client action.
+- A7 remains open: the Owner's Account → Back 2–3 second report has no exact
+  click-correlated anonymous event. No claim is made about network/device/VPS
+  cause or all-button smoothness; no speculative latency patch or hardware
+  purchase is justified. Goal status remains ACTIVE until that evidence gate is
+  either collected or explicitly deferred by the Owner.
