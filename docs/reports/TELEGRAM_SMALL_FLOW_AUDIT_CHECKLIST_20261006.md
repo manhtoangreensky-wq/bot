@@ -3259,7 +3259,8 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   values beyond the explicit `main_memory|freehub` allowlist; valid child
   screens use distinct callback roots. This is source inventory evidence only,
   not live Telegram evidence.
-- [ ] No PR/push/merge/deploy/restart is claimed by this checklist yet.
+- [x] Batch branch pushed and PR #1432 opened; no merge/deploy/restart has
+  been performed. CI and exact-head delivery gates remain open.
 - [ ] Broader Admin child/Back runner: `NOT_VERIFIED` (no completion marker;
   not interpreted as a product failure or pass).
 

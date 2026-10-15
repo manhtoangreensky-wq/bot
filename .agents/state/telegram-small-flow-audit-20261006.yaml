@@ -8294,4 +8294,6 @@ S12_35_252_archive_view_file_local_test_rerun:
     changed_file_scope_exit: 0
     no_handler_entry_smoke_exit: 0
     all_locale_handler_map_exit: 0
-    delivery: NOT_STARTED
+    delivery: >-
+      Branch pushed and PR #1432 opened at head e7fde4ee. Merge, deploy and
+      restart remain intentionally unperformed; CI/exact-head gates are open.
