@@ -108904,6 +108904,55 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
             pass
 
 
+async def product_video_telegram_dispatcher_ingress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Actual Telegram dispatcher ingress boundary for Product Video (Directive #1422, Section 2).
+
+    Creates durable dispatcher execution record BEFORE any handler runs.
+    DISPATCH_PROOF_CREATED_AT_ACTUAL_TELEGRAM_DISPATCH_BOUNDARY = YES
+    """
+    query = getattr(update, "callback_query", None)
+    if not query:
+        return
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or getattr(query, "data", "")
+        or ""
+    )
+    if not re.fullmatch(r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$", callback_data):
+        return
+
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    if not real_update_id or not real_cbq_id:
+        return
+
+    user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    if not user_id or not real_chat_id:
+        return
+
+    if OWNER_IDS and not is_owner_user(user_id):
+        return
+
+    from services import video_trace_state
+    try:
+        exec_info = video_trace_state.record_telegram_dispatcher_execution(
+            dispatcher_ingress_token=video_trace_state.get_dispatcher_ingress_token(),
+            telegram_update_id=real_update_id,
+            callback_query_id=real_cbq_id,
+            user_id=user_id,
+            chat_id=real_chat_id,
+            callback_action="create_video_task",
+            product_type="Product Video",
+        )
+        if exec_info and exec_info.get("execution_id"):
+            setattr(context, "_dispatcher_execution_id", exec_info["execution_id"])
+            if hasattr(context, "user_data") and isinstance(context.user_data, dict):
+                context.user_data["_dispatcher_execution_id"] = exec_info["execution_id"]
+    except Exception as exc:
+        logger.warning("Telegram dispatcher ingress record error: %s", exc)
+
+
 @video_public_callback_failure_guard
 async def handle_product_video_owner_live_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Production public Telegram callback handler for Owner-authorized live acceptance (Directive #1422, N21AA)."""
@@ -108977,27 +109026,29 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             )
 
     # Section B: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
+    # Pre-existing dispatcher execution record is strictly required
+    # (LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF=NO, CALLBACK_HANDLER_REQUIRES_PREEXISTING_DISPATCH_EXECUTION=YES)
     from services import video_trace_state
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
-    try:
-        video_trace_state.record_telegram_dispatcher_execution(
-            telegram_update_id=real_update_id,
-            callback_query_id=real_cbq_id,
-            user_id=user_id,
-            chat_id=real_chat_id,
-            callback_action="create_video_task",
-            product_type="Product Video",
-        )
-    except Exception as exec_exc:
+    exec_row = video_trace_state.get_telegram_dispatcher_execution(
+        telegram_update_id=real_update_id,
+        callback_query_id=real_cbq_id,
+        user_id=user_id,
+        chat_id=real_chat_id,
+    )
+    if not exec_row:
         await query.answer()
         return await safe_edit_or_send(
             query,
-            f"Từ chối quyền thực thi kiểm thử trực tiếp: {exec_exc}",
+            "Lỗi xác thực: Thiếu chứng từ điều phối Telegram trước đó "
+            "(LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF=NO, CALLBACK_HANDLER_REQUIRES_PREEXISTING_DISPATCH_EXECUTION=YES).",
         )
+    dispatcher_execution_id = str((exec_row or {}).get("execution_id") or "").strip()
 
     # Section 4: Durable registered dispatch event is primary authority
     try:
         cb_event = video_trace_state.register_registered_callback_dispatch_event(
+            dispatcher_execution_id=dispatcher_execution_id,
             telegram_update_id=real_update_id,
             callback_query_id=real_cbq_id,
             user_id=user_id,
@@ -109157,17 +109208,6 @@ async def handle_owner_authorized_live_test_confirm(
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
     real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
 
-    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
-    cb_ev_param = callback_event.get("event_id") if isinstance(callback_event, dict) else None
-    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
-        owner_receipt=clean_rcpt,
-        callback_event_id=cb_ev_param,
-    )
-    if not is_avail:
-        raise PermissionError(
-            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})"
-        )
-
     # Validate durable pre-existing Owner live authorization record
     is_valid, blocker, auth_data = validate_owner_live_authorization(
         clean_rcpt,
@@ -109178,7 +109218,21 @@ async def handle_owner_authorized_live_test_confirm(
         operation="create_video_task",
     )
     if not is_valid:
-        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
+        raise PermissionError(
+            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} "
+            f"Owner authorization invalid ({blocker})"
+        )
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    cb_ev_param = callback_event.get("event_id") if isinstance(callback_event, dict) else (auth_data.get("callback_event_id") if isinstance(auth_data, dict) else None)
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=clean_rcpt,
+        callback_event_id=cb_ev_param,
+    )
+    if not is_avail:
+        raise PermissionError(
+            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})"
+        )
 
     if not real_cbq_id or not real_update_id or not real_chat_id or not real_user_id:
         raise PermissionError(
@@ -274632,6 +274686,13 @@ async def lifespan(app: FastAPI):
         ),
         group=-9,
     )
+    tg_app.add_handler(
+        CallbackQueryHandler(
+            product_video_telegram_dispatcher_ingress,
+            pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+        ),
+        group=-5,
+    )
     tg_app.add_handler(BusinessConnectionHandler(handle_cskh_business_connection))
     tg_app.add_handler(BusinessMessagesDeletedHandler(handle_cskh_deleted_business_messages))
     tg_app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, handle_cskh_business_message))
@@ -275729,7 +275790,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_video_owner_live_accept_callback, pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))(?!owner_live_accept(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_architecture_profile_callback, pattern=r"^archprofile\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\|"))

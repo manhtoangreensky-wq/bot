@@ -34,6 +34,7 @@ import re
 import secrets
 import sqlite3
 import sys
+import tempfile
 import time
 from typing import Any
 import typing
@@ -546,7 +547,7 @@ def evaluate_paid_live_test_availability(
                 (up_ev, cbq_ev),
             )
             ex_row = cur_chk.fetchone()
-            if ex_row and (str(ex_row[0] or "").startswith("tde_") or str(ex_row[0] or "").startswith("tgexec_")):
+            if ex_row and (str(ex_row[0] or "").startswith("tde_") or str(ex_row[0] or "").startswith("tgexec_") or str(ex_row[0] or "").startswith("exec_")):
                 if str(ex_row[1] or "").strip() == str(ev.get("user_id") or "").strip() and str(ex_row[2] or "").strip() == str(ev.get("chat_id") or "").strip():
                     is_real_telegram_dispatch = True
         except Exception:
@@ -1675,8 +1676,10 @@ def issue_bot_mint_authority(
             ):
                 if should_close:
                     active_conn.rollback()
+                if PAID_LIVE_TEST_AVAILABLE != "YES":
+                    raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
                 raise PermissionError(
-                    "Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
+                    f"{BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}: Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
                 )
 
@@ -2435,6 +2438,8 @@ def resolve_canonical_cost_micro_usd(
             or context.metadata.get("duration")
             or context.metadata.get("provider_submit_seconds")
             or context.metadata.get("public_scene_seconds")
+            or context.metadata.get("scene_duration_seconds")
+            or (context.metadata.get("selected_request_defaults") or {}).get("duration")
         )
 
         filtered_tiers = tiers
@@ -3643,6 +3648,12 @@ def reserve_provider_spend(
 
         # 9. Durable Bot Confirmation Record Verification (Section 2)
         confirmation_to_consume: str | None = None
+        owner_auth_to_consume: str | None = None
+        ctx_scene = 0
+        try:
+            ctx_scene = int(context.scene_index or 0)
+        except Exception:
+            ctx_scene = 0
         require_durable_confirmation = bool(
             context.is_paid_live_attempt
             or authority.bot_origin_required
@@ -3755,9 +3766,43 @@ def reserve_provider_spend(
             owner_auth_slots_count: int = 1
             owner_auth_used_confs: list[str] = []
             if is_durable_paid_live_test:
+                # Section 12: Owner receipt binding required for paid live test
+                rec_rcpt = str(rec_owner_receipt or "").strip()
+                if not rec_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+                        reason="Durable confirmation has no proven Owner live authorization issuance record",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                ctx_rcpt = str(context.owner_receipt or "").strip()
+                if not ctx_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_RECEIPT_MISSING,
+                        reason="Context requires Owner live authorization receipt for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if ctx_rcpt != rec_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_RECEIPT_MISMATCH,
+                        reason=f"Owner authorization receipt mismatch: '{ctx_rcpt}' != '{rec_rcpt}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
                 is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
                     context=context,
-                    owner_receipt=str(context.owner_receipt or rec_owner_receipt or "").strip() or None,
+                    owner_receipt=rec_rcpt,
                     env=effective_env,
                     db_path=target_db_path,
                     conn=conn,
@@ -3819,40 +3864,6 @@ def reserve_provider_spend(
                         allowed=False,
                         blocker=BLOCKER_BOT_ORIGIN_PROOF_MISSING,
                         reason="Directive #1422 requires user_flow for paid live test",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-
-                # Section 12: Owner receipt binding required for paid live test
-                rec_rcpt = str(rec_owner_receipt or "").strip()
-                if not rec_rcpt:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
-                        reason="Durable confirmation has no proven Owner live authorization issuance record",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                ctx_rcpt = str(context.owner_receipt or "").strip()
-                if not ctx_rcpt:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_RECEIPT_MISSING,
-                        reason="Context requires Owner live authorization receipt for paid live test",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                if ctx_rcpt != rec_rcpt:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_RECEIPT_MISMATCH,
-                        reason=f"Owner authorization receipt mismatch: '{ctx_rcpt}' != '{rec_rcpt}'",
                         week_id=week_id,
                         cap_micro_usd=cap_micro_usd,
                         cap_usd=cap_usd,

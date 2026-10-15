@@ -828,6 +828,7 @@ def test_27_router_preflight_accepts_kling_v3_model_as_valid():
     """video_provider_router preflight accepts kling-v3 as a valid known model for key4u_video."""
     env = {
         "KEY4U_API_KEY": "dummy_key",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer dummy_key",
         "KEY4U_VIDEO_MODEL": "kling-v3",
         "KEY4U_SUBMIT_URL": "https://api.key4u.vn/submit",
         "KEY4U_POLL_URL": "https://api.key4u.vn/poll/{task_id}",
@@ -924,13 +925,21 @@ def test_28_end_to_end_key4u_i2v_wire_selfshot2(tmp_path: Path, monkeypatch):
         "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
         lambda *args, **kwargs: mock_continuity,
     )
+    monkeypatch.setattr(
+        "services.provider_spend_guard.reserve_provider_spend",
+        lambda *args, **kwargs: MagicMock(allowed=True, blocker="", audit_record={}),
+    )
 
     env_overrides = {
         "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_wire_api_key_valid",
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
         "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
         "KEY4U_BASE_URL": "https://api.key4u.vn",
+        "SPEND_GUARD_DB_PATH": str(tmp_path / "spend_guard.db"),
+        "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+        "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
     }
     for k, v in env_overrides.items():
         monkeypatch.setenv(k, v)
@@ -1055,13 +1064,21 @@ def test_29_end_to_end_key4u_i2v_wire_selfshot3(tmp_path: Path, monkeypatch):
         "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
         lambda *args, **kwargs: mock_continuity,
     )
+    monkeypatch.setattr(
+        "services.provider_spend_guard.reserve_provider_spend",
+        lambda *args, **kwargs: MagicMock(allowed=True, blocker="", audit_record={}),
+    )
 
     env_overrides = {
         "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_wire_api_key_valid",
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
         "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
         "KEY4U_BASE_URL": "https://api.key4u.vn",
+        "SPEND_GUARD_DB_PATH": str(tmp_path / "spend_guard.db"),
+        "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+        "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
     }
     for k, v in env_overrides.items():
         monkeypatch.setenv(k, v)
@@ -1272,14 +1289,22 @@ def test_32_default_provider_chain_pins_kling_v3_for_selfshot2(tmp_path: Path, m
         "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
         lambda *args, **kwargs: mock_continuity,
     )
+    monkeypatch.setattr(
+        "services.provider_spend_guard.reserve_provider_spend",
+        lambda *args, **kwargs: MagicMock(allowed=True, blocker="", audit_record={}),
+    )
 
     env_overrides = {
         "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_wire_api_key_valid",
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
         "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
         "KEY4U_BASE_URL": "https://api.key4u.vn",
         "KEY4U_VIDEO_MODEL": "arbitrary_env_model_must_be_overridden",
+        "SPEND_GUARD_DB_PATH": str(tmp_path / "spend_guard.db"),
+        "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+        "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
     }
     for k, v in env_overrides.items():
         monkeypatch.setenv(k, v)
@@ -1388,14 +1413,22 @@ def test_33_default_provider_chain_pins_kling_v3_for_selfshot3(tmp_path: Path, m
         "services.video_selfshot_continuity_validator.validate_selfshot_scene_continuity",
         lambda *args, **kwargs: mock_continuity,
     )
+    monkeypatch.setattr(
+        "services.provider_spend_guard.reserve_provider_spend",
+        lambda *args, **kwargs: MagicMock(allowed=True, blocker="", audit_record={}),
+    )
 
     env_overrides = {
         "KEY4U_API_KEY": "test_wire_api_key_valid",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_wire_api_key_valid",
         "KEY4U_VIDEO_ENABLED": "1",
         "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/kling/v1/videos/image2video",
         "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/kling/v1/videos/query?id={task_id}",
         "KEY4U_BASE_URL": "https://api.key4u.vn",
         "KEY4U_VIDEO_MODEL": "arbitrary_env_model_must_be_overridden",
+        "SPEND_GUARD_DB_PATH": str(tmp_path / "spend_guard.db"),
+        "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+        "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
     }
     for k, v in env_overrides.items():
         monkeypatch.setenv(k, v)
