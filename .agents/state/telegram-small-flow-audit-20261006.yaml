@@ -8661,3 +8661,47 @@ S12_35_504_post_delivery_evidence_closure_20261015:
   provider_calls: 0
   wallet_mutations: 0
   production_data_writes: 0
+
+S12_35_505_admin_root_stale_suffixes_20261016:
+  status: locally_verified_green_delivery_pending
+  contract: >-
+    Dispatch the Admin menu's emitted menu|admin_support and
+    menu|admin_broadcast_lite roots plus stale suffixes through the exact
+    registered handle_menu_callback. Preserve both Admin pages; reject each
+    stale suffix with one alert before pending cleanup or render. Do not read or
+    mutate Ticket/Broadcast data, wallet/payment, provider, job, product-engine
+    or AutoPost state.
+  baseline: >-
+    The current source emitted menu|admin_support from
+    admin_module_keyboard("support") and menu|admin_broadcast_lite from
+    admin_control_center_keyboard(), both registered through
+    handle_menu_callback, but admin_exact_root_labels omitted both roots. The
+    inert registered-handler probes accepted either suffixed callback, ACKed
+    normally, ran cleanup seams and rendered a fallback screen.
+  change: >-
+    Added only admin_support: CSKH / Góp ý and admin_broadcast_lite: Thông báo
+    khách hàng to the existing exact-root label map; exact roots and all
+    Ticket/Broadcast child callbacks are unchanged.
+  evidence: >-
+    python.exe -S -m unittest -v
+    tests.test_admin_submenu_root_suffix_guards_current_main -> Ran 1 test in
+    1.842s - OK. The matrix now covers 13 producer roots including
+    admin_support and admin_broadcast_lite; every stale suffix returns one
+    alert with no edit or cleanup effect. Separate exact-root inert probes keep
+    both existing page renders. Changed-test py_compile exited 0 and git
+    diff --check exited 0.
+  allowed_scope:
+    - bot.py handle_menu_callback exact-root label map only
+    - tests/test_admin_submenu_root_suffix_guards_current_main.py
+    - checklist, tester plan and this state
+  protected_scope:
+    - Ticket/CSKH data, actions and storage beyond stale callback admission
+    - Product/Edit/Image/Video/SubDub/Voice/Music routes and engines
+    - providers, workers, jobs, wallet/PayOS, AutoPost, ENV/secrets
+    - production data and real Telegram activity
+  provider_calls: 0
+  wallet_mutations: 0
+  production_data_writes: 0
+  delivery: >-
+    Local candidate only in this continuation; GitHub CI, push, merge, deploy
+    and live verification remain separate gates. A7 remains open.

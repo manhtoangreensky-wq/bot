@@ -142693,6 +142693,8 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         "admin_provider_worker": "Provider / Worker",
         "admin_finance": "Tài chính Admin",
         "admin_packages": "Gói / Combo",
+        "admin_support": "CSKH / Góp ý",
+        "admin_broadcast_lite": "Thông báo khách hàng",
         "freeze_queue": "Freeze / Queue",
     }
     admin_exact_root = action.split("|", 1)[0].strip()
