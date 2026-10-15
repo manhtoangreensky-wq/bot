@@ -26,6 +26,10 @@ spec admission callback S12.35.497–S12.35.502 trên
   SQLite-style và hiện trả đúng một alert trong fixture candidate.
 - Focused evidence: `RUN 6 / ALL_OK` cho Archive và `VAULT_FOCUSED_RUN 2 /
   ALL_OK` cho Vault; test-file `py_compile` và `git diff --check` đều exit `0`.
+- S12.35.503 khóa ACK của `docflow|confirm`: state/config/minimum-file admission
+  nội bộ xong trước, ACK đúng một lần, rồi mới lookup ngôn ngữ/render. Regression
+  giữ alert một lần khi thiếu file; PR #1432 CI run `38752240110` và source
+  compile run `38752240014` đều SUCCESS.
 - Chưa deploy, chưa restart, chưa gọi provider, chưa gửi Telegram thật, chưa
   ghi DB/wallet và chưa chốt full `bot.py` compile local; CI/merge/deploy vẫn
   là gate riêng.

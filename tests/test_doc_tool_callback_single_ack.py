@@ -124,6 +124,37 @@ def test_confirm_with_too_few_files_gets_one_alert_ack():
     assert edits == []
 
 
+def test_confirm_acknowledges_before_language_lookup():
+    state = {"doc_tool_current": "merge_pdf", "doc_tool_files": ["file-1", "file-2"]}
+    edits = []
+    namespace = _load_runtime(state, edits)
+    emitted = _emitted_callback(
+        namespace["doc_tool_after_file_keyboard"](state, "vi"),
+        "docflow|confirm",
+    )
+    route = _registered_doc_tool_route(namespace, emitted)
+    query = _Query(emitted)
+    events = []
+    namespace.update(
+        get_user_language=lambda _uid: events.append("language") or "vi",
+        doc_tool_confirm_text=lambda _state, lang: f"confirm-{lang}",
+        doc_tool_confirm_keyboard=lambda lang, _state: f"confirm-keyboard-{lang}",
+    )
+
+    original_answer = query.answer
+
+    async def _answer(*args, **kwargs):
+        events.append("ack")
+        await original_answer(*args, **kwargs)
+
+    query.answer = _answer
+    asyncio.run(route.callback(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert events == ["ack", "language"], events
+    assert query.answers == [((), {})]
+    assert edits == [(query, "confirm-vi", {"parse_mode": "HTML", "reply_markup": "confirm-keyboard-vi"})]
+
+
 def test_send_more_keeps_one_ack_and_existing_document_screen():
     state = {"doc_tool_current": "merge_pdf", "doc_tool_files": ["file-1"]}
     edits = []

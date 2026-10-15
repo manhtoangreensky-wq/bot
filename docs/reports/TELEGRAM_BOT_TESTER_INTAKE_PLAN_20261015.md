@@ -63,6 +63,7 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.500 | Customer Ticket action ID overflow (`reply_user`/`attach`/`done`) | LOCKED GREEN | exact registered routes reproduced SQLite-style `OverflowError` after ACK; one shared bounded ID predicate now rejects all three before lookup/pending/action. |
 | S12.35.501 | Internal Archive `view`/`file` out-of-range document ID | LOCKED GREEN | exact registered routes reproduced SQLite-style `OverflowError`; the bounded ASCII-decimal/int64 guard now returns one invalid-ID alert before lookup for both actions. Focused no-I/O runner: `RUN 6` / `ALL_OK`; changed test compile and diff check exit 0. |
 | S12.35.502 | Knowledge Vault prompt/asset callback out-of-range ID | LOCKED GREEN | exact `^vault\\|` handler reproduced SQLite-style `OverflowError`; bounded ASCII-decimal/int64 admission now returns one alert before Vault for `use`/`approve_prompt`/`approve_asset`. Focused run: `VAULT_FOCUSED_RUN 2` / `ALL_OK`; test compile and diff check exit 0. |
+| S12.35.503 | Document Tools `confirm` ACK ordering | LOCKED GREEN (CI) | exact registered `docflow|confirm` route now performs only in-memory admission before one ACK, then reads language and renders; regression locks ACK-before-language for a valid confirm and preserves one alert for too-few files. No file processing or charge path changed. |
 
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
@@ -108,6 +109,13 @@ or out-of-range offsets return the existing expired-button alert before any
 ticket list read. No ticket data, wallet, payment, provider, job, product
 engine or AutoPost path is changed.
 
+S12.35.503 changes only the ordering at the Document Tools callback boundary.
+`docflow|confirm` checks its already-loaded pending state and minimum-file
+condition before acknowledging exactly once; valid confirmation ACKs before the
+language lookup/render path, while the too-few-files alert remains the sole ACK.
+Document processing, file delivery, charging, wallet, provider, engine and
+AutoPost paths are unchanged.
+
 ## 4. Release gates still open
 
 - Full `bot.py` compile emitted `COMPILE_START` but no completion marker during
@@ -118,9 +126,10 @@ engine or AutoPost path is changed.
 - The broader Admin child/Back regression runner did not return a completion
   marker in the bounded local observation window; it is `NOT_VERIFIED`, not a
   product failure or pass, and is not being repeated unchanged.
-- Exact-head CI run `38700321728` completed SUCCESS. The source compile guard
-  run `38700321747` also completed SUCCESS; all selected Admin/customer,
-  stale-root, PayOS ACK and workflow-hygiene steps were green.
+- Exact-head CI run `38752240110` for PR #1432 completed SUCCESS, including the
+  new Document Tools ACK-order regression; the independent source-compile run
+  `38752240014` also completed SUCCESS. All selected Admin/customer, stale-root,
+  PayOS ACK and workflow-hygiene steps were green.
 - Protected-scope comparator must show no route/engine/provider/worker delta.
 - No provider call, wallet mutation, production DB write or real Telegram send.
 - Merge, deploy, restart and live-client latency claims remain separate owner

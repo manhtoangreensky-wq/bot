@@ -188003,11 +188003,8 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
     back_origin = ""
     if action.startswith("back|"):
         action, back_origin = action.split("|", 1)
-    if action == "confirm":
-        lang = get_user_language(uid) or "vi"
-    else:
+    if action != "confirm":
         await query.answer()
-        lang = get_user_language(uid) or "vi"
     state = get_doc_tool_pending(uid)
     tool = str(state.get("doc_tool_current") or "save_document") if state else "save_document"
     config = None
@@ -188019,6 +188016,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
             return await query.answer("Chưa đủ file để xử lý.", show_alert=True)
     if action == "confirm":
         await query.answer()
+    lang = get_user_language(uid) or "vi"
     if action == "main":
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))

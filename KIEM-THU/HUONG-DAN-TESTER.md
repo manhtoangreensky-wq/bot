@@ -41,6 +41,16 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 3. PASS khi callback có đúng một alert, không gọi getter/Vault seam, không clear pending và không gửi file; ID hợp lệ `441` vẫn ACK một lần và đi vào nhánh cũ.
 4. Không gọi provider, ví/PayOS, engine sản phẩm, AutoPost hoặc Telegram thật trong case này. Nếu full compile/CI chưa có kết quả, ghi `NOT_VERIFIED`, không ghi PASS.
 
+## Cách test Document Tools confirm ACK
+
+1. Dùng fixture registered-handler `UI-DOC-CONFIRM-ACK-01`; mở Document Tools,
+   phát keyboard thật và chọn `docflow|confirm`.
+2. Với đủ file, ghi thứ tự sự kiện: `query.answer()` phải xảy ra trước
+   `get_user_language()` và trước render màn xác nhận; chỉ một ACK.
+3. Lặp với thiếu file: phải nhận đúng một alert `Chưa đủ file để xử lý.` và
+   không render/đọc thêm. Không xử lý file, gửi file, gọi provider, trừ Xu,
+   ghi production DB hoặc dùng Telegram thật.
+
 ## Cách test Public Landing Motion
 
 1. Dùng đúng sáu case `ML-01..ML-06`; tải mới trang trước mỗi case.

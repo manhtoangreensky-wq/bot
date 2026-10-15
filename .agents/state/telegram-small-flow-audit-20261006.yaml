@@ -9,12 +9,13 @@ objective: >-
   narrow defects; preserve AutoPost WIP and stable Product/Edit/SubDub/Voice/Music
   engines. Do not change secrets, wallets, production data, call paid providers,
   send real Telegram messages, or merge/deploy/restart without authorization.
-current_spec: S12.35.502-archive-vault-safe-callback-batch-verification
+current_spec: S12.35.503-document-confirm-ack-order
 current_spec_contract: >-
-  Verify S12.35.497 through S12.35.502 with focused registered-handler tests,
-  changed-test compilation, diff/scope comparison and then one final batch
-  sync/PR/CI gate. Keep full-source compile and runtime delivery explicitly
-  separate until empirical evidence exists.
+  Verify the Document Tools confirm callback's ACK-before-language ordering with
+  a focused registered-handler regression, changed-test compilation,
+  diff/scope comparison and the existing consolidated PR CI gate. Keep full
+  source compile and runtime delivery explicitly separate until empirical
+  evidence exists.
 current_branch: fix/telegram-stale-root-callbacks-20261015
 current_base_sha: 7cd336dedd6f3946cd3fe0772b4793bf47935747
 release_cadence: >-
@@ -145,6 +146,7 @@ specs:
     provider_calls: 0
     wallet_mutations: 0
     production_data_writes: 0
+
   S12.18-admin-package-orders-back-origin:
     status: merged-deployed-runtime-sha-verified
     base_sha: 979c0ee5d9cc3b51d23b5c6470a6d02947f69208
@@ -8573,3 +8575,56 @@ S12_35_252_archive_view_file_local_test_rerun:
     provider_calls: 0
     wallet_mutations: 0
     production_data_writes: 0
+
+  S12_35_503_document_confirm_ack_order:
+    status: locally_verified_ci_green_batch_closeout_pending
+    contract: >-
+      Dispatch the emitted registered docflow|confirm callback with a valid
+      pending file set and verify that the callback performs only in-memory
+      admission before one normal ACK, then reads the user's language and
+      renders the existing confirmation screen. The too-few-files branch must
+      keep exactly one alert ACK. Do not process files, charge, call a provider,
+      mutate wallet/data, or alter Document Tools business logic.
+    baseline: >-
+      The registered handler read get_user_language before query.answer for the
+      confirm action. A slow language lookup therefore kept the Telegram
+      callback spinner open before the existing confirmation/alert response.
+      The existing too-few-files case also performed that lookup before its
+      single alert.
+    change: >-
+      Moved only the confirm admission (pending state, config and minimum-file
+      check) ahead of the ACK and moved the language lookup after the one ACK.
+      Non-confirm actions keep their existing early ACK; file processing,
+      delivery, charging and render helpers are unchanged.
+    evidence: >-
+      Focused regression added to tests/test_doc_tool_callback_single_ack.py
+      records the event order ACK then language for a valid confirm and keeps
+      the existing one-alert too-few-files assertion. Changed test py_compile
+      exited 0; git diff --check exited 0. PR #1432 exact head 03809988 was
+      CI-verified by run 38752240110 (SUCCESS) and source-compile run
+      38752240014 (SUCCESS), including the registered Document Tools regression.
+    allowed_scope:
+      - bot.py handle_doc_tool_callback ACK/language ordering only
+      - tests/test_doc_tool_callback_single_ack.py
+      - checklist, tester plan and this state
+    protected_scope:
+      - Document file processing, delivery, charging and pending semantics beyond
+        the callback admission/ACK boundary
+      - wallet/payment, providers, jobs and production data
+      - Product/Edit/Image/Video/SubDub/Voice/Music engines
+      - AutoPost WIP, ENV/secrets and real Telegram activity
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+
+latest_pr_1432_release_gate_readback_20261015: >-
+  PR #1432 is OPEN/MERGEABLE at exact head 03809988fb22e4619a50cf54591f362587fcb436.
+  Exact-head CI run 38752240110 (full hygiene/regression) and source-compile run
+  38752240014 both completed SUCCESS. Read-only VPS runtime remains
+  f3fe738f3764e61a7edc85c386c917f167fd8d8d; bot.py SHA-256 is
+  24954ca64335283b9b64cd9f519e60fe682f79ac17565bc25a6835fbb0b83a43, all three
+  services are active/running with NRestarts=0, and internal 127.0.0.1:8080/health
+  returns status=ok. PR #1432 is not merged/deployed and no restart occurred.
+  Branch-introduced protected-scope comparator found no services/providers/worker/
+  remote_worker/config/wallet/AutoPost file changes; A7 live client correlation
+  remains partial.

@@ -28,6 +28,7 @@ candidate chỉ chặn payload số malformed/out-of-range trước lớp đọc
 | Ticket Admin/customer | ID/offset ngoài SQLite int64 nhận một alert trước lookup | ownership, status, action, pending và Back |
 | Internal Archive | `view`/`file` ID lỗi nhận một alert trước document lookup | storage, file delivery, stale recovery và Back |
 | Knowledge Vault | `use`/`approve_prompt`/`approve_asset` ID lỗi nhận một alert trước Vault | prompt/asset content, import và approval branch hợp lệ |
+| Document Tools | `docflow|confirm` ACK sau admission nội bộ và trước language lookup/render | xử lý file, delivery, charging và pending business logic |
 
 Evidence cục bộ là fixture registered-handler, không phải production/live claim;
 `origin/main` và candidate SHA/CI/runtime phải được đối chiếu riêng trước merge.

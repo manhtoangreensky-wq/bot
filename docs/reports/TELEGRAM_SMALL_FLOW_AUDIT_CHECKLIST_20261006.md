@@ -3648,3 +3648,48 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Prompt/asset content, storage/import/approval semantics, provider, wallet,
   job, Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, Telegram
   sends, merge, deploy and restart were not run or changed.
+
+### S12.35.503 — Document Tools confirm ACK ordering
+
+- Contract: dispatch the actual registered `docflow|confirm` callback from the
+  emitted Document Tools confirmation keyboard. Pending-state/config/minimum-file
+  admission is in-memory only; a valid confirmation must ACK once before the
+  language lookup/render path. The too-few-files branch must keep one alert as
+  its only ACK. Do not process files, send files, charge Xu, call providers or
+  mutate production data.
+- RED on the current callback source: `handle_doc_tool_callback` read
+  `get_user_language(uid)` before `query.answer()` for `confirm`; a slow language
+  read could therefore hold the Telegram spinner before the response. The
+  existing too-few-files path also performed that read before its alert.
+- Minimal fix: moved only the existing in-memory state/config/minimum-file
+  admission ahead of the confirm ACK and moved `get_user_language` after that
+  single ACK. Non-confirm actions keep their existing early ACK; document
+  processing, file delivery, charging and render helpers are unchanged.
+- GREEN: focused regression `test_confirm_acknowledges_before_language_lookup`
+  locks event order `ACK -> language` for a valid emitted callback; the existing
+  too-few-files regression still asserts one alert and no render. Changed-test
+  `py_compile` exited `0`; `git diff --check` exited `0`. PR #1432 exact head
+  `03809988` passed CI run `38752240110` and source-compile run `38752240014`.
+- Protected review/limits: only `bot.py` callback ordering and its focused
+  regression changed. No provider, wallet, job, production DB, Telegram send,
+  Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, merge, deploy or
+  restart was performed. This closes the callback ordering defect; live client
+  latency remains a separate A7 gate.
+
+### Batch release gate recheck — 15/10/2026
+
+- PR #1432 is OPEN and MERGEABLE at exact head `03809988`; the branch-introduced
+  diff from its merge base contains no `services/`, `providers/`, worker,
+  `remote_worker`, config, wallet or AutoPost files. The two main-only commits
+  (`f3fe738f` and `358e28de`) are not part of the branch patch and remain on
+  current main.
+- CI is GREEN for the exact head: full hygiene/regression run
+  `38752240110` and source-compile/tokenize run `38752240014`. The latter ran
+  `py_compile bot.py`, tokenize and the complete-source guard on Ubuntu.
+- Read-only VPS recheck remains runtime SHA `f3fe738f3764e61a7edc85c386c917f167fd8d8d`,
+  `toanaas-bot.service`, `toanaas-web.service` and `nginx.service` all
+  `active/running`, `NRestarts=0`, and internal `127.0.0.1:8080/health` returns
+  `status=ok`. PR #1432 is not deployed; no restart occurred.
+- Merge/deploy and manual Telegram-client latency remain owner gates. A7 is
+  still partial because the reported click-to-screen duration has no matching
+  anonymous server event; no hardware/network cause is inferred.
