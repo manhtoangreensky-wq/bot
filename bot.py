@@ -142585,6 +142585,113 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     raw_action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     action = raw_action
+    if action.split("|", 1)[0].strip() == "main" and action != "main":
+        return await query.answer(
+            "Nút Menu chính đã hết phiên. Vui lòng mở lại từ /start hoặc /menu.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_profile" and action != "main_profile":
+        return await query.answer(
+            "Nút Tài khoản đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_video" and action != "main_video":
+        return await query.answer(
+            "Nút Video đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_image" and action != "main_image":
+        return await query.answer(
+            "Nút Ảnh đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_guide" and action != "main_guide":
+        return await query.answer(
+            "Nút Hướng dẫn đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_music" and action != "main_music":
+        return await query.answer(
+            "Nút Nhạc đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "translate" and action not in {
+        "translate",
+        "translate_more",
+        "translate_off",
+        "translate_set_ar",
+        "translate_set_en",
+        "translate_set_ja",
+        "translate_set_ko",
+        "translate_set_th",
+        "translate_set_vi",
+        "translate_set_zh",
+    }:
+        return await query.answer(
+            "Nút Dịch đã hết phiên. Vui lòng mở lại từ Trung tâm dịch.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "doc_tools" and action != "doc_tools":
+        return await query.answer(
+            "Nút Công cụ tài liệu đã hết phiên. Vui lòng mở lại từ Tài liệu.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "chat_pro" and action != "chat_pro":
+        return await query.answer(
+            "Nút Chat Pro đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "chat_free" and action != "chat_free":
+        return await query.answer(
+            "Nút Chat miễn phí đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "admin" and action != "admin":
+        return await query.answer(
+            "Nút Quản trị đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "finance" and action != "finance":
+        return await query.answer(
+            "Nút Tài chính đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "billing" and action != "billing":
+        return await query.answer(
+            "Nút Bill / Xu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_docs" and action != "main_docs":
+        return await query.answer(
+            "Nút Công cụ tài liệu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    admin_exact_root_labels = {
+        "admin_users": "User / Xu",
+        "admin_billing": "Bill / PayOS",
+        "admin_queue": "Queue / Freeze",
+        "admin_security_db": "Bảo mật / DB",
+        "admin_system_ops": "Hệ thống",
+        "admin_handbook": "Hướng dẫn Admin",
+        "admin_provider": "Provider",
+        "admin_provider_worker": "Provider / Worker",
+        "admin_finance": "Tài chính Admin",
+        "admin_packages": "Gói / Combo",
+        "freeze_queue": "Freeze / Queue",
+    }
+    admin_exact_root = action.split("|", 1)[0].strip()
+    if admin_exact_root in admin_exact_root_labels and action != admin_exact_root:
+        return await query.answer(
+            f"Nút {admin_exact_root_labels[admin_exact_root]} đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_memory" and action not in {
+        "main_memory", "main_memory|freehub",
+    }:
+        return await query.answer(
+            "Nút Ghi chú/Tài liệu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
     memory_back_to_freehub = action == "main_memory|freehub"
     if memory_back_to_freehub:
         action = "main_memory"

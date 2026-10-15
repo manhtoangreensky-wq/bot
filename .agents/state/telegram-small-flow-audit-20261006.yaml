@@ -8230,3 +8230,63 @@ S12_35_252_archive_view_file_local_test_rerun:
     provider_calls: 0
     wallet_mutations: 0
     production_data_writes: 0
+
+  current_main_tester_intake_20261015:
+    status: targeted_green_release_gates_open
+    contract: >-
+      UI/callback-only stale suffix audit from exact origin/main. Preserve all
+      producer-backed valid callbacks. Do not touch Product Video, Video, Image,
+      Music, Voice, SubDub, providers, workers, jobs, pricing, wallet/Xu, PayOS,
+      AutoPost, ENV/secrets or production data.
+    source_base: 7cd336dedd6f3946cd3fe0772b4793bf47935747
+    specs_locked:
+      - S12.35.477_main_root_suffix
+      - S12.35.478_main_profile_root_suffix
+      - S12.35.479_main_memory_suffix_allowlist
+      - S12.35.480_main_video_root_suffix
+      - S12.35.481_main_image_root_suffix
+      - S12.35.482_main_guide_root_suffix
+      - S12.35.483_main_music_root_suffix
+      - S12.35.485_translate_suffix_allowlist
+      - S12.35.486_doc_tools_root_suffix
+      - S12.35.487_chat_pro_root_suffix
+      - S12.35.488_chat_free_root_suffix
+      - S12.35.489_admin_root_suffix
+      - S12.35.490_finance_root_suffix
+      - S12.35.491_billing_root_suffix
+      - S12.35.492_main_docs_root_suffix
+      - S12.35.493_admin_submenu_exact_root_matrix
+    closed_without_patch:
+      - S12.35.484_main_topup_existing_origin_guard
+    not_open:
+      - main_quick_no_current_literal_producer
+      - main_audio_no_current_literal_producer
+      - autopost_wip_out_of_scope
+    red: >-
+      Exact registered ^menu\\| handler accepted stale suffixes for the listed
+      roots. main_topup was re-probed and already rejected unknown origins before
+      ACK, so its speculative duplicate guard was removed.
+    green: >-
+      Focused registered-handler unittest batch returned `Ran 19 tests in
+      3.172s -- OK` after the minimal guards (the Admin matrix contains 11
+      producer-root subtests). No external I/O, provider call,
+      wallet mutation, production data write or real Telegram send occurred.
+    allowed_scope:
+      - bot.py handle_menu_callback stale-root guards only
+      - focused current-main callback tests
+      - tester plan/checklist/state evidence
+    protected_scope:
+      - Product Video/Video/Image/Music/Voice/SubDub route and engine logic
+      - provider/worker/job/pricing/wallet/Xu/PayOS/AutoPost/ENV/secrets/data
+    provider_calls: 0
+    wallet_mutations: 0
+    production_data_writes: 0
+    full_compile: >-
+      NOT_VERIFIED: COMPILE_START emitted, no completion marker in a bounded
+      ~270s observation, stopped with Ctrl+C; not classified as syntax failure.
+    broader_admin_child_runner: NOT_VERIFIED
+    protected_code_comparator_exit: 0
+    changed_file_scope_exit: 0
+    no_handler_entry_smoke_exit: 0
+    all_locale_handler_map_exit: 0
+    delivery: NOT_STARTED

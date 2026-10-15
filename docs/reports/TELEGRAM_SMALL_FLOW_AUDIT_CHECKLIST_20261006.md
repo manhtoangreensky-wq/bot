@@ -3180,6 +3180,85 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - Limits: fixture/source-extracted evidence only; no production report query, provider, chart/file generation, wallet, or Telegram send. AI/chart commands and the broader Admin report matrix remain unverified.
 - Status: locally verified; final batch CI/delivery pending.
 
+## Current-main tester intake 2026-10-15 — ordered callback gate
+
+- [x] Filter the supplied PDF/tester material. Legacy/WebApp findings without
+  an active Telegram producer/registered handler remain unmapped; no route or
+  engine patch was copied into the bot.
+- [x] Lock protected scope: Product Video, Video, Image, Music, Voice, SubDub,
+  provider, worker, job, pricing, wallet/Xu, PayOS, AutoPost, ENV/secrets and
+  production data are out of scope.
+- [x] Require exact producer + registered `^menu\\|` handler + side-effect-free
+  RED before opening each implementation spec.
+- [ ] Full-source compile, exact-head CI, protected comparator and live-client
+  evidence remain release gates.
+
+### S12.35.477–S12.35.490 ledger
+
+- [x] **477 `main`** — stale suffix rejected before ACK/cleanup/render; exact
+  root remains valid; focused `2 tests ... OK`.
+- [x] **478 `main_profile`** — stale suffix rejected before side effects;
+  focused `1 test ... OK`.
+- [x] **479 `main_memory`** — exact root and `freehub` origin preserved; stale
+  suffix rejected; focused `3 tests ... OK`.
+- [x] **480 `main_video`** — stale suffix guard only; focused `1 test ... OK`;
+  Product Video/Video engine untouched.
+- [x] **481 `main_image`** — stale suffix guard only; focused `1 test ... OK`;
+  Image engine untouched.
+- [x] **482 `main_guide`** — stale suffix rejected; focused `1 test ... OK`.
+- [x] **483 `main_music`** — stale suffix rejected; focused `1 test ... OK`;
+  Music engine/provider/pricing untouched.
+- [x] **484 `main_topup`** — no implementation opened: baseline already rejects
+  unknown origin before ACK; duplicate speculative guard removed.
+- [x] **485 `translate`** — producer-backed values allowlisted; unknown suffix
+  rejected; focused `1 test ... OK`; translation execution untouched.
+- [x] **486 `doc_tools`** — stale suffix rejected; focused `1 test ... OK`;
+  document/PDF processing untouched.
+- [x] **487 `chat_pro`** — stale suffix rejected; focused `1 test ... OK`;
+  provider/engine untouched.
+- [x] **488 `chat_free`** — stale suffix rejected; focused `1 test ... OK`;
+  provider/engine untouched.
+- [x] **489 `admin`** — exact current-main RED reproduced; focused stale-root
+  regression passes; Admin data/report/provider helpers are not called.
+- [x] **490 `finance`** — exact current-main RED reproduced; focused stale-root
+  regression passes; finance calculations/wallet/PayOS are not called.
+- [x] **491 `billing`** — exact current-main RED reproduced; focused stale-root
+  regression passes; wallet/payment logic is not called.
+- [x] **492 `main_docs`** — exact current-main RED reproduced; focused stale-root
+  regression passes; document processing/PDF logic is not called.
+- [x] **493 Admin submenu matrix** — 11 exact producer roots reject stale
+  suffixes before ACK/cleanup/render; child-origin routes remain explicit and
+  unchanged (`admin_overview|...`, provider status/routes, DB refresh/back,
+  package orders).
+- [ ] `main_quick`/`main_audio`: no current literal producer; do not patch until
+  an active producer and RED are found.
+- [ ] `autopost`: WIP is intentionally held; no new implementation here.
+- [x] `billing` producer/ownership is isolated as an exact admin-menu root; no
+  broad admin/finance rule was generalized to it.
+
+### Verification record for this candidate
+
+- [x] Exact current-main baseline probes were run through the registered Menu
+  handler with inert cleanup/render seams and no I/O.
+- [x] Focused unittest batch: `Ran 19 tests in 3.172s`, `OK` (Admin matrix
+  contains 11 producer-root subtests).
+- [x] Changed test modules compile: `TEST_MODULE_COMPILE_EXIT=0`.
+- [ ] Full `bot.py` compile emitted `COMPILE_START` but no completion marker
+  during a bounded ~270s observation and was stopped with Ctrl+C;
+  `FULL_SOURCE_COMPILE=NOT_VERIFIED` (not interpreted as a syntax failure).
+- [x] `git diff --check`: `DIFF_CHECK_EXIT=0`.
+- [x] Added `bot.py` executable lines contain no protected provider/worker/
+  job/wallet/PayOS/engine/route mutation (UI label strings excluded):
+  `PROTECTED_CODE_COMPARATOR_EXIT=0`.
+- [x] Changed-file allowlist is exact: `CHANGED_FILE_SCOPE_EXIT=0`.
+- [x] Main-menu emitted callback registration smoke: one focused test returned
+  `NO_HANDLER_ENTRY_EXIT=0`.
+- [x] All public/admin main-menu callback patterns across configured locales:
+  `ALL_LOCALE_HANDLER_MAP_EXIT=0` (1 test, 2.768s).
+- [ ] No PR/push/merge/deploy/restart is claimed by this checklist yet.
+- [ ] Broader Admin child/Back runner: `NOT_VERIFIED` (no completion marker;
+  not interpreted as a product failure or pass).
+
 ### S12.35.293 — Admin tax read-only child Back matrix
 
 - Contract: build the actual `finance_tax_keyboard()` emitted from
