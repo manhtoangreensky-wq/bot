@@ -273,3 +273,11 @@ duration has no exact anonymous server event correlated to the click timestamp,
 so this report does not attribute it to bot, Telegram, network, device or VPS,
 and does not claim every button is smooth. No latency patch or hardware
 purchase is justified until that evidence exists.
+
+### Final delivery lock — 16/10/2026
+
+PR #1434 (`3d17231cdfbffecdf999b3398c189bb83f36558e`) and its exact bot-only
+deploy workflow `38784324561` are merged/SUCCESS and live on the VPS with
+`deploy_workers=false`. Runtime SHA, services and health were read back; the
+worker stayed unchanged. This is a documentation checkpoint only: no route,
+engine, provider, wallet, AutoPost or production-data scope was reopened.

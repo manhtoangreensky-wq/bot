@@ -162,3 +162,18 @@ AutoPost path changes.
   correlated to the Owner's click timestamp. Therefore client/network cause,
   device diagnosis and “all buttons are smooth” are not claimed; no hardware or
   latency patch is justified without that evidence.
+
+## Superseding delivery lock — 16/10/2026
+
+The Admin Support/Broadcast stale-root fix is no longer a local candidate:
+PR #1434 is merged at `3d17231cdfbffecdf999b3398c189bb83f36558e`, and the one
+approved bot-only deploy [38784324561](https://github.com/manhtoangreensky-wq/bot/actions/runs/38784324561)
+is `SUCCESS` with `deploy_workers=false`. VPS readback matches the target SHA;
+bot/web/nginx are active, `NRestarts=0`, and `/health` is `ok`. The worker and
+all protected Product/Edit/Image/Video/SubDub/Voice/Music engines remain outside
+this delivery. Do not reopen this code path or create a per-spec PR.
+
+A7 remains a deliberately open evidence gate: a manual client duration alone
+cannot attribute the Account → Back delay to bot code, Telegram, network,
+device, or VPS. Collect a precisely timestamped client click plus matching
+anonymous server event only if the Owner explicitly reopens that diagnostic.
