@@ -66,6 +66,18 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.503 | Document Tools `confirm` ACK ordering | LOCKED GREEN (CI) | exact registered `docflow|confirm` route now performs only in-memory admission before one ACK, then reads language and renders; regression locks ACK-before-language for a valid confirm and preserves one alert for too-few files. No file processing or charge path changed. |
 | S12.35.505 | Admin Support/Broadcast Lite root stale suffixes | LOCKED GREEN (local) | `menu|admin_support` and `menu|admin_broadcast_lite` are emitted by Admin modules and registered through `handle_menu_callback`; exact current-main RED accepted either suffixed callback, cleared pending state and rendered a fallback screen. The exact-root guard now rejects both suffixes with one alert before cleanup/render; focused registered-handler matrix passes. |
 
+### Continuation recheck — Admin Growth (no new implementation spec)
+
+The current source was re-audited through the actual `^admin_growth\\|`
+registration. An inert source-extracted runner reached 33 distinct emitted
+callbacks, each with exactly one ACK and one render, and verified 11 malformed
+trail cases fail closed before report/list reads. Three public-user cases were
+denied without reads. The only two accepted callbacks not currently emitted
+are the documented legacy unscoped `admin_growth|aff_add` and
+`admin_growth|aff_import` guides. Result: `ADMIN_GROWTH_RECHECK=ALL_OK`; no
+new RED, so no code/spec change is authorized. This is fixture evidence only,
+not live Telegram latency evidence.
+
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
 than receiving speculative code. `menu|autopost` remains out of this run as

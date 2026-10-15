@@ -3707,6 +3707,38 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   production data, real Telegram send, merge, deploy or restart was touched.
   Full source compile/CI and live-client timing remain separate release gates.
 
+### Current continuation recheck — Admin Growth registered trail (2026-10-16)
+
+- Contract: re-audit the current `admin_growth` producer/handler pair without
+  opening a new implementation spec unless a registered-handler RED appears.
+  Exercise every reachable read-only Marketing callback, immediate/nested Back
+  ancestry, callback byte bounds, malformed-trail rejection before report/list
+  reads, public denial, and the two documented legacy guide callbacks.
+- Source boundary: `admin_control_center_keyboard()` emits
+  `admin_growth|main`; the exact registered route remains
+  `^admin_growth\\|` → `handle_admin_growth_callback`. No producer, handler,
+  report helper, publish action, wallet, provider, job, product engine or
+  AutoPost code was changed in this recheck.
+- Verification: the source-extracted inert runner reached 33 distinct emitted
+  callback values. Every one produced exactly one ACK and one render; all
+  emitted callback values stayed within Telegram's 64-byte callback limit.
+  Eleven malformed/truncated/invalid parent trails returned one alert with no
+  edit. Three public-user callbacks returned the existing admin-only screen
+  without invoking any report/list read seam. The only two accepted values not
+  emitted by the current keyboards are the existing backward-compatible
+  unscoped `admin_growth|aff_add` and `admin_growth|aff_import` guides; their
+  existing Affiliate Back behavior is covered and was not changed.
+- Result: `ADMIN_GROWTH_RECHECK=ALL_OK`; no new RED, duplicate ACK, wrong Back
+  destination, stale-read, or missing-handler defect was reproduced. No
+  implementation spec is opened and no product code is changed. The ordinary
+  Windows `asyncio.run()` test wrapper remains unsuitable here; this result
+  uses the established immediate no-I/O driver and is not a live Telegram or
+  latency claim.
+- Side effects/limits: fixture/source review only; no production DB/report,
+  publish operation, provider, wallet, protected engine, AutoPost, Telegram
+  send, merge, deploy or restart. A7 click-correlated latency and final batch
+  delivery gates remain open.
+
 ### Batch release gate recheck — 15/10/2026 (pre-delivery snapshot)
 
 - At the time of this snapshot PR #1432 was OPEN and MERGEABLE at exact head

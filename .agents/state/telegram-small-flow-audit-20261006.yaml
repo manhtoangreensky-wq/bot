@@ -9,12 +9,12 @@ objective: >-
   narrow defects; preserve AutoPost WIP and stable Product/Edit/SubDub/Voice/Music
   engines. Do not change secrets, wallets, production data, call paid providers,
   send real Telegram messages, or merge/deploy/restart without authorization.
-current_spec: S12.35.504-post-delivery-evidence-closure
+current_spec: current-continuation-recheck-admin-growth-20261016
 current_spec_contract: >-
-  Reconcile checklist, tester plan, operational report and durable state after
-  the single PR #1432 merge and bot-only deployment. Keep A7 client-correlation
-  evidence explicitly open until a precise click timestamp matches an anonymous
-  route event; do not add speculative callback code.
+  Re-audit the current Admin Growth producer/registered handler trail with an
+  inert source-extracted driver. Do not open an implementation spec without a
+  registered side-effect-free RED; keep A7 client-correlation evidence open and
+  do not add speculative callback code.
 current_branch: docs/ui-callback-evidence-20261015
 current_base_sha: 55abb1d0701a2e6f7e399d6583a2ad2b91687afc
 release_cadence: >-
@@ -8705,3 +8705,33 @@ S12_35_505_admin_root_stale_suffixes_20261016:
   delivery: >-
     Local candidate only in this continuation; GitHub CI, push, merge, deploy
     and live verification remain separate gates. A7 remains open.
+
+current_continuation_recheck_admin_growth_20261016:
+  status: locally_verified_no_new_red
+  contract: >-
+    Re-audit the emitted Admin Marketing/Growth callback trail through the exact
+    registered handler. Cover all reachable read-only callbacks, one-ACK/render,
+    Back ancestry, callback byte bounds, malformed trail fail-closed, public
+    denial before reads, and documented legacy guide callbacks. Open no new
+    implementation spec without a registered side-effect-free RED.
+  evidence: >-
+    Source-extracted inert runner reached 33 distinct emitted callbacks; all
+    returned exactly one ACK and one render and stayed within 64 callback bytes.
+    Eleven malformed/truncated/invalid trails returned one alert with no edit;
+    three public cases rendered the existing admin-only screen with zero report/
+    list reads. Two accepted unscoped values are the existing legacy guides
+    admin_growth|aff_add and admin_growth|aff_import. Result:
+    ADMIN_GROWTH_RECHECK=ALL_OK.
+  decision: >-
+    No new RED, duplicate ACK, wrong Back destination, stale-read or missing
+    registration was reproduced. Do not change bot.py or open a speculative
+    latency/route spec. Ordinary Windows asyncio.run wrapper remains unsuitable;
+    evidence uses the established immediate no-I/O driver and is not live UX
+    proof.
+  protected_scope: >-
+    Product/Edit/Image/Video/SubDub/Voice/Music routes and engines, providers,
+    workers, jobs, wallet/PayOS, AutoPost, ENV/secrets, production data and
+    real Telegram activity.
+  provider_calls: 0
+  wallet_mutations: 0
+  production_data_writes: 0
