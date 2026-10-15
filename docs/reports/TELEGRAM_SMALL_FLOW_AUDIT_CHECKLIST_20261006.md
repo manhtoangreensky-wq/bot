@@ -3677,6 +3677,36 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   restart was performed. This closes the callback ordering defect; live client
   latency remains a separate A7 gate.
 
+### S12.35.505 — Admin Support/Broadcast Lite root stale suffixes
+
+- Contract: dispatch the Admin menu's emitted `menu|admin_support` and
+  `menu|admin_broadcast_lite` roots plus their stale/suffixed variants through
+  the exact registered `handle_menu_callback`. Each exact root must preserve
+  its existing Admin page; each suffixed root must return one expired-button
+  alert before pending cleanup or render. Do not read or mutate Ticket,
+  Broadcast, wallet/payment, provider, job, product-engine or AutoPost state.
+- RED on the current source: `admin_module_keyboard("support")` emits
+  `menu|admin_support`, and `admin_control_center_keyboard()` emits
+  `menu|admin_broadcast_lite`; both are registered page roots, but
+  `admin_exact_root_labels` omitted them. The inert registered handler accepted
+  each suffixed callback, acknowledged normally, cleared pending-state seams
+  and rendered a fallback screen instead of rejecting the stale callback.
+- Minimal fix: add only `admin_support: "CSKH / Góp ý"` and
+  `admin_broadcast_lite: "Thông báo khách hàng"` to the existing exact-root
+  label map. Both exact roots and their Ticket/Broadcast child callbacks remain
+  unchanged.
+- GREEN: `python.exe -S -m unittest -v
+  tests.test_admin_submenu_root_suffix_guards_current_main` → `Ran 1 test in
+  1.842s — OK`; the matrix now covers 13 producer roots including
+  `admin_support` and `admin_broadcast_lite`, and each stale suffix returns one alert with no edit or
+  cleanup effect. Changed test `py_compile` exited `0`; `git diff --check`
+  exited `0`.
+- Protected review/limits: changed files are only `bot.py` and the existing
+  stale-root regression. No Product/Edit/Image/Video/SubDub/Voice/Music route
+  or engine, provider/worker/job, wallet/PayOS, AutoPost, ENV/secrets,
+  production data, real Telegram send, merge, deploy or restart was touched.
+  Full source compile/CI and live-client timing remain separate release gates.
+
 ### Batch release gate recheck — 15/10/2026 (pre-delivery snapshot)
 
 - At the time of this snapshot PR #1432 was OPEN and MERGEABLE at exact head
@@ -3721,3 +3751,5 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   cause or all-button smoothness; no speculative latency patch or hardware
   purchase is justified. Goal status remains ACTIVE until that evidence gate is
   either collected or explicitly deferred by the Owner.
+- S12.35.505 is locally GREEN but not yet delivered to GitHub/runtime in this
+  continuation; keep merge/deploy status separate from the fixture result.
