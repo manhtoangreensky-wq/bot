@@ -71,11 +71,15 @@ S12.35.494 changes only the ACK order in `handle_package_choice`: malformed
 
 - Full `bot.py` compile emitted `COMPILE_START` but no completion marker during
   a bounded ~300s observation and was stopped with Ctrl+C; status is
-  `NOT_VERIFIED`, not a syntax failure. Exact-head CI must still return an
-  actual exit marker.
+  `NOT_VERIFIED` locally, not a syntax failure. Exact-head CI later verified
+  `Compile Complete Bot Source` and `Python Compile Guard` successfully in run
+  `38700321728`.
 - The broader Admin child/Back regression runner did not return a completion
   marker in the bounded local observation window; it is `NOT_VERIFIED`, not a
   product failure or pass, and is not being repeated unchanged.
+- Exact-head CI run `38700321728` completed SUCCESS. The source compile guard
+  run `38700321747` also completed SUCCESS; all selected Admin/customer,
+  stale-root, PayOS ACK and workflow-hygiene steps were green.
 - Protected-scope comparator must show no route/engine/provider/worker delta.
 - No provider call, wallet mutation, production DB write or real Telegram send.
 - Merge, deploy, restart and live-client latency claims remain separate owner

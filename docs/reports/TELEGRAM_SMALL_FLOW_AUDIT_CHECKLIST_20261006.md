@@ -3246,6 +3246,10 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - [ ] Full `bot.py` compile emitted `COMPILE_START` but no completion marker
   during a bounded ~300s observation and was stopped with Ctrl+C;
   `FULL_SOURCE_COMPILE=NOT_VERIFIED` (not interpreted as a syntax failure).
+- [x] Exact-head GitHub CI run `38700321728` verified Complete Bot Source,
+  Python Compile Guard, all selected Admin/customer regression steps, the
+  19-test stale-root gate, the PayOS ACK gate and workflow hygiene: SUCCESS.
+- [x] Independent source-compile guard run `38700321747`: SUCCESS.
 - [x] `git diff --check`: `DIFF_CHECK_EXIT=0`.
 - [x] Added `bot.py` executable lines contain no protected provider/worker/
   job/wallet/PayOS/engine/route mutation (UI label strings excluded):
@@ -3260,7 +3264,8 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   screens use distinct callback roots. This is source inventory evidence only,
   not live Telegram evidence.
 - [x] Batch branch pushed and PR #1432 opened; no merge/deploy/restart has
-  been performed. CI and exact-head delivery gates remain open.
+  been performed. CI and exact-head delivery gates are green; merge/deploy/
+  restart remain owner gates.
 - [ ] Broader Admin child/Back runner: `NOT_VERIFIED` (no completion marker;
   not interpreted as a product failure or pass).
 

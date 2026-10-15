@@ -8291,14 +8291,19 @@ S12_35_252_archive_view_file_local_test_rerun:
     full_compile: >-
       NOT_VERIFIED: COMPILE_START emitted, no completion marker in a bounded
       ~300s observation, stopped with Ctrl+C; not classified as syntax failure.
+    exact_head_ci: >-
+      SUCCESS: CI Main & PR Quality Guard run 38700321728 verified Compile
+      Complete Bot Source, Python Compile Guard, all selected Admin/customer
+      regressions, stale-root gate, PayOS ACK gate and workflow hygiene.
+      Independent source-compile guard run 38700321747 also SUCCESS.
     broader_admin_child_runner: NOT_VERIFIED
     protected_code_comparator_exit: 0
     changed_file_scope_exit: 0
     no_handler_entry_smoke_exit: 0
     all_locale_handler_map_exit: 0
     delivery: >-
-      Branch pushed and PR #1432 opened at head e7fde4ee. Merge, deploy and
-      restart remain intentionally unperformed; CI/exact-head gates are open.
+      Branch pushed and PR #1432 opened at head 029a70f3f9e937bbc24e7b42b8dd040ffc71715e.
+      CI is green; merge, deploy and restart remain intentionally unperformed.
 
   S12_35_494_payos_package_ownership_ack:
     status: local_green
@@ -8316,6 +8321,8 @@ S12_35_252_archive_view_file_local_test_rerun:
     green: >-
       Registered producer/handler source contract test returned 1 test in
       0.194s OK; changed test py_compile and git diff --check returned exit 0.
+      Exact-head CI run 38700321728 also completed SUCCESS through the new
+      PayOS ACK gate.
     protected_scope: >-
       No order creation, PayOS request, wallet/Xu, pricing, provider, job,
       Product Video, Image, Music, Voice, SubDub, AutoPost or route-engine body
