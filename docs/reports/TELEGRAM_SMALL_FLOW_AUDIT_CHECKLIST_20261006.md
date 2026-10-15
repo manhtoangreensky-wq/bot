@@ -3677,6 +3677,68 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   restart was performed. This closes the callback ordering defect; live client
   latency remains a separate A7 gate.
 
+### S12.35.505 — Admin Support/Broadcast Lite root stale suffixes
+
+- Contract: dispatch the Admin menu's emitted `menu|admin_support` and
+  `menu|admin_broadcast_lite` roots plus their stale/suffixed variants through
+  the exact registered `handle_menu_callback`. Each exact root must preserve
+  its existing Admin page; each suffixed root must return one expired-button
+  alert before pending cleanup or render. Do not read or mutate Ticket,
+  Broadcast, wallet/payment, provider, job, product-engine or AutoPost state.
+- RED on the current source: `admin_module_keyboard("support")` emits
+  `menu|admin_support`, and `admin_control_center_keyboard()` emits
+  `menu|admin_broadcast_lite`; both are registered page roots, but
+  `admin_exact_root_labels` omitted them. The inert registered handler accepted
+  each suffixed callback, acknowledged normally, cleared pending-state seams
+  and rendered a fallback screen instead of rejecting the stale callback.
+- Minimal fix: add only `admin_support: "CSKH / Góp ý"` and
+  `admin_broadcast_lite: "Thông báo khách hàng"` to the existing exact-root
+  label map. Both exact roots and their Ticket/Broadcast child callbacks remain
+  unchanged.
+- GREEN: `python.exe -S -m unittest -v
+  tests.test_admin_submenu_root_suffix_guards_current_main` → `Ran 1 test in
+  1.842s — OK`; the matrix now covers 13 producer roots including
+  `admin_support` and `admin_broadcast_lite`, and each stale suffix returns one alert with no edit or
+  cleanup effect. Changed test `py_compile` exited `0`; `git diff --check`
+  exited `0`.
+- Protected review/limits: changed files are only `bot.py` and the existing
+  stale-root regression. No Product/Edit/Image/Video/SubDub/Voice/Music route
+  or engine, provider/worker/job, wallet/PayOS, AutoPost, ENV/secrets,
+  production data, real Telegram send, merge, deploy or restart was touched.
+  Full source compile/CI and live-client timing remain separate release gates.
+
+### Current continuation recheck — Admin Growth registered trail (2026-10-16)
+
+- Contract: re-audit the current `admin_growth` producer/handler pair without
+  opening a new implementation spec unless a registered-handler RED appears.
+  Exercise every reachable read-only Marketing callback, immediate/nested Back
+  ancestry, callback byte bounds, malformed-trail rejection before report/list
+  reads, public denial, and the two documented legacy guide callbacks.
+- Source boundary: `admin_control_center_keyboard()` emits
+  `admin_growth|main`; the exact registered route remains
+  `^admin_growth\\|` → `handle_admin_growth_callback`. No producer, handler,
+  report helper, publish action, wallet, provider, job, product engine or
+  AutoPost code was changed in this recheck.
+- Verification: the source-extracted inert runner reached 33 distinct emitted
+  callback values. Every one produced exactly one ACK and one render; all
+  emitted callback values stayed within Telegram's 64-byte callback limit.
+  Eleven malformed/truncated/invalid parent trails returned one alert with no
+  edit. Three public-user callbacks returned the existing admin-only screen
+  without invoking any report/list read seam. The only two accepted values not
+  emitted by the current keyboards are the existing backward-compatible
+  unscoped `admin_growth|aff_add` and `admin_growth|aff_import` guides; their
+  existing Affiliate Back behavior is covered and was not changed.
+- Result: `ADMIN_GROWTH_RECHECK=ALL_OK`; no new RED, duplicate ACK, wrong Back
+  destination, stale-read, or missing-handler defect was reproduced. No
+  implementation spec is opened and no product code is changed. The ordinary
+  Windows `asyncio.run()` test wrapper remains unsuitable here; this result
+  uses the established immediate no-I/O driver and is not a live Telegram or
+  latency claim.
+- Side effects/limits: fixture/source review only; no production DB/report,
+  publish operation, provider, wallet, protected engine, AutoPost, Telegram
+  send, merge, deploy or restart. A7 click-correlated latency and final batch
+  delivery gates remain open.
+
 ### Batch release gate recheck — 15/10/2026 (pre-delivery snapshot)
 
 - At the time of this snapshot PR #1432 was OPEN and MERGEABLE at exact head
@@ -3721,3 +3783,5 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   cause or all-button smoothness; no speculative latency patch or hardware
   purchase is justified. Goal status remains ACTIVE until that evidence gate is
   either collected or explicitly deferred by the Owner.
+- S12.35.505 is locally GREEN but not yet delivered to GitHub/runtime in this
+  continuation; keep merge/deploy status separate from the fixture result.

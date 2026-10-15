@@ -22,6 +22,8 @@ ADMIN_ROOTS = (
     "admin_provider_worker",
     "admin_finance",
     "admin_packages",
+    "admin_support",
+    "admin_broadcast_lite",
     "freeze_queue",
 )
 

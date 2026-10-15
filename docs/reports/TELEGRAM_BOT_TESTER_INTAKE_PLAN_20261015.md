@@ -64,6 +64,19 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.501 | Internal Archive `view`/`file` out-of-range document ID | LOCKED GREEN | exact registered routes reproduced SQLite-style `OverflowError`; the bounded ASCII-decimal/int64 guard now returns one invalid-ID alert before lookup for both actions. Focused no-I/O runner: `RUN 6` / `ALL_OK`; changed test compile and diff check exit 0. |
 | S12.35.502 | Knowledge Vault prompt/asset callback out-of-range ID | LOCKED GREEN | exact `^vault\\|` handler reproduced SQLite-style `OverflowError`; bounded ASCII-decimal/int64 admission now returns one alert before Vault for `use`/`approve_prompt`/`approve_asset`. Focused run: `VAULT_FOCUSED_RUN 2` / `ALL_OK`; test compile and diff check exit 0. |
 | S12.35.503 | Document Tools `confirm` ACK ordering | LOCKED GREEN (CI) | exact registered `docflow|confirm` route now performs only in-memory admission before one ACK, then reads language and renders; regression locks ACK-before-language for a valid confirm and preserves one alert for too-few files. No file processing or charge path changed. |
+| S12.35.505 | Admin Support/Broadcast Lite root stale suffixes | LOCKED GREEN (local) | `menu|admin_support` and `menu|admin_broadcast_lite` are emitted by Admin modules and registered through `handle_menu_callback`; exact current-main RED accepted either suffixed callback, cleared pending state and rendered a fallback screen. The exact-root guard now rejects both suffixes with one alert before cleanup/render; focused registered-handler matrix passes. |
+
+### Continuation recheck — Admin Growth (no new implementation spec)
+
+The current source was re-audited through the actual `^admin_growth\\|`
+registration. An inert source-extracted runner reached 33 distinct emitted
+callbacks, each with exactly one ACK and one render, and verified 11 malformed
+trail cases fail closed before report/list reads. Three public-user cases were
+denied without reads. The only two accepted callbacks not currently emitted
+are the documented legacy unscoped `admin_growth|aff_add` and
+`admin_growth|aff_import` guides. Result: `ADMIN_GROWTH_RECHECK=ALL_OK`; no
+new RED, so no code/spec change is authorized. This is fixture evidence only,
+not live Telegram latency evidence.
 
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
@@ -115,6 +128,13 @@ condition before acknowledging exactly once; valid confirmation ACKs before the
 language lookup/render path, while the too-few-files alert remains the sole ACK.
 Document processing, file delivery, charging, wallet, provider, engine and
 AutoPost paths are unchanged.
+
+S12.35.505 changes only the exact-root label map used by the existing stale
+`menu|` guard. `menu|admin_support` and `menu|admin_broadcast_lite` remain valid
+producer-backed roots and continue to render their existing Admin pages; only
+suffixed/stale variants are rejected before pending cleanup or rendering. No
+Ticket/Broadcast data or action, wallet, provider, job, product engine or
+AutoPost path changes.
 
 ## 4. Release-gate result and remaining evidence
 
