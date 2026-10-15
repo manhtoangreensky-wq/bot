@@ -34,6 +34,13 @@ job/delivery/report, report gửi trước settlement hoặc lộ thông tin k�
 17. Không test `multi_scene_film`, `video_long`, `video_local_edit` hoặc
     `videoedit|ai` trong chu kỳ V2 hiện tại. Local Edit là baseline đã khóa.
 
+## Cách test callback ID stale của Telegram small-flow
+
+1. Chỉ dùng fixture registered-handler trong `docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md`; không dùng ticket, hồ sơ, prompt hoặc asset production.
+2. Với Ticket, Archive và Knowledge Vault, thử ID Unicode, `9223372036854775808` và chuỗi 20 chữ số.
+3. PASS khi callback có đúng một alert, không gọi getter/Vault seam, không clear pending và không gửi file; ID hợp lệ `441` vẫn ACK một lần và đi vào nhánh cũ.
+4. Không gọi provider, ví/PayOS, engine sản phẩm, AutoPost hoặc Telegram thật trong case này. Nếu full compile/CI chưa có kết quả, ghi `NOT_VERIFIED`, không ghi PASS.
+
 ## Cách test Public Landing Motion
 
 1. Dùng đúng sáu case `ML-01..ML-06`; tải mới trang trước mỗi case.

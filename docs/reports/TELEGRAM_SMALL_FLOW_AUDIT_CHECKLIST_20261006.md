@@ -3455,6 +3455,109 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 
 ### S12.35.291 — Admin tax report selector Back origin
 
+### S12.35.497 — Admin Ticket status callback out-of-range ID
+
+- Contract: dispatch the actual registered `ticket|st|<id>|<status>` callback
+  through `handle_ticket_callback` with an Admin actor. A malformed or
+  SQLite-int64-out-of-range ID must receive exactly one unsupported-action
+  alert before `get_support_ticket`; a valid in-range ID keeps the existing
+  not-found/status path. Do not update a ticket or touch payment, wallet,
+  provider, job, product-engine or AutoPost state.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  the registered route accepted `ticket|st|9223372036854775808|resolved`,
+  called `get_support_ticket(9223372036854775808)`, and a SQLite-style fixture
+  raised `OverflowError: Python int too large to convert to SQLite INTEGER`
+  before the callback could acknowledge safely. The ordinary in-range stale
+  route still returned its existing one “Không tìm thấy ticket.” alert.
+- Minimal fix: added a local `ticket_status_id_ok` predicate matching the
+  existing ASCII-decimal/int64 boundary used for detail IDs and applied it
+  only to the `st` pre-lookup check. No status, lookup, ownership, Back or
+  admin authorization logic was refactored.
+- GREEN: the registered-handler fixture file ran four direct no-I/O cases —
+  `RUN 4`, each `OK`, and `ALL_OK`; the out-of-range case produced exactly one
+  unsupported alert and zero lookup calls. `git diff --check` exited 0.
+- Protected review: only `handle_ticket_callback`'s `st` ID guard, its focused
+  regression, one safe-navigation CI test entry, and audit evidence changed.
+  Provider calls, wallet mutations, production writes and real Telegram sends:
+  0. Status: locally verified; consolidated CI, PR delivery and live-client
+  latency remain separate gates.
+
+### S12.35.498 — Admin Ticket list callback out-of-range offset
+
+- Contract: dispatch the actual registered `ticket|al|<kind>|<offset>` route
+  with an Admin actor. A malformed or SQLite-int64-out-of-range offset must
+  receive one expired-button alert before `support_admin_list_payload`; a valid
+  offset keeps the existing list/pagination behavior. Do not read or mutate
+  ticket data in the fixture and do not enter wallet, payment, provider, job,
+  product-engine or AutoPost paths.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  `ticket|al|new|9223372036854775808` passed the decimal check, sent one normal
+  ACK, then reached the list getter. A SQLite-style getter raised
+  `OverflowError: Python int too large to convert to SQLite INTEGER` instead of
+  recovering the expired button.
+- Minimal fix: added only the existing int64 boundary (`ASCII decimal`, at most
+  19 digits and `<= 9223372036854775807`) to the `al` pre-lookup predicate.
+  The list query, page ordering, status filters and Back callbacks are
+  unchanged.
+- GREEN: the exact registered-handler fixture covers nonnumeric and
+  out-of-range offsets; both return one expired-button alert and do not reach
+  the list seam. Test-file compile and `git diff --check` exit 0.
+- Protected review: only the `al` offset guard, its focused regression, one
+  safe-navigation CI entry and audit evidence changed. Provider calls, wallet
+  mutations, production writes and real Telegram sends: 0. Status: locally
+  verified; consolidated CI, PR delivery and live-client latency remain
+  separate gates.
+
+### S12.35.499 — Customer Ticket summary callback out-of-range ID
+
+- Contract: dispatch the actual registered
+  `ticket|summary|<id>|profile_result|feedback_result` callback with a
+  customer actor. A malformed or SQLite-int64-out-of-range ID must receive one
+  unsupported-action alert before `get_support_ticket`; valid IDs and the two
+  existing result origins keep their current summary/Back behavior.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  `ticket|summary|9223372036854775808|profile_result` was ACKed, reached the
+  ticket getter and a SQLite-style fixture raised
+  `OverflowError: Python int too large to convert to SQLite INTEGER`.
+- Minimal fix: the existing early summary ACK predicate now applies the same
+  ASCII-decimal/int64 boundary used by Ticket detail IDs, and the summary
+  branch rejects any value that did not pass that predicate before lookup.
+  Summary rendering, origin mapping and Back controls are unchanged.
+- GREEN: the exact registered-handler fixture covers a nonnumeric and an
+  out-of-range summary ID; each returned one `Action not supported` alert and
+  the getter seam was not reached. Test-file compile and `git diff --check`
+  exit 0.
+- Protected review: only the summary ID guard, its focused regression, one
+  safe-navigation CI entry and audit evidence changed. Provider calls, wallet
+  mutations, production writes and real Telegram sends: 0. Status: locally
+  verified; consolidated CI, PR delivery and live-client latency remain
+  separate gates.
+
+### S12.35.500 — Customer Ticket action ID overflow (`reply_user`/`attach`/`done`)
+
+- Contract: dispatch the actual registered customer Ticket action callbacks
+  `ticket|reply_user|<id>`, `ticket|attach|<id>` and `ticket|done|<id>`. A
+  malformed or SQLite-int64-out-of-range ID must receive one unsupported
+  alert before `get_support_ticket`, pending-state changes or the action;
+  valid IDs retain the existing behavior and Back ancestry.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  each of the three callbacks with ID `9223372036854775808` passed the
+  decimal check, ACKed once, reached the ticket getter and raised a
+  SQLite-style `OverflowError`.
+- Minimal fix: added one local ASCII-decimal/int64 Ticket ID predicate at the
+  handler boundary, reused it for detail/status/summary/customer-action
+  admission, and replaced the customer-action decimal-only lookup check. No
+  valid action branch, pending state, ownership or Back builder was changed.
+- GREEN: the exact registered-handler fixture covers all three actions with
+  both out-of-range and nonnumeric IDs; every case returns one unsupported
+  alert and does not reach the getter. Test-file compile and
+  `git diff --check` exit 0.
+- Protected review: only the shared Ticket ID admission branch, its focused
+  regression, one safe-navigation CI entry and audit evidence changed.
+  Provider calls, wallet mutations, production writes and real Telegram sends:
+  0. Status: locally verified; consolidated CI, PR delivery and live-client
+  latency remain separate gates.
+
 - Contract: enter the Admin VAT/CIT module through `menu|finance_tax_vat`, open its emitted VAT/CIT report selector, and dispatch that selector's emitted Back through the registered `menu|` handler. Back must restore the immediate tax module, not Finance root; public access must be rejected before report helpers.
 - Scope: inert rendering only. Do not query production reports, generate exports, change tax calculations, touch finance/wallet state, providers, jobs, AutoPost, or protected product engines.
 - Baseline source evidence: `ADMIN_MENU_PAGE_HANDLERS` maps `finance_tax_vat` to the tax dashboard and `finance_tax_keyboard`; that keyboard emits the report selector. `finance_tax_report_keyboard()` currently labels Back “Tài chính” and emits `menu|finance`, which is the wrong ancestor. Existing tests cover tax report helpers, not this emitted Back route through the menu handler.
@@ -3477,3 +3580,71 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   finance/wallet mutation, job, AutoPost, protected engine, or real Telegram.
   Full bot compilation, batch CI, PR/delivery, and live UI latency remain open.
 - Status: locally verified; final batch CI/delivery pending.
+
+### S12.35.501 — Internal Archive view/file out-of-range document ID
+
+- Contract: dispatch the actual registered `archive|view|<id>` and
+  `archive|file|<id>` callbacks as an Admin. A malformed or SQLite-int64-
+  out-of-range decimal ID must receive one invalid-ID alert before
+  `get_internal_document`; valid IDs keep the existing view/file behavior,
+  ACK ordering, stale recovery and Back controls.
+- Scope: only the `handle_internal_archive_callback` ID admission guard and a
+  focused inert fixture. Do not alter archive storage, file sending, pending
+  cleanup, provider, wallet, job, Product/Edit/Image/Video/SubDub/Voice/Music
+  engine or AutoPost code.
+- RED on exact `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`: both
+  registered routes accepted `9223372036854775808`, ACKed once, reached a
+  SQLite-style getter and raised `OverflowError: Python int too large to
+  convert to SQLite INTEGER`.
+- Acceptance: reject non-ASCII/non-decimal, over-19-digit and above-int64 IDs
+  before the getter with one alert; preserve the current one early ACK and
+  valid in-range view/file fixtures. Record focused GREEN, test compile and
+  diff/scope review before moving to another finding.
+- GREEN: the registered-handler fixture covered both `view` and `file` with
+  Arabic-Indic digits, the first above-int64 value, and a 20-digit value;
+  `RUN 6` / `ALL_OK` confirmed one invalid-ID alert, zero document lookups,
+  zero file sends, and no pending cleanup for every case. The existing
+  ACK-before-lookup regression also returned `OK`; changed-test `py_compile`
+  exited 0 and `git diff --check` exited 0.
+- Minimal fix: added only a local ASCII-decimal/int64 predicate in
+  `handle_internal_archive_callback` and reused it for the existing `view`/
+  `file` admission branch. Valid lookup, ACK ordering, stale recovery, file
+  delivery and Back keyboards are unchanged.
+- Protected review/limits: only Archive admission, its existing focused test,
+  CI inclusion (the test module was already selected), checklist, tester plan
+  and durable state changed. No archive storage/file write, DB, wallet,
+  provider, job, Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost,
+  Telegram send, merge, deploy or restart occurred. Full source compile and
+  consolidated CI remain separate gates.
+
+### S12.35.502 — Knowledge Vault prompt/asset callback out-of-range ID
+
+- Contract: dispatch the registered `^vault\\|` handler for `vault|use|<id>`,
+  `vault|approve_prompt|<id>` and `vault|approve_asset|<id>`. A malformed or
+  SQLite-int64-out-of-range ID must receive exactly one invalid-ID alert before
+  the Vault object is called; valid IDs retain the existing one early ACK and
+  use/approval behavior.
+- Scope: only callback admission/ACK ordering and a no-I/O fixture. Do not
+  alter prompt text, asset import/approval semantics, Vault storage, provider,
+  wallet, job, Product/Edit/Image/Video/SubDub/Voice/Music engine or AutoPost.
+- RED on exact `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`: each
+  action ACKed once and passed `9223372036854775808` to its Vault seam; a
+  SQLite-style fixture raised `OverflowError: Python int too large to convert
+  to SQLite INTEGER`.
+- Acceptance: non-ASCII/non-decimal, over-19-digit and above-int64 IDs return
+  one alert with zero Vault calls; valid in-range actions keep their current
+  ACK and branch. Record focused GREEN, test compile and diff/scope review.
+- GREEN: the registered-handler fixture covered all three actions with Arabic-
+  Indic digits, the first above-int64 value, and a 20-digit value; `VAULT_FOCUSED_RUN 2` /
+  `ALL_OK` confirmed one invalid-ID alert, zero Vault factory calls and zero
+  Vault method calls for every malformed case. Valid `441` cases retained one
+  normal ACK and the original `get_prompt`/`approve_prompt`/`approve_asset`
+  branches. Test `py_compile` exited 0 and `git diff --check` exited 0.
+- Minimal fix: moved the existing ACK after a local Vault item ID admission
+  check for only these three ID-bearing actions; invalid callbacks now get one
+  alert, while all other actions and valid branches keep their prior ACK.
+- Protected review/limits: only Vault callback admission/ACK order, its focused
+  regression, CI selection, checklist, tester plan and durable state changed.
+  Prompt/asset content, storage/import/approval semantics, provider, wallet,
+  job, Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, Telegram
+  sends, merge, deploy and restart were not run or changed.

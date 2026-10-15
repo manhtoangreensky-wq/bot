@@ -208,6 +208,26 @@ def _runtime():
 
 
 class InternalArchiveSearchBackOriginTests(unittest.TestCase):
+    def test_view_and_file_reject_malformed_or_out_of_range_ids_before_lookup(self):
+        for action in ("view", "file"):
+            for document_id in ("١", "9223372036854775808", "10000000000000000000"):
+                with self.subTest(action=action, document_id=document_id):
+                    runtime, _captured, _clock, _click = _runtime()
+                    query = _Query(700223, f"archive|{action}|{document_id}")
+                    self.assertIsNotNone(_registered_archive_pattern().match(query.data))
+                    _run_no_io(runtime["handle_internal_archive_callback"](
+                        SimpleNamespace(callback_query=query),
+                        SimpleNamespace(bot=SimpleNamespace(send_document=lambda **kwargs: None)),
+                    ))
+
+                    self.assertEqual(
+                        query.answers,
+                        [(("Mã hồ sơ không hợp lệ.",), {"show_alert": True})],
+                    )
+                    self.assertEqual(runtime["_archive_lookup_calls"], [])
+                    self.assertEqual(runtime["_archive_sent_documents"], [])
+                    self.assertEqual(runtime["_archive_pending_clear_calls"], [])
+
     def test_archive_document_reads_are_acknowledged_before_lookup(self):
         for action in ("view", "file"):
             with self.subTest(action=action):

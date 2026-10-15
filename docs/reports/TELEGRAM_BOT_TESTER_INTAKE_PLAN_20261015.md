@@ -57,6 +57,12 @@ as unmapped and are not copied into `bot.py`.
 | S12.35.494 | registered PayOS package ownership ACK | LOCKED GREEN | RED: unauthorized `payos_pkg|...` received normal ACK then alert; GREEN: producer/registration contract passes with alert-only denial; payment branches unchanged |
 | S12.35.495 | registered manual package admin ownership ACK | LOCKED GREEN | RED: non-admin `manual|approve...` received normal ACK then denial alert; GREEN: admin gate precedes normal ACK; approval/payment branches unchanged |
 | S12.35.496 | malformed provider-choice UID | DEFERRED BY PROTECTED SCOPE | `provider_keyboard()` emits `prov|voice/image|...|<uid>` and exact `^prov\\|` registration reaches `handle_provider_choice`; malformed UID reaches `int(uid_str)` before ACK. No patch is authorized in this UI-only batch because this is the protected Voice/Image provider-choice boundary. |
+| S12.35.497 | Admin Ticket status callback out-of-range ID | LOCKED GREEN | exact registered `ticket|st|<id>|<status>` route reproduced an `OverflowError` before a safe alert when the decimal ID exceeded SQLite int64; bounded ASCII-decimal guard now returns one unsupported alert before lookup. |
+| S12.35.498 | Admin Ticket list callback out-of-range offset | LOCKED GREEN | exact registered `ticket|al|<kind>|<offset>` route reproduced a SQLite-style `OverflowError` after a normal ACK; bounded int64 offset guard now returns one expired-button alert before list lookup. |
+| S12.35.499 | Customer Ticket summary callback out-of-range ID | LOCKED GREEN | exact registered `ticket|summary|<id>|<origin>` route reproduced a SQLite-style `OverflowError` after ACK; bounded int64 ID guard now returns one unsupported alert before lookup. |
+| S12.35.500 | Customer Ticket action ID overflow (`reply_user`/`attach`/`done`) | LOCKED GREEN | exact registered routes reproduced SQLite-style `OverflowError` after ACK; one shared bounded ID predicate now rejects all three before lookup/pending/action. |
+| S12.35.501 | Internal Archive `view`/`file` out-of-range document ID | LOCKED GREEN | exact registered routes reproduced SQLite-style `OverflowError`; the bounded ASCII-decimal/int64 guard now returns one invalid-ID alert before lookup for both actions. Focused no-I/O runner: `RUN 6` / `ALL_OK`; changed test compile and diff check exit 0. |
+| S12.35.502 | Knowledge Vault prompt/asset callback out-of-range ID | LOCKED GREEN | exact `^vault\\|` handler reproduced SQLite-style `OverflowError`; bounded ASCII-decimal/int64 admission now returns one alert before Vault for `use`/`approve_prompt`/`approve_asset`. Focused run: `VAULT_FOCUSED_RUN 2` / `ALL_OK`; test compile and diff check exit 0. |
 
 `menu|main_quick` and `menu|main_audio` were probed but have no current
 literal producer that can justify a new guard; they remain `NOT_OPEN` rather
@@ -77,6 +83,30 @@ the existing read/approval branch.
 S12.35.496 is a follow-up item only. Reopening it requires explicit Owner
 permission for a narrow malformed-UID guard at the protected provider-choice
 boundary; no permission is inferred from this UI audit.
+
+S12.35.497 changes only the Admin Ticket status callback's ID validation. Valid
+SQLite-range IDs keep the existing lookup, status update, and Back rendering;
+out-of-range or malformed values are rejected before any ticket lookup. No
+ticket data, wallet, payment, provider, job, product engine or AutoPost path is
+changed.
+
+S12.35.500 applies the shared Ticket ID admission check only to the three
+customer action callbacks `reply_user`, `attach` and `done`. Valid IDs retain
+their existing reply/attachment/resolve and Back behavior; malformed or
+out-of-range IDs stop before lookup and pending/action changes. No ticket data,
+wallet, payment, provider, job, product engine or AutoPost path is changed.
+
+S12.35.499 changes only the Customer Ticket summary callback's ID admission.
+Valid SQLite-range IDs and both existing result origins retain the current
+summary screen and Back controls; malformed or out-of-range IDs are rejected
+before the ticket getter. No ticket data, wallet, payment, provider, job,
+product engine or AutoPost path is changed.
+
+S12.35.498 changes only the Admin Ticket list offset admission check. Valid
+SQLite-range offsets retain the existing list and pagination behavior; malformed
+or out-of-range offsets return the existing expired-button alert before any
+ticket list read. No ticket data, wallet, payment, provider, job, product
+engine or AutoPost path is changed.
 
 ## 4. Release gates still open
 

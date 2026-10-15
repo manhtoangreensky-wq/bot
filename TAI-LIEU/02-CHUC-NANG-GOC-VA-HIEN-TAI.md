@@ -18,6 +18,20 @@ Nguồn đối chiếu:
 
 ## Đối chiếu
 
+### Delta callback/UI đã kiểm chứng — 15/10/2026
+
+Chức năng UI nhỏ vẫn giữ cùng callback registrations và Back/Home contracts;
+candidate chỉ chặn payload số malformed/out-of-range trước lớp đọc dữ liệu:
+
+| Surface | Hiện tại trong candidate | Không thay đổi |
+|---|---|---|
+| Ticket Admin/customer | ID/offset ngoài SQLite int64 nhận một alert trước lookup | ownership, status, action, pending và Back |
+| Internal Archive | `view`/`file` ID lỗi nhận một alert trước document lookup | storage, file delivery, stale recovery và Back |
+| Knowledge Vault | `use`/`approve_prompt`/`approve_asset` ID lỗi nhận một alert trước Vault | prompt/asset content, import và approval branch hợp lệ |
+
+Evidence cục bộ là fixture registered-handler, không phải production/live claim;
+`origin/main` và candidate SHA/CI/runtime phải được đối chiếu riêng trước merge.
+
 | Chức năng gốc | Hiện tại | Trạng thái |
 |---|---|---|
 | Video AI Prompt -> Add-on -> tier -> invoice -> confirm -> job | Tail hiện khóa 6 màn Add-on, Review, Quality, Invoice, Confirm, Status | Còn dùng, đã mở rộng |

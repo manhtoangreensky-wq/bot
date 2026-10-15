@@ -135,7 +135,12 @@ jobs:
             tests/test_support_expired_input_dispatch.py \
             tests/test_subdub_voice_child_back.py \
             tests/test_voice_settings_input_back.py \
-            tests/test_video_downloader_freehub_exit_pending.py
+            tests/test_video_downloader_freehub_exit_pending.py \
+            tests/test_admin_stale_ticket_status_callback_single_ack.py \
+            tests/test_admin_stale_ticket_list_callback_single_ack.py \
+            tests/test_customer_stale_ticket_summary_callback_single_ack.py \
+            tests/test_customer_stale_ticket_action_id_single_ack.py \
+            tests/test_knowledge_vault_callback_single_ack.py
 
       - name: Current-main Stale Menu Root Callback Guards
         run: |

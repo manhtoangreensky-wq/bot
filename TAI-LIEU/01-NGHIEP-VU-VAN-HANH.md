@@ -13,6 +13,27 @@ local commit `d7f296d2a00eba050d437ca51962d33acc5b4ffa`, ngày 2026-08-28.
 
 ## Phạm vi
 
+## Addendum Telegram small-flow callback — 15/10/2026
+
+Batch candidate `fix/telegram-stale-root-callbacks-20261015` đang khóa sáu
+spec admission callback S12.35.497–S12.35.502 trên
+`origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+
+- 4 route Ticket (status, list offset, summary, customer action), 2 route
+  Archive (`view`/`file`) và 3 action Knowledge Vault (`use`,
+  `approve_prompt`, `approve_asset`) đều có guard ASCII-decimal/int64 trước
+  getter/Vault; giá trị `9223372036854775808` đã tái hiện RED bằng fixture
+  SQLite-style và hiện trả đúng một alert trong fixture candidate.
+- Focused evidence: `RUN 6 / ALL_OK` cho Archive và `VAULT_FOCUSED_RUN 2 /
+  ALL_OK` cho Vault; test-file `py_compile` và `git diff --check` đều exit `0`.
+- Chưa deploy, chưa restart, chưa gọi provider, chưa gửi Telegram thật, chưa
+  ghi DB/wallet và chưa chốt full `bot.py` compile local; CI/merge/deploy vẫn
+  là gate riêng.
+- Protected Product Video/Edit/Image/SubDub/Voice/Music, provider/worker,
+  AutoPost WIP, giá, ví, PayOS, ENV/secrets không nằm trong diff callback này.
+
+Nguồn case và checklist chi tiết: [Telegram tester intake plan](../docs/reports/TELEGRAM_BOT_TESTER_INTAKE_PLAN_20261015.md), [small-flow checklist](../docs/reports/TELEGRAM_SMALL_FLOW_AUDIT_CHECKLIST_20261006.md).
+
 - 8 representative rows theo sản phẩm/lane: 19 cảnh; trong đó Kịch bản -> Video
   dùng 5 cảnh, 7 row còn lại dùng 2 cảnh.
 - 9 quality-only rows, mỗi row 1 cảnh; tier `400` đã được 8 representative rows
