@@ -108919,19 +108919,6 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
     ):
         return
 
-    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
-    from services.provider_spend_guard import (
-        evaluate_paid_live_test_availability,
-        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
-    )
-    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability()
-    if not is_avail:
-        await query.answer()
-        return await safe_edit_or_send(
-            query,
-            f"Từ chối quyền thực thi kiểm thử trực tiếp: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
-        )
-
     # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
     real_update_id = getattr(update, "update_id", 0) or 0
     real_cbq_id = getattr(query, "id", "") or ""
@@ -108966,17 +108953,49 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
     job_id = draft.get("job_id") or session.get("job_id") or 0
     request_id = draft.get("request_id") or session.get("request_id") or ""
     scene_count = int(draft.get("scene_count") or session.get("scene_count") or 1)
+    acceptance_plan = session.get("acceptance_plan") or draft.get("acceptance_plan") or getattr(context, "_acceptance_plan", None)
 
-    if not owner_receipt:
+    if not owner_receipt and not (acceptance_plan and isinstance(acceptance_plan, dict)):
         await query.answer()
         return await safe_edit_or_send(
             query,
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
         )
 
-    # Section 4: Durable registered dispatch event is primary authority
+    # Section 7: Universal fail-closed check before touching durable dispatch storage
+    if owner_receipt:
+        from services.provider_spend_guard import (
+            evaluate_paid_live_test_availability,
+            BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+        )
+        is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(owner_receipt=owner_receipt)
+        if not is_avail:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})",
+            )
+
+    # Section B: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
     from services import video_trace_state
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    try:
+        video_trace_state.record_telegram_dispatcher_execution(
+            telegram_update_id=real_update_id,
+            callback_query_id=real_cbq_id,
+            user_id=user_id,
+            chat_id=real_chat_id,
+            callback_action="create_video_task",
+            product_type="Product Video",
+        )
+    except Exception as exec_exc:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {exec_exc}",
+        )
+
+    # Section 4: Durable registered dispatch event is primary authority
     try:
         cb_event = video_trace_state.register_registered_callback_dispatch_event(
             telegram_update_id=real_update_id,
@@ -108997,6 +109016,47 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             query,
             f"Từ chối quyền thực thi kiểm thử trực tiếp: {reg_exc}",
         )
+
+    if not owner_receipt and acceptance_plan and isinstance(acceptance_plan, dict):
+        from services.provider_spend_guard import issue_canonical_owner_authorization_from_event
+        try:
+            owner_receipt, _ = issue_canonical_owner_authorization_from_event(
+                cb_event["event_id"],
+                acceptance_plan,
+            )
+            session["owner_receipt"] = owner_receipt
+            cb_event["owner_receipt"] = owner_receipt
+            cb_event["signature"] = video_trace_state._compute_callback_ownership_signature(cb_event)
+        except Exception as auth_exc:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                f"Từ chối quyền thực thi kiểm thử trực tiếp: {auth_exc}",
+            )
+
+    if not owner_receipt:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    from services.provider_spend_guard import (
+        evaluate_paid_live_test_availability,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+    )
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=owner_receipt,
+        callback_event_id=cb_event.get("event_id") if isinstance(cb_event, dict) else None,
+    )
+    if not is_avail:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
+        )
+
 
     try:
         plan = await handle_owner_authorized_live_test_confirm(
@@ -109091,16 +109151,22 @@ async def handle_owner_authorized_live_test_confirm(
     if not clean_rcpt:
         raise PermissionError("Owner live authorization receipt is required for live test acceptance")
 
-    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
-    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(owner_receipt=clean_rcpt)
-    if not is_avail:
-        raise PermissionError(f"Cannot mint live test confirmation: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
-
     query = getattr(update, "callback_query", None)
     real_update_id = getattr(update, "update_id", 0) or 0
     real_cbq_id = getattr(query, "id", "") or ""
     real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
     real_user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    cb_ev_param = callback_event.get("event_id") if isinstance(callback_event, dict) else None
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=clean_rcpt,
+        callback_event_id=cb_ev_param,
+    )
+    if not is_avail:
+        raise PermissionError(
+            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})"
+        )
 
     # Validate durable pre-existing Owner live authorization record
     is_valid, blocker, auth_data = validate_owner_live_authorization(
@@ -109128,6 +109194,14 @@ async def handle_owner_authorized_live_test_confirm(
     if callback_event is not None:
         cb_receipt = callback_event
     else:
+        video_trace_state.record_telegram_dispatcher_execution(
+            telegram_update_id=real_update_id,
+            callback_query_id=real_cbq_id,
+            user_id=real_user_id,
+            chat_id=real_chat_id,
+            callback_action="create_video_task",
+            product_type="Product Video",
+        )
         cb_receipt = video_trace_state.register_registered_callback_dispatch_event(
             telegram_update_id=real_update_id,
             callback_query_id=real_cbq_id,

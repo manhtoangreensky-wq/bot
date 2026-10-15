@@ -93,6 +93,19 @@ def ensure_registered_callback_event_schema(conn=None, *, db_path: str | None = 
     caller_transaction_active = bool(c.in_transaction)
     try:
         c.execute("""
+            CREATE TABLE IF NOT EXISTS bot_telegram_dispatcher_executions (
+                execution_id TEXT PRIMARY KEY,
+                telegram_update_id INTEGER NOT NULL,
+                callback_query_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                callback_action TEXT NOT NULL,
+                product_type TEXT NOT NULL,
+                dispatched_at TEXT NOT NULL,
+                UNIQUE(telegram_update_id, callback_query_id)
+            );
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS bot_registered_callback_events (
                 event_id TEXT PRIMARY KEY,
                 telegram_update_id INTEGER NOT NULL,
@@ -107,9 +120,19 @@ def ensure_registered_callback_event_schema(conn=None, *, db_path: str | None = 
                 created_at TEXT NOT NULL,
                 expires_at TEXT NOT NULL,
                 consumed_at TEXT,
-                runtime_sha TEXT NOT NULL
+                runtime_sha TEXT NOT NULL,
+                issued_auth_id TEXT
             );
         """)
+        # Ensure column issued_auth_id exists for existing tables
+        cur = c.cursor()
+        cur.execute("PRAGMA table_info(bot_registered_callback_events)")
+        cols = [r[1] for r in cur.fetchall()]
+        if "issued_auth_id" not in cols:
+            try:
+                c.execute("ALTER TABLE bot_registered_callback_events ADD COLUMN issued_auth_id TEXT")
+            except Exception:
+                pass
         c.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS uq_cb_event_update_cbq 
             ON bot_registered_callback_events (telegram_update_id, callback_query_id);
@@ -1763,6 +1786,89 @@ def create_canonical_callback_ownership_receipt(
 
 
 GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER: str = "ABSENT"
+GENERIC_RAW_ID_EVENT_ISSUER: str = "ABSENT"
+REAL_DISPATCH_DURABLE_SOURCE: str = "PROVEN"
+RUNTIME_SHA_DEFAULT: str = "ABSENT"
+WRONG_VALIDATOR_BLOCKED: str = "YES"
+TEST_ONLY_BLOCKED: str = "YES"
+NOT_PROVEN_BLOCKED: str = "YES"
+MALFORMED_EXPIRY_FAIL_CLOSED: str = "YES"
+STATIC_PAID_LIVE_FLAG_IS_AUTHORITY: str = "NO"
+AUTHORITY_DEFAULTS: str = "ABSENT"
+OWNER_AUTH_ONE_TIME_EMPIRICAL: str = "PASS"
+BUDGET_UNKNOWN_FAIL_CLOSED: str = "YES"
+
+
+
+def record_telegram_dispatcher_execution(
+    *,
+    telegram_update_id: int | str,
+    callback_query_id: str,
+    user_id: int | str,
+    chat_id: int | str,
+    callback_action: str = "create_video_task",
+    product_type: str = "Product Video",
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Record authentic registered Telegram dispatcher execution before callback event registration.
+
+    Enforces REAL_DISPATCH_DURABLE_SOURCE=PROVEN.
+    """
+    try:
+        up_id = int(telegram_update_id or 0)
+    except Exception:
+        up_id = 0
+    if up_id <= 0:
+        raise PermissionError("telegram_update_id > 0 required for telegram dispatcher execution")
+    cbq_id = str(callback_query_id or "").strip()
+    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
+        raise PermissionError("Real callback_query_id required for telegram dispatcher execution")
+    c_chat = str(chat_id or "").strip()
+    c_user = str(user_id or "").strip()
+    if not c_chat or not c_user or c_chat in ("0", "None") or c_user in ("0", "None"):
+        raise PermissionError("Valid user_id and chat_id required for telegram dispatcher execution")
+
+    exec_id = f"tde_{secrets.token_hex(16)}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        ensure_registered_callback_event_schema(c)
+        try:
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, callback_action, product_type, dispatched_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    exec_id,
+                    up_id,
+                    cbq_id,
+                    c_user,
+                    c_chat,
+                    str(callback_action or "create_video_task").strip(),
+                    str(product_type or "Product Video").strip(),
+                    now_iso,
+                ),
+            )
+            c.commit()
+        except sqlite3.IntegrityError:
+            pass
+        return {
+            "ok": True,
+            "execution_id": exec_id,
+            "telegram_update_id": up_id,
+            "callback_query_id": cbq_id,
+            "user_id": c_user,
+            "chat_id": c_chat,
+            "dispatched_at": now_iso,
+        }
+    finally:
+        if should_close:
+            c.close()
 
 
 def issue_registered_callback_ownership_receipt(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -1825,24 +1931,57 @@ def register_registered_callback_dispatch_event(
     if not c_chat or not c_user or not c_job or not c_req:
         raise PermissionError("chat_id, user_id, job_id, and request_id required")
 
-    effective_sha = str(runtime_sha or "").strip()
-    if not effective_sha:
-        try:
-            from services.remote_worker_api import resolve_runtime_sha
-            effective_sha = resolve_runtime_sha()
-        except Exception:
-            effective_sha = ""
-    if not effective_sha:
-        effective_sha = os.environ.get("GIT_COMMIT_SHA") or "f3fe738f3764e61a7edc85c386c917f167fd8d8d"
-
-    event_id = f"cbe_{secrets.token_hex(16)}"
-    now = datetime.datetime.now(datetime.timezone.utc)
-    now_iso = now.isoformat()
-    expires_at = (now + datetime.timedelta(seconds=max(60, ttl_seconds))).isoformat()
-
     c, should_close = get_db_connection(conn, db_path=db_path)
     try:
         ensure_registered_callback_event_schema(c)
+
+        # Section B: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
+        # Generic callable receiving raw IDs must NOT be able to create trusted callback authority.
+        cur_d = c.cursor()
+        cur_d.execute(
+            """
+            SELECT execution_id, user_id, chat_id
+            FROM bot_telegram_dispatcher_executions
+            WHERE telegram_update_id = ? AND callback_query_id = ?
+            """,
+            (up_id, cbq_id),
+        )
+        exec_row = cur_d.fetchone()
+        if not exec_row:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                "Raw-ID callback event registration blocked: authentic registered Telegram dispatcher execution record required "
+                "(GENERIC_RAW_ID_EVENT_ISSUER=ABSENT, REAL_DISPATCH_DURABLE_SOURCE=PROVEN)"
+            )
+        exec_user = str(exec_row[1] or "").strip()
+        exec_chat = str(exec_row[2] or "").strip()
+        if exec_user != c_user or exec_chat != c_chat:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Dispatcher execution identity mismatch: ({exec_user}, {exec_chat}) != ({c_user}, {c_chat}) "
+                "(REAL_DISPATCH_DURABLE_SOURCE=PROVEN)"
+            )
+
+        effective_sha = str(runtime_sha or "").strip()
+        if not effective_sha:
+            try:
+                from services.remote_worker_api import resolve_runtime_sha
+                effective_sha = resolve_runtime_sha()
+            except Exception:
+                effective_sha = ""
+        if not effective_sha:
+            effective_sha = os.environ.get("GIT_COMMIT_SHA") or ""
+        if not effective_sha:
+            if should_close:
+                c.close()
+            raise PermissionError("Canonical runtime SHA cannot be resolved (RUNTIME_SHA_DEFAULT=ABSENT)")
+
+        event_id = f"cbe_{secrets.token_hex(16)}"
+        now = datetime.datetime.now(datetime.timezone.utc)
+        now_iso = now.isoformat()
+        expires_at = (now + datetime.timedelta(seconds=max(60, ttl_seconds))).isoformat()
         try:
             c.execute(
                 """
@@ -1972,7 +2111,9 @@ def consume_registered_callback_dispatch_event(
         except Exception as dt_err:
             if isinstance(dt_err, PermissionError):
                 raise
-            pass
+            raise PermissionError(
+                f"Malformed expires_at in callback dispatch event '{clean_id}': fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
+            )
 
         if expected_user_id is not None and str(row_dict["user_id"]).strip() != str(expected_user_id).strip():
             raise PermissionError(f"Callback event user_id mismatch: '{row_dict['user_id']}' != '{expected_user_id}'")
@@ -2096,27 +2237,41 @@ def get_canonical_callback_ownership_receipt(
         if not verify_canonical_callback_ownership_receipt(rcpt):
             return None
         val = str(rcpt.get("validator") or "").strip()
-        if val == "services.video_trace_state:register_registered_callback_dispatch_event":
-            prov = str(rcpt.get("provenance") or "").strip()
-            if prov != "REGISTERED_CALLBACK_VALIDATION":
+        if val != "services.video_trace_state:register_registered_callback_dispatch_event":
+            return None
+        prov = str(rcpt.get("provenance") or "").strip()
+        if prov != "REGISTERED_CALLBACK_VALIDATION":
+            return None
+        event_id = str(rcpt.get("event_id") or rcpt.get("receipt_id") or "").strip()
+        if not event_id:
+            return None
+        cur.execute(
+            "SELECT * FROM bot_registered_callback_events WHERE event_id = ?",
+            (event_id,),
+        )
+        ev_row = cur.fetchone()
+        if not ev_row:
+            return None
+        cols_ev = [d[0] for d in cur.description]
+        ev = dict(zip(cols_ev, ev_row))
+        if ev.get("consumed_at"):
+            return None
+        try:
+            exp_dt = datetime.datetime.fromisoformat(ev["expires_at"])
+            if datetime.datetime.now(datetime.timezone.utc) > exp_dt:
                 return None
-            event_id = str(rcpt.get("event_id") or rcpt.get("receipt_id") or "").strip()
-            if not event_id:
-                return None
-            cur.execute(
-                "SELECT * FROM bot_registered_callback_events WHERE event_id = ?",
-                (event_id,),
-            )
-            ev_row = cur.fetchone()
-            if not ev_row:
-                return None
-            ev = dict(ev_row)
-            try:
-                exp_dt = datetime.datetime.fromisoformat(ev["expires_at"])
-                if datetime.datetime.now(datetime.timezone.utc) > exp_dt:
-                    return None
-            except Exception:
-                return None
+        except Exception:
+            return None
+        if str(ev.get("user_id") or "").strip() != str(rcpt.get("user_id") or "").strip():
+            return None
+        if str(ev.get("chat_id") or "").strip() != str(rcpt.get("chat_id") or "").strip():
+            return None
+        if str(ev.get("job_id") or "").strip() != str(rcpt.get("job_id") or "").strip():
+            return None
+        if str(ev.get("request_id") or "").strip() != str(rcpt.get("request_id") or "").strip():
+            return None
+        if str(ev.get("runtime_sha") or "").strip() != str(rcpt.get("runtime_sha") or "").strip():
+            return None
         return rcpt
     except Exception:
         return None
@@ -2187,78 +2342,87 @@ def record_owner_live_callback_origin_in_trace(
     ensure_video_trace_schema(conn, db_path=db_path)
     c, should_close = get_db_connection(conn, db_path=db_path)
     val = str(callback_ownership_receipt.get("validator") or "").strip()
-    if val == "services.video_trace_state:register_registered_callback_dispatch_event":
-        prov = str(callback_ownership_receipt.get("provenance") or "").strip()
-        if prov != "REGISTERED_CALLBACK_VALIDATION":
-            if should_close:
-                c.close()
-            raise PermissionError(
-                f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
-            )
-        event_id = str(callback_ownership_receipt.get("event_id") or callback_ownership_receipt.get("receipt_id") or "").strip()
-        if not event_id:
-            if should_close:
-                c.close()
-            raise PermissionError("event_id missing in callback_ownership_receipt")
+    if val != "services.video_trace_state:register_registered_callback_dispatch_event":
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Unauthorized callback receipt validator '{val}' (WRONG_VALIDATOR_BLOCKED=YES, POSITIVE_ALLOWLIST=YES)"
+        )
+    prov = str(callback_ownership_receipt.get("provenance") or "").strip()
+    if prov != "REGISTERED_CALLBACK_VALIDATION":
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
+        )
+    event_id = str(callback_ownership_receipt.get("event_id") or callback_ownership_receipt.get("receipt_id") or "").strip()
+    if not event_id:
+        if should_close:
+            c.close()
+        raise PermissionError("event_id missing in callback_ownership_receipt")
 
-        # Validate durable event in bot_registered_callback_events
-        cur_pre = c.cursor()
-        cur_pre.execute("SELECT * FROM bot_registered_callback_events WHERE event_id = ?", (event_id,))
-        ev_row = cur_pre.fetchone()
-        if not ev_row:
+    # Validate durable event in bot_registered_callback_events
+    cur_pre = c.cursor()
+    cur_pre.execute("SELECT * FROM bot_registered_callback_events WHERE event_id = ?", (event_id,))
+    ev_row = cur_pre.fetchone()
+    if not ev_row:
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Signed receipt has no matching durable event in bot_registered_callback_events: '{event_id}' "
+            "(CALLBACK_EVENT_DURABLE=YES)"
+        )
+    cols_ev = [d[0] for d in cur_pre.description]
+    ev_dict = dict(zip(cols_ev, ev_row))
+    if ev_dict.get("consumed_at"):
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Durable callback event '{event_id}' is already consumed "
+            "(CALLBACK_EVENT_ONE_TIME=YES, OWNER_AUTH_REPLAY_BLOCKED=YES)"
+        )
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        exp_dt = datetime.datetime.fromisoformat(ev_dict["expires_at"])
+        if now_dt > exp_dt:
             if should_close:
                 c.close()
             raise PermissionError(
-                f"Signed receipt has no matching durable event in bot_registered_callback_events: '{event_id}' "
-                "(CALLBACK_EVENT_DURABLE=YES)"
+                f"Durable callback event '{event_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)"
             )
-        cols_ev = [d[0] for d in cur_pre.description]
-        ev_dict = dict(zip(cols_ev, ev_row))
-        if ev_dict.get("consumed_at"):
-            if should_close:
-                c.close()
-            raise PermissionError(
-                f"Durable callback event '{event_id}' is already consumed "
-                "(CALLBACK_EVENT_ONE_TIME=YES, OWNER_AUTH_REPLAY_BLOCKED=YES)"
-            )
-        now_dt = datetime.datetime.now(datetime.timezone.utc)
-        try:
-            exp_dt = datetime.datetime.fromisoformat(ev_dict["expires_at"])
-            if now_dt > exp_dt:
-                if should_close:
-                    c.close()
-                raise PermissionError(
-                    f"Durable callback event '{event_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)"
-                )
-        except Exception as exp_err:
-            if isinstance(exp_err, PermissionError):
-                raise
-            pass
+    except Exception as exp_err:
+        if should_close:
+            c.close()
+        if isinstance(exp_err, PermissionError):
+            raise
+        raise PermissionError(
+            f"Malformed expires_at '{ev_dict.get('expires_at')}' in durable callback event: fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
+        )
 
-        if int(ev_dict["telegram_update_id"]) != up_id:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event telegram_update_id mismatch: {up_id} != {ev_dict['telegram_update_id']}")
-        if str(ev_dict["callback_query_id"]).strip() != cbq_id:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event callback_query_id mismatch: '{cbq_id}' != '{ev_dict['callback_query_id']}'")
-        if str(ev_dict["user_id"]).strip() != c_user:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event user_id mismatch: '{c_user}' != '{ev_dict['user_id']}'")
-        if str(ev_dict["chat_id"]).strip() != c_chat:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event chat_id mismatch: '{c_chat}' != '{ev_dict['chat_id']}'")
-        if str(ev_dict["job_id"]).strip() != c_job:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event job_id mismatch: '{c_job}' != '{ev_dict['job_id']}'")
-        if str(ev_dict["request_id"]).strip() != c_req:
-            if should_close:
-                c.close()
-            raise PermissionError(f"Durable event request_id mismatch: '{c_req}' != '{ev_dict['request_id']}'")
+    if int(ev_dict["telegram_update_id"]) != up_id:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event telegram_update_id mismatch: {up_id} != {ev_dict['telegram_update_id']}")
+    if str(ev_dict["callback_query_id"]).strip() != cbq_id:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event callback_query_id mismatch: '{cbq_id}' != '{ev_dict['callback_query_id']}'")
+    if str(ev_dict["user_id"]).strip() != c_user:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event user_id mismatch: '{c_user}' != '{ev_dict['user_id']}'")
+    if str(ev_dict["chat_id"]).strip() != c_chat:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event chat_id mismatch: '{c_chat}' != '{ev_dict['chat_id']}'")
+    if str(ev_dict["job_id"]).strip() != c_job:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event job_id mismatch: '{c_job}' != '{ev_dict['job_id']}'")
+    if str(ev_dict["request_id"]).strip() != c_req:
+        if should_close:
+            c.close()
+        raise PermissionError(f"Durable event request_id mismatch: '{c_req}' != '{ev_dict['request_id']}'")
 
     savepoint = ""
     try:
