@@ -43705,10 +43705,9 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     """Xử lý sinh hóa đơn và link QR Động từ PayOS khi khách click chọn gói"""
     expire_old_payos_orders()
     query = update.callback_query
-    await query.answer()
     parts = query.data.split("|")
     if len(parts) != 3:
-        return
+        return await query.answer()
     _, pkg_key, uid_str = parts
     uid = int(uid_str)
     lang = get_user_language(uid) or "vi"
@@ -43718,11 +43717,11 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
     deep_copy = public_topup_deep_copy(lang)
 
     if query.from_user.id != uid:
-        await query.answer(
+        return await query.answer(
             "⚠️ Không phải yêu cầu của bạn!" if locale == "vi" else f"⚠️ {hub_copy['common_failed']}",
             show_alert=True,
         )
-        return
+    await query.answer()
 
     if pkg_key.startswith("manual_"):
         manual_key = pkg_key.replace("manual_", "", 1)
@@ -44018,14 +44017,14 @@ async def handle_package_choice(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_manual_package_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     parts = (query.data or "").split("|")
     if len(parts) < 2:
-        return
+        return await query.answer()
     action = parts[1]
     if action in {"approve", "approve_expected", "approve_custom", "reject", "confirm"}:
         if not is_admin_user(query.from_user.id):
             return await query.answer("Bạn không có quyền duyệt bill.", show_alert=True)
+        await query.answer()
         if action in {"approve", "approve_expected", "approve_custom"} and len(parts) == 3 and str(parts[2]).isdigit():
             deposit_id = int(parts[2])
             conn = db_connect()
@@ -44094,6 +44093,7 @@ async def handle_manual_package_choice(update: Update, context: ContextTypes.DEF
             finally:
                 context.args = old_args
         return
+    await query.answer()
     lang = get_user_language(query.from_user.id) or "vi"
     copy = public_hub_copy(lang)
     account_copy = public_account_flow_copy(lang)
@@ -141734,6 +141734,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     parts = data.split("|")
     action = parts[1] if len(parts) > 1 else "start"
     uid = query.from_user.id
+    ticket_numeric_id_ok = (
+        len(parts) > 2
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and len(parts[2]) <= 19
+        and int(parts[2]) <= 9223372036854775807
+    )
     support_child_origins = {"admin_contact", "cskh_auto", "premium"}
     profile_child_origins = {f"profile_{child}" for child in support_child_origins}
     customer_origin_values = {
@@ -141742,11 +141749,11 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     }
     ticket_detail_id_ok = (
         action in {"pv", "av"}
-        and len(parts) > 2
-        and parts[2].isascii()
-        and parts[2].isdecimal()
-        and len(parts[2]) <= 19
-        and int(parts[2]) <= 9223372036854775807
+        and ticket_numeric_id_ok
+    )
+    ticket_status_id_ok = (
+        action == "st"
+        and ticket_numeric_id_ok
     )
     early_start_ack = data == "ticket|start"
     if early_start_ack:
@@ -141785,8 +141792,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     early_ticket_summary_ack = (
         action == "summary"
         and len(parts) == 4
-        and parts[2].isascii()
-        and parts[2].isdecimal()
+        and ticket_numeric_id_ok
         and parts[3] in {"profile_result", "feedback_result"}
     )
     if early_ticket_summary_ack:
@@ -141794,8 +141800,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     early_ticket_reply_ack = (
         action == "reply_user"
         and len(parts) in {3, 4}
-        and parts[2].isascii()
-        and parts[2].isdecimal()
+        and ticket_numeric_id_ok
         and (len(parts) == 3 or parts[3] in customer_origin_values)
     )
     if early_ticket_reply_ack:
@@ -141803,8 +141808,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     early_ticket_attach_ack = (
         action == "attach"
         and len(parts) in {3, 4}
-        and parts[2].isascii()
-        and parts[2].isdecimal()
+        and ticket_numeric_id_ok
         and (len(parts) == 3 or parts[3] in customer_origin_values)
     )
     if early_ticket_attach_ack:
@@ -141812,8 +141816,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
     early_ticket_done_ack = (
         action == "done"
         and len(parts) in {3, 4}
-        and parts[2].isascii()
-        and parts[2].isdecimal()
+        and ticket_numeric_id_ok
         and (len(parts) == 3 or parts[3] in customer_origin_values)
     )
     if early_ticket_done_ack:
@@ -141838,13 +141841,13 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             valid_origins = {"profile_result", "feedback_result"}
         if (len(parts) != customer_arities[action] + 1 or parts[-1] not in valid_origins
                 or (action == "mine" and parts[-1] not in {"profile", "support", "ticket_menu", *support_child_origins, *profile_child_origins})
-                or (action != "mine" and not parts[2].isdecimal())):
+                or (action != "mine" and not ticket_numeric_id_ok)):
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         ticket_profile_origin = parts[-1]
         parts = parts[:-1]
     ticket_summary = None
     if action == "summary":
-        if ticket_profile_origin not in {"profile_result", "feedback_result"}:
+        if not early_ticket_summary_ack or ticket_profile_origin not in {"profile_result", "feedback_result"}:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         ticket_summary = await asyncio.to_thread(get_support_ticket, int(parts[2]), uid)
         if not ticket_summary:
@@ -141863,6 +141866,8 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
         len(parts) != 4
         or parts[2] not in {"new", "high", "refund"}
         or not (parts[3].isascii() and parts[3].isdecimal())
+        or len(parts[3]) > 19
+        or int(parts[3]) > 9223372036854775807
     ):
         return await query.answer("Nút danh sách ticket đã hết phiên. Vui lòng mở lại từ CSKH/Ticket.", show_alert=True)
     read_panel_origin = "admin"
@@ -141898,7 +141903,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             clear_support_ticket_pending(uid)
     customer_action_ticket = None
     if action in {"reply_user", "done", "attach"}:
-        if len(parts) < 3 or not parts[2].isdecimal():
+        if len(parts) < 3 or not ticket_numeric_id_ok:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         if action in {"reply_user", "attach", "done"}:
             customer_action_ticket = await asyncio.to_thread(get_support_ticket, int(parts[2]), uid)
@@ -141939,7 +141944,7 @@ async def handle_ticket_callback(update: Update, context: ContextTypes.DEFAULT_T
             return await query.answer("Không tìm thấy ticket.", show_alert=True)
     admin_ticket_status = None
     if action == "st":
-        if len(parts) < 4 or not parts[2].isdigit():
+        if len(parts) < 4 or not ticket_status_id_ok:
             return await query.answer(copy["support_ticket_action_unsupported"], show_alert=True)
         admin_ticket_status = get_support_ticket(int(parts[2]))
         if not admin_ticket_status:
@@ -142596,6 +142601,113 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     raw_action = (query.data.split("|", 1)[1] if "|" in query.data else "main").strip()
     action = raw_action
+    if action.split("|", 1)[0].strip() == "main" and action != "main":
+        return await query.answer(
+            "Nút Menu chính đã hết phiên. Vui lòng mở lại từ /start hoặc /menu.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_profile" and action != "main_profile":
+        return await query.answer(
+            "Nút Tài khoản đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_video" and action != "main_video":
+        return await query.answer(
+            "Nút Video đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_image" and action != "main_image":
+        return await query.answer(
+            "Nút Ảnh đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_guide" and action != "main_guide":
+        return await query.answer(
+            "Nút Hướng dẫn đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_music" and action != "main_music":
+        return await query.answer(
+            "Nút Nhạc đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "translate" and action not in {
+        "translate",
+        "translate_more",
+        "translate_off",
+        "translate_set_ar",
+        "translate_set_en",
+        "translate_set_ja",
+        "translate_set_ko",
+        "translate_set_th",
+        "translate_set_vi",
+        "translate_set_zh",
+    }:
+        return await query.answer(
+            "Nút Dịch đã hết phiên. Vui lòng mở lại từ Trung tâm dịch.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "doc_tools" and action != "doc_tools":
+        return await query.answer(
+            "Nút Công cụ tài liệu đã hết phiên. Vui lòng mở lại từ Tài liệu.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "chat_pro" and action != "chat_pro":
+        return await query.answer(
+            "Nút Chat Pro đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "chat_free" and action != "chat_free":
+        return await query.answer(
+            "Nút Chat miễn phí đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "admin" and action != "admin":
+        return await query.answer(
+            "Nút Quản trị đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "finance" and action != "finance":
+        return await query.answer(
+            "Nút Tài chính đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "billing" and action != "billing":
+        return await query.answer(
+            "Nút Bill / Xu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_docs" and action != "main_docs":
+        return await query.answer(
+            "Nút Công cụ tài liệu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    admin_exact_root_labels = {
+        "admin_users": "User / Xu",
+        "admin_billing": "Bill / PayOS",
+        "admin_queue": "Queue / Freeze",
+        "admin_security_db": "Bảo mật / DB",
+        "admin_system_ops": "Hệ thống",
+        "admin_handbook": "Hướng dẫn Admin",
+        "admin_provider": "Provider",
+        "admin_provider_worker": "Provider / Worker",
+        "admin_finance": "Tài chính Admin",
+        "admin_packages": "Gói / Combo",
+        "freeze_queue": "Freeze / Queue",
+    }
+    admin_exact_root = action.split("|", 1)[0].strip()
+    if admin_exact_root in admin_exact_root_labels and action != admin_exact_root:
+        return await query.answer(
+            f"Nút {admin_exact_root_labels[admin_exact_root]} đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
+    if action.split("|", 1)[0].strip() == "main_memory" and action not in {
+        "main_memory", "main_memory|freehub",
+    }:
+        return await query.answer(
+            "Nút Ghi chú/Tài liệu đã hết phiên. Vui lòng mở lại từ menu hiện tại.",
+            show_alert=True,
+        )
     memory_back_to_freehub = action == "main_memory|freehub"
     if memory_back_to_freehub:
         action = "main_memory"
@@ -187902,11 +188014,8 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
     back_origin = ""
     if action.startswith("back|"):
         action, back_origin = action.split("|", 1)
-    if action == "confirm":
-        lang = get_user_language(uid) or "vi"
-    else:
+    if action != "confirm":
         await query.answer()
-        lang = get_user_language(uid) or "vi"
     state = get_doc_tool_pending(uid)
     tool = str(state.get("doc_tool_current") or "save_document") if state else "save_document"
     config = None
@@ -187918,6 +188027,7 @@ async def handle_doc_tool_callback(update: Update, context: ContextTypes.DEFAULT
             return await query.answer("Chưa đủ file để xử lý.", show_alert=True)
     if action == "confirm":
         await query.answer()
+    lang = get_user_language(uid) or "vi"
     if action == "main":
         clear_doc_tool_pending(uid)
         return await safe_edit_or_send(query, localized_start_menu_text(uid, lang), parse_mode="HTML", reply_markup=localized_main_menu_keyboard(is_admin_user(uid), lang))
@@ -211117,9 +211227,18 @@ async def handle_knowledge_vault_callback(update: Update, context: ContextTypes.
     query = update.callback_query
     if not query:
         return
-    await query.answer()
     parts = (query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "status"
+    vault_item_id_ok = (
+        len(parts) > 2
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and len(parts[2]) <= 19
+        and int(parts[2]) <= 9223372036854775807
+    )
+    if action in {"use", "approve_prompt", "approve_asset"} and not vault_item_id_ok:
+        return await query.answer("Mã kho không hợp lệ.", show_alert=True)
+    await query.answer()
     admin = bool(query.from_user and is_admin_user(query.from_user.id))
     vault = toan_knowledge_vault()
 
@@ -235806,8 +235925,15 @@ async def handle_internal_archive_callback(update: Update, context: ContextTypes
         )
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "root"
+    archive_document_id_ok = (
+        len(parts) > 2
+        and parts[2].isascii()
+        and parts[2].isdecimal()
+        and len(parts[2]) <= 19
+        and int(parts[2]) <= 9223372036854775807
+    )
     if action in {"view", "file"}:
-        if len(parts) <= 2 or not parts[2].isdecimal():
+        if not archive_document_id_ok:
             return await query.answer("Mã hồ sơ không hợp lệ.", show_alert=True)
         await query.answer()
         item = await asyncio.to_thread(get_internal_document, uid, int(parts[2]))

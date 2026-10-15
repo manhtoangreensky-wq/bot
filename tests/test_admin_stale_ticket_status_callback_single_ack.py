@@ -82,6 +82,18 @@ def test_malformed_admin_status_gets_one_unsupported_alert_without_lookup():
     assert side_effects == []
 
 
+def test_out_of_range_admin_status_gets_one_unsupported_alert_without_lookup():
+    query = _Query("ticket|st|9223372036854775808|resolved")
+    assert _registered_ticket_pattern().match(query.data)
+    side_effects = []
+    handler = _load_handler(side_effects, [])
+
+    asyncio.run(handler(SimpleNamespace(callback_query=query), SimpleNamespace()))
+
+    assert query.answers == [(("Action not supported",), {"show_alert": True})]
+    assert side_effects == []
+
+
 def test_ticket_start_keeps_one_ack_and_existing_admin_screen():
     query = _Query("ticket|start")
     assert _registered_ticket_pattern().match(query.data)

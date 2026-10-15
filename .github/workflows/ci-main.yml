@@ -135,7 +135,38 @@ jobs:
             tests/test_support_expired_input_dispatch.py \
             tests/test_subdub_voice_child_back.py \
             tests/test_voice_settings_input_back.py \
-            tests/test_video_downloader_freehub_exit_pending.py
+            tests/test_video_downloader_freehub_exit_pending.py \
+            tests/test_admin_stale_ticket_status_callback_single_ack.py \
+            tests/test_admin_stale_ticket_list_callback_single_ack.py \
+            tests/test_customer_stale_ticket_summary_callback_single_ack.py \
+            tests/test_customer_stale_ticket_action_id_single_ack.py \
+            tests/test_knowledge_vault_callback_single_ack.py
+
+      - name: Current-main Stale Menu Root Callback Guards
+        run: |
+          python -m unittest \
+            tests/test_main_root_suffix_guard_current_main.py \
+            tests/test_main_profile_root_suffix_guard_current_main.py \
+            tests/test_main_memory_root_suffix_guard_current_main.py \
+            tests/test_main_video_root_suffix_guard_current_main.py \
+            tests/test_main_image_root_suffix_guard_current_main.py \
+            tests/test_main_guide_root_suffix_guard_current_main.py \
+            tests/test_main_music_root_suffix_guard_current_main.py \
+            tests/test_translate_root_suffix_guard_current_main.py \
+            tests/test_doc_tools_root_suffix_guard_current_main.py \
+            tests/test_chat_pro_root_suffix_guard_current_main.py \
+            tests/test_chat_free_root_suffix_guard_current_main.py \
+            tests/test_admin_root_suffix_guard_current_main.py \
+            tests/test_finance_root_suffix_guard_current_main.py \
+            tests/test_billing_root_suffix_guard_current_main.py \
+            tests/test_main_docs_root_suffix_guard_current_main.py \
+            tests/test_admin_submenu_root_suffix_guards_current_main.py
+
+      - name: PayOS Package Ownership Acknowledgement
+        run: python -m unittest tests/test_package_choice_ack_only.py
+
+      - name: Manual Package Admin Ownership Acknowledgement
+        run: python -m unittest tests/test_manual_package_choice_ack_only.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |
