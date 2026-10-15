@@ -8278,6 +8278,7 @@ S12_35_252_archive_view_file_local_test_rerun:
     allowed_scope:
       - bot.py handle_menu_callback stale-root guards only
       - focused current-main callback tests
+      - .github/workflows/ci-main.yml test-only stale-root gate
       - tester plan/checklist/state evidence
     protected_scope:
       - Product Video/Video/Image/Music/Voice/SubDub route and engine logic

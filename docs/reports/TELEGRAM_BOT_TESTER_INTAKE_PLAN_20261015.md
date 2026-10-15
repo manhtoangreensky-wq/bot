@@ -21,6 +21,8 @@ as unmapped and are not copied into `bot.py`.
    latency defect. Record protected-scope lock before editing.
 3. **BUILD:** make the smallest UI/callback guard or destination correction;
    preserve every producer-backed valid value.
+   A test-only entry may be added to `.github/workflows/ci-main.yml` so each
+   locked callback defect remains a CI gate; workflow deploy behavior is frozen.
 4. **REVIEW:** inspect the diff and reject any Product Video/SubDub/Voice/
    Music/Image/Video route or engine hunk, provider/worker/job/wallet change or
    generic router refactor.
@@ -62,7 +64,7 @@ guard is introduced.
 ## 4. Release gates still open
 
 - Full `bot.py` compile emitted `COMPILE_START` but no completion marker during
-  a bounded ~270s observation and was stopped with Ctrl+C; status is
+  a bounded ~300s observation and was stopped with Ctrl+C; status is
   `NOT_VERIFIED`, not a syntax failure. Exact-head CI must still return an
   actual exit marker.
 - The broader Admin child/Back regression runner did not return a completion
