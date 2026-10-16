@@ -8662,6 +8662,35 @@ S12_35_504_post_delivery_evidence_closure_20261015:
   wallet_mutations: 0
   production_data_writes: 0
 
+A7_owner_acceptance_20261016:
+  status: closed_by_owner_manual_acceptance
+  contract: >-
+    Close the remaining Account -> Back UX item after the Owner's final manual
+    retest. Do not open another latency patch when the visible result is fast
+    and no registered-handler RED or wrong destination is reproduced.
+  evidence: >-
+    The Owner retested Account -> Quay lại and reported the Main screen visible
+    in less than one second. Earlier menu-only checks for Tạo video AI -> Quay
+    lại and Bảng giá were also reported below one second. The read-only runtime
+    query immediately after the latest tap returned TOTAL_EVENTS=0,
+    JOURNALCTL_EXIT=0 and JOURNALCTL_STDERR_BYTES=0; no anonymous event was
+    available to attribute a cause to server, Telegram transport, network,
+    device or VPS. The visible UX acceptance is therefore closed by the Owner;
+    the absent timing event is a diagnostic limitation, not a reproduced
+    product defect.
+  decision: >-
+    No bot.py change, instrumentation change, route change, engine change or
+    hardware/network action is justified. Close A7 and the UI/callback audit
+    goal. Reopen only on a new reproducible slow or wrong-destination result.
+  protected_scope: >-
+    Product/Edit/Image/Video/SubDub/Voice/Music routes and engines, providers,
+    workers, jobs, wallet/PayOS, AutoPost, ENV/secrets, production data and
+    real Telegram activity.
+  provider_calls: 0
+  wallet_mutations: 0
+  production_data_writes: 0
+  real_telegram_sends: 0
+
 S12_35_505_admin_root_stale_suffixes_20261016:
   status: merged_deployed_runtime_verified_a7_open
   contract: >-
