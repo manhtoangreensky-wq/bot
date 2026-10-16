@@ -103,3 +103,12 @@ The continuation is delivered and runtime-verified: PR #1434 merged at
 with `deploy_workers=false`; VPS SHA/services/health match. S12.35.505 is
 closed as live evidence. Keep A7 explicitly deferred and do not reopen the
 already-verified callback code without a new RED and Owner scope decision.
+
+### Final A7 handover — 16/10/2026
+
+The Owner retested `Tài khoản → Quay lại` and accepted the visible return to
+Main in `<1 giây`. No new slow or wrong-destination behavior was reproduced.
+The immediate aggregate query had no matching runtime event, so it cannot name
+an infrastructure cause; that diagnostic gap does not keep the user-visible
+issue open. A7 and the UI/callback goal are closed. Reopen only after a new
+reproducible RED with the exact route and observed delay.

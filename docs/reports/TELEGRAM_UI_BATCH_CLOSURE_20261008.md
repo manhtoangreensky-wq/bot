@@ -281,3 +281,11 @@ deploy workflow `38784324561` are merged/SUCCESS and live on the VPS with
 `deploy_workers=false`. Runtime SHA, services and health were read back; the
 worker stayed unchanged. This is a documentation checkpoint only: no route,
 engine, provider, wallet, AutoPost or production-data scope was reopened.
+
+## Final A7 acceptance — 16/10/2026
+
+The Owner retested `Tài khoản → Quay lại` and accepted the Main screen appearing
+in `<1 giây`. The latest read-only runtime check returned no matching event,
+with `JOURNALCTL_EXIT=0` and zero stderr bytes. This leaves no reproduced UX
+failure to fix; A7 is closed by the Owner's visible acceptance. No code, route,
+engine, deploy, or hardware change is required.

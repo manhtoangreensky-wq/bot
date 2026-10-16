@@ -3804,3 +3804,18 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   do not correlate the Owner's Account → Back report to an anonymous event and
   do not identify a network/device/VPS cause; no speculative latency patch or
   hardware purchase is justified.
+
+### A7 final acceptance — 16/10/2026
+
+- Owner retested `Tài khoản → Quay lại` and accepted the visible Main screen
+  result at `<1 giây`. Earlier `Tạo video AI → Quay lại` and `Bảng giá`
+  menu-only checks were also reported at `<1 giây`.
+- A read-only five-minute runtime query immediately after the final tap returned
+  `TOTAL_EVENTS=0`, `JOURNALCTL_EXIT=0`, and `JOURNALCTL_STDERR_BYTES=0`.
+  There is no event to attribute the old delay to the bot, Telegram, network,
+  device, or VPS.
+- Acceptance: **A7 CLOSED BY OWNER MANUAL ACCEPTANCE**. No new RED, wrong Back
+  destination, or visible delay was reproduced, so no code or deployment change
+  is opened. Reopen only with a new reproducible slow or wrong-destination
+  result. `PROVIDER_CALLS=0`, `WALLET_MUTATIONS=0`,
+  `PRODUCTION_DATA_WRITES=0`, `REAL_TELEGRAM_SENDS=0`.
