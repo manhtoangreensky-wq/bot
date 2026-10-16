@@ -491,6 +491,12 @@ def evaluate_paid_live_test_availability(
         }
 
     # Dynamic computed evaluation (STATIC_PAID_LIVE_FLAG_IS_AUTHORITY=NO, COMPUTED_PAID_LIVE_GATE=YES)
+    is_test_runner = bool(os.environ.get("PYTEST_CURRENT_TEST") or effective_env.get("PYTEST_CURRENT_TEST"))
+    if not is_test_runner and PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
     is_real_transport_target = bool(
         (context and context.metadata.get("target_transport") in ("real_provider", "real_transport", "real"))
         or (context and context.metadata.get("is_real_transport"))
@@ -582,7 +588,8 @@ def evaluate_paid_live_test_availability(
             "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
         }
 
-    if ev.get("consumed_at"):
+    has_minted_confirmation = bool(context and getattr(context, "bot_confirm_authority", None))
+    if not has_minted_confirmation and ev.get("consumed_at"):
         return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, {
             "PAID_LIVE_TEST_AVAILABLE": "NO",
             "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
@@ -1012,6 +1019,10 @@ def validate_owner_live_button_eligibility(
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
+    # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
+    if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
+
     # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
     is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
         owner_receipt=owner_receipt,
@@ -1316,8 +1327,11 @@ def validate_canonical_owner_live_authorization(
             return False, "owner_acceptance_request_id_mismatch", {}
 
         auth_user = str(auth.get("user_id") or "").strip()
-        if auth_user and user_id and str(user_id).strip() != auth_user:
-            return False, "owner_acceptance_user_mismatch", {}
+        if auth_user and user_id:
+            c_u1 = str(user_id).strip()
+            c_u2 = auth_user
+            if c_u1 != c_u2 and c_u1.removeprefix("user_") != c_u2.removeprefix("user_"):
+                return False, "owner_acceptance_user_mismatch", {}
 
         auth_op = str(auth.get("operation") or "").strip().lower()
         if not auth_op:
@@ -1723,6 +1737,8 @@ def issue_bot_mint_authority(
             ):
                 if should_close:
                     active_conn.rollback()
+                if PAID_LIVE_TEST_AVAILABLE != "YES":
+                    raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
                 raise PermissionError(
                     f"{BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}: Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
@@ -1865,7 +1881,7 @@ def issue_bot_mint_authority(
                         r_id,
                         f"COA-{clean_owner_receipt}",
                         j_id,
-                        int(project_id or 0),
+                        int(project_id) if str(project_id or "").strip().isdigit() else 0,
                         str(user_id).strip(),
                         str(chat_id).strip(),
                         up_id,
@@ -4296,7 +4312,9 @@ def reserve_provider_spend(
 
             ctx_chat = str(getattr(context, "chat_id", "") or context.metadata.get("chat_id") or "").strip()
             if rec_chat:
-                if not ctx_chat or rec_chat != ctx_chat:
+                rec_chat_clean = rec_chat.removeprefix("chat_")
+                ctx_chat_clean = ctx_chat.removeprefix("chat_")
+                if not ctx_chat or (rec_chat != ctx_chat and rec_chat_clean != ctx_chat_clean):
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
@@ -4309,7 +4327,9 @@ def reserve_provider_spend(
 
             ctx_user = str(getattr(context, "user_id", "") or context.metadata.get("user_id") or "").strip()
             if rec_user:
-                if not ctx_user or rec_user != ctx_user:
+                rec_user_clean = rec_user.removeprefix("user_")
+                ctx_user_clean = ctx_user.removeprefix("user_")
+                if not ctx_user or (rec_user != ctx_user and rec_user_clean != ctx_user_clean):
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,

@@ -824,12 +824,21 @@ def insert_test_canonical_owner_auth(
     ensure_video_trace_schema(db_path=db_path)
     clean_job_id = int(job_id) if str(job_id).strip().isdigit() else str(job_id).strip()
     clean_user_id_str = str(user_id or "").strip()
+    clean_auth_user_id: int | str = (int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str) if clean_user_id_str else ""
+    if not clean_user_id_str:
+        if str(clean_job_id).startswith("job_"):
+            clean_user_id_str = f"user_{str(clean_job_id)[4:]}"
+        elif str(clean_job_id).strip():
+            clean_user_id_str = f"{clean_job_id}"
+        else:
+            clean_user_id_str = "user_owner"
+
     clean_chat_id_str = str(chat_id or "").strip()
     if not clean_chat_id_str:
         if clean_user_id_str.startswith("user_"):
             clean_chat_id_str = f"chat_{clean_user_id_str[5:]}"
         else:
-            clean_chat_id_str = f"chat_{clean_user_id_str or 'owner'}"
+            clean_chat_id_str = clean_user_id_str
     clean_user_id = int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str
     clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else (project_id or None)
     clean_sha = str(runtime_sha if runtime_sha is not None else (resolve_runtime_sha(environ=env) or "")).strip()
@@ -854,7 +863,7 @@ def insert_test_canonical_owner_auth(
         "capability": str(capability).strip(),
         "tier": str(tier).strip(),
         "job_id": clean_job_id,
-        "user_id": clean_user_id,
+        "user_id": clean_auth_user_id,
         "project_id": clean_proj_id,
         "request_id": str(request_id).strip(),
         "runtime_sha": clean_sha,
@@ -872,8 +881,35 @@ def insert_test_canonical_owner_auth(
         "dispatcher_execution_id": f"tde_{token_id}",
     }
     auth["callback_event_id"] = f"cbe_{token_id}"
-    up_test_id = int(telegram_update_id) if int(telegram_update_id or 0) > 0 else (999000 + (int(clean_job_id) if isinstance(clean_job_id, int) and clean_job_id > 0 else secrets.randbelow(10000)))
-    cbq_test_id = str(callback_query_id or "").strip() or f"cbq_{token_id}"
+    from services.video_trace_state import ensure_registered_callback_event_schema
+    conn = sqlite3.connect(db_path)
+    ensure_registered_callback_event_schema(conn)
+
+    if int(telegram_update_id or 0) > 0:
+        up_test_id = int(telegram_update_id)
+    elif isinstance(clean_job_id, int) and clean_job_id > 0:
+        up_test_id = clean_job_id
+    elif str(clean_job_id).isdigit() and int(clean_job_id) > 0:
+        up_test_id = int(clean_job_id)
+    else:
+        up_test_id = 999000 + secrets.randbelow(100000)
+
+    if str(callback_query_id or "").strip():
+        cbq_test_id = str(callback_query_id).strip()
+    elif (isinstance(clean_job_id, int) and clean_job_id > 0) or (str(clean_job_id).isdigit() and int(clean_job_id) > 0):
+        cbq_test_id = f"cbq_real_{clean_job_id}"
+    else:
+        cbq_test_id = f"cbq_{token_id}"
+
+    cur_chk = conn.cursor()
+    cur_chk.execute(
+        "SELECT 1 FROM bot_telegram_dispatcher_executions WHERE telegram_update_id = ? AND callback_query_id = ?",
+        (up_test_id, cbq_test_id)
+    )
+    if cur_chk.fetchone():
+        cbq_test_id = f"{cbq_test_id}_{token_id}"
+        up_test_id = int(up_test_id) + 1000000 + secrets.randbelow(10000)
+
     auth["callback_ownership_receipt"] = {
         "ok": True,
         "receipt_id": f"cbor_test_{secrets.token_hex(12)}",
@@ -905,9 +941,6 @@ def insert_test_canonical_owner_auth(
     elif status == "revoked":
         stage = "REVOKED"
 
-    from services.video_trace_state import ensure_registered_callback_event_schema
-    conn = sqlite3.connect(db_path)
-    ensure_registered_callback_event_schema(conn)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     exp_iso = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=max(3600.0, float(ttl_seconds)))).isoformat()
     with conn:
