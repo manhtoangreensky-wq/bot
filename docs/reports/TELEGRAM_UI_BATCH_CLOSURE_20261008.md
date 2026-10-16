@@ -243,3 +243,41 @@ Reviewed the four source branches in `pricing_main_keyboard`: Vietnamese domesti
 - Scope review: `bot.py` hunks are confined to Translation label, Feedback callback/expiry, Document Back origin, Memory stale delete-confirmation, Vault labels/Home, and Internal Archive Back origin. No `services/`, provider, worker, config, Product Video/SubDub/Voice/Music engine, wallet, AutoPost, or Image Story prompt change is in the local diff. Final exact-main comparison is still required after one rebase.
 - Remaining limitations: Account → Back is still reported at 2–3 seconds but cannot be correlated with an exact route/timestamp; aggregate server samples are not a cause diagnosis. Telegram viewport/wrapping and manual all-button QA remain unverified. Support category-picker entry behavior remains an Owner UX choice. Keep these explicit; do not claim every button smooth or every action route fully verified.
 - Delivery state: UI batch remains local and undelivered. Rebase once onto the current SHA after committing only the task files, run CI, then use one consolidated PR/merge and one bot-only deploy (`deploy_workers=false`) only if exact diff/runtime checks still pass. No push, PR, merge, deploy, restart, provider, wallet, or production-data mutation occurred in this gate refresh.
+
+## Post-delivery superseding readback — 15/10/2026
+
+The preceding release-gate refresh is a historical pre-delivery snapshot. The
+same UI/callback batch has since been delivered once, without a second code
+patch: PR [#1432](https://github.com/manhtoangreensky-wq/bot/pull/1432) is
+merged at head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7` with merge commit
+`55abb1d0701a2e6f7e399d6583a2ad2b91687afc`. Exact-head CI runs
+`38758593472` (full hygiene/regression) and `38758593047` (source compile) are
+both `SUCCESS`.
+
+The single approved bot-only deploy
+[`38761999018`](https://github.com/manhtoangreensky-wq/bot/actions/runs/38761999018)
+is `SUCCESS`, targeted at `55abb1d0701a2e6f7e399d6583a2ad2b91687afc` with
+`deploy_workers=false`. Read-only VPS verification reports the same bot SHA,
+`toanaas-bot.service`, `toanaas-web.service` and `nginx.service` active,
+`NRestarts=0`, and `/health` `status=ok`. Worker code and protected product
+engines were not deployed by this UI batch.
+
+The delivered fixes close the reproduced stale-root, ACK-order and bounded-ID
+callback defects covered by S12.35.477–S12.35.503. Provider calls, wallet
+mutations, production-data writes and real Telegram sends remain `0`; no
+Product/Edit/Image/Video/SubDub/Voice/Music route or engine, AutoPost,
+provider, worker, ENV/secret or payment logic was changed in this delivery.
+
+A7 remains explicitly open. The Owner-reported Account → Back 2–3 second
+duration has no exact anonymous server event correlated to the click timestamp,
+so this report does not attribute it to bot, Telegram, network, device or VPS,
+and does not claim every button is smooth. No latency patch or hardware
+purchase is justified until that evidence exists.
+
+### Final delivery lock — 16/10/2026
+
+PR #1434 (`3d17231cdfbffecdf999b3398c189bb83f36558e`) and its exact bot-only
+deploy workflow `38784324561` are merged/SUCCESS and live on the VPS with
+`deploy_workers=false`. Runtime SHA, services and health were read back; the
+worker stayed unchanged. This is a documentation checkpoint only: no route,
+engine, provider, wallet, AutoPost or production-data scope was reopened.

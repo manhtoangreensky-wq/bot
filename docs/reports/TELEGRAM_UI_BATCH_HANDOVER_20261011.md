@@ -1,7 +1,9 @@
 # Telegram UI/callback — batch continuation 11/10/2026
 
-Status: local verification recorded; this batch is not yet pushed, merged or
-deployed. Whole-goal status remains ACTIVE.
+Status: this handover is a historical pre-delivery snapshot. The batch was
+later delivered once through PR #1432 and bot-only deploy run #38761999018;
+whole-goal status remains ACTIVE only because A7 client-correlation evidence is
+still missing.
 
 ## Current operating checkpoint
 
@@ -75,3 +77,29 @@ and screen duration. The fixture cases can run without a production action.
 
 `MERGED != DEPLOYED != LIVE`. A local test or active service does not establish
 client smoothness or product-output success.
+
+## Superseding delivery readback — 15/10/2026
+
+- PR [#1432](https://github.com/manhtoangreensky-wq/bot/pull/1432) is merged:
+  head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7`, merge commit
+  `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`.
+- Exact-head CI `38758593472` (full hygiene/regression) and
+  `38758593047` (source compile) are `SUCCESS`. Deploy
+  [`38761999018`](https://github.com/manhtoangreensky-wq/bot/actions/runs/38761999018)
+  is `SUCCESS` with `deploy_workers=false` and target SHA
+  `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`.
+- VPS readback: bot SHA equals target, bot/web/nginx are `active`,
+  `NRestarts=0`, and `/health` is `ok`. The protected product/provider/worker,
+  wallet/PayOS and AutoPost scope was not changed by this UI batch.
+- The delivered callback fixes are locked; no second code patch is opened merely
+  to polish a passing route. A7 remains partial because Account → Back has no
+  exact click-correlated anonymous event. Do not infer network/device/VPS cause
+  or all-button smoothness from the current server samples.
+
+### Superseding handover — 16/10/2026
+
+The continuation is delivered and runtime-verified: PR #1434 merged at
+`3d17231cdfbffecdf999b3398c189bb83f36558e`; workflow `38784324561` succeeded
+with `deploy_workers=false`; VPS SHA/services/health match. S12.35.505 is
+closed as live evidence. Keep A7 explicitly deferred and do not reopen the
+already-verified callback code without a new RED and Owner scope decision.

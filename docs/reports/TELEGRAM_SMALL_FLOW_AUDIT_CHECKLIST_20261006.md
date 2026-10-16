@@ -3180,6 +3180,95 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
 - Limits: fixture/source-extracted evidence only; no production report query, provider, chart/file generation, wallet, or Telegram send. AI/chart commands and the broader Admin report matrix remain unverified.
 - Status: locally verified; final batch CI/delivery pending.
 
+## Current-main tester intake 2026-10-15 — ordered callback gate
+
+- [x] Filter the supplied PDF/tester material. Legacy/WebApp findings without
+  an active Telegram producer/registered handler remain unmapped; no route or
+  engine patch was copied into the bot.
+- [x] Lock protected scope: Product Video, Video, Image, Music, Voice, SubDub,
+  provider, worker, job, pricing, wallet/Xu, PayOS, AutoPost, ENV/secrets and
+  production data are out of scope.
+- [x] Require exact producer + registered `^menu\\|` handler + side-effect-free
+  RED before opening each implementation spec.
+- [ ] Full-source compile, exact-head CI, protected comparator and live-client
+  evidence remain release gates.
+
+### S12.35.477–S12.35.490 ledger
+
+- [x] **477 `main`** — stale suffix rejected before ACK/cleanup/render; exact
+  root remains valid; focused `2 tests ... OK`.
+- [x] **478 `main_profile`** — stale suffix rejected before side effects;
+  focused `1 test ... OK`.
+- [x] **479 `main_memory`** — exact root and `freehub` origin preserved; stale
+  suffix rejected; focused `3 tests ... OK`.
+- [x] **480 `main_video`** — stale suffix guard only; focused `1 test ... OK`;
+  Product Video/Video engine untouched.
+- [x] **481 `main_image`** — stale suffix guard only; focused `1 test ... OK`;
+  Image engine untouched.
+- [x] **482 `main_guide`** — stale suffix rejected; focused `1 test ... OK`.
+- [x] **483 `main_music`** — stale suffix rejected; focused `1 test ... OK`;
+  Music engine/provider/pricing untouched.
+- [x] **484 `main_topup`** — no implementation opened: baseline already rejects
+  unknown origin before ACK; duplicate speculative guard removed.
+- [x] **485 `translate`** — producer-backed values allowlisted; unknown suffix
+  rejected; focused `1 test ... OK`; translation execution untouched.
+- [x] **486 `doc_tools`** — stale suffix rejected; focused `1 test ... OK`;
+  document/PDF processing untouched.
+- [x] **487 `chat_pro`** — stale suffix rejected; focused `1 test ... OK`;
+  provider/engine untouched.
+- [x] **488 `chat_free`** — stale suffix rejected; focused `1 test ... OK`;
+  provider/engine untouched.
+- [x] **489 `admin`** — exact current-main RED reproduced; focused stale-root
+  regression passes; Admin data/report/provider helpers are not called.
+- [x] **490 `finance`** — exact current-main RED reproduced; focused stale-root
+  regression passes; finance calculations/wallet/PayOS are not called.
+- [x] **491 `billing`** — exact current-main RED reproduced; focused stale-root
+  regression passes; wallet/payment logic is not called.
+- [x] **492 `main_docs`** — exact current-main RED reproduced; focused stale-root
+  regression passes; document processing/PDF logic is not called.
+- [x] **493 Admin submenu matrix** — 11 exact producer roots reject stale
+  suffixes before ACK/cleanup/render; child-origin routes remain explicit and
+  unchanged (`admin_overview|...`, provider status/routes, DB refresh/back,
+  package orders).
+- [ ] `main_quick`/`main_audio`: no current literal producer; do not patch until
+  an active producer and RED are found.
+- [ ] `autopost`: WIP is intentionally held; no new implementation here.
+- [x] `billing` producer/ownership is isolated as an exact admin-menu root; no
+  broad admin/finance rule was generalized to it.
+
+### Verification record for this candidate
+
+- [x] Exact current-main baseline probes were run through the registered Menu
+  handler with inert cleanup/render seams and no I/O.
+- [x] Focused unittest batch: `Ran 19 tests in 3.392s`, `OK` (Admin matrix
+  contains 11 producer-root subtests).
+- [x] Changed test modules compile: `TEST_MODULE_COMPILE_EXIT=0`.
+- [ ] Full `bot.py` compile emitted `COMPILE_START` but no completion marker
+  during a bounded ~300s observation and was stopped with Ctrl+C;
+  `FULL_SOURCE_COMPILE=NOT_VERIFIED` (not interpreted as a syntax failure).
+- [x] Exact-head GitHub CI run `38700321728` verified Complete Bot Source,
+  Python Compile Guard, all selected Admin/customer regression steps, the
+  19-test stale-root gate, the PayOS ACK gate and workflow hygiene: SUCCESS.
+- [x] Independent source-compile guard run `38700321747`: SUCCESS.
+- [x] `git diff --check`: `DIFF_CHECK_EXIT=0`.
+- [x] Added `bot.py` executable lines contain no protected provider/worker/
+  job/wallet/PayOS/engine/route mutation (UI label strings excluded):
+  `PROTECTED_CODE_COMPARATOR_EXIT=0`.
+- [x] Changed-file allowlist is exact: `CHANGED_FILE_SCOPE_EXIT=0`.
+- [x] Main-menu emitted callback registration smoke: one focused test returned
+  `NO_HANDLER_ENTRY_EXIT=0`.
+- [x] All public/admin main-menu callback patterns across configured locales:
+  `ALL_LOCALE_HANDLER_MAP_EXIT=0` (1 test, 2.768s).
+- [x] Read-only producer inventory found no emitted `menu|<guarded-root>|...`
+  values beyond the explicit `main_memory|freehub` allowlist; valid child
+  screens use distinct callback roots. This is source inventory evidence only,
+  not live Telegram evidence.
+- [x] Batch branch pushed and PR #1432 opened; no merge/deploy/restart has
+  been performed. CI and exact-head delivery gates are green; merge/deploy/
+  restart remain owner gates.
+- [ ] Broader Admin child/Back runner: `NOT_VERIFIED` (no completion marker;
+  not interpreted as a product failure or pass).
+
 ### S12.35.293 — Admin tax read-only child Back matrix
 
 - Contract: build the actual `finance_tax_keyboard()` emitted from
@@ -3285,6 +3374,24 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Runtime newer than target or an unapproved protected delta stops that deploy.
 - Status: review/delivery preparation; client visual/latency remains deferred.
 
+### S12.35.494 — PayOS package ownership callback ACK
+
+- Contract: use the emitted `payos_package_callback_data("50k", uid)` and the
+  exact registered `handle_package_choice` route. An unauthorized tap must
+  produce one alert ACK and no payment/UI action. The authorized path keeps one
+  normal early ACK. Do not create an order, call PayOS, mutate wallet/Xu or
+  change pricing.
+- RED: the registered handler acknowledged once before ownership validation and
+  then acknowledged the unauthorized alert, producing two callback answers.
+- Minimal fix: move the normal ACK after the owner gate; malformed callbacks
+  retain one normal ACK and unauthorized callbacks return the single alert.
+- GREEN: `python -m unittest -v tests.test_package_choice_ack_only` → `Ran 1
+  test in 0.194s — OK`; changed test `py_compile` and `git diff --check` exit 0.
+- Protected review: only the ACK order in `handle_package_choice`, its focused
+  test, CI gate and audit docs changed; order, PayOS, wallet, price and provider
+  code were untouched. No external call, DB write, wallet mutation or Telegram
+  send occurred.
+
 ### S12.35.292 — Admin Finance Audit Back origin
 
 - Contract: from Admin `menu|finance_tax_vat`, activate the actual emitted
@@ -3316,7 +3423,140 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   Telegram. Batch CI/release and live performance remain open.
 - Status: locally verified; final batch CI/delivery pending.
 
+### S12.35.495 — Manual package admin callback ACK
+
+- Contract: use the emitted `manual_package_callback_data("50k", uid)` and
+  the exact registered `handle_manual_package_choice` route. A non-admin tap
+  on `manual|approve...`, `reject` or `confirm` must produce one denial alert;
+  an authorized admin gets one normal ACK before the existing branch. No
+  pending-deposit read/write, Xu mutation, PayOS call or approval action runs.
+- RED: the handler issued a normal ACK before its admin gate, then issued the
+  denial alert, yielding two answers for one unauthorized callback.
+- Minimal fix: malformed callbacks return one normal ACK; admin actions check
+  admin first and ACK once only after authorization; non-admin actions keep one
+  normal ACK before their existing owner/state checks.
+- GREEN: `python -m unittest -v tests.test_manual_package_choice_ack_only` →
+  `Ran 1 test in 0.190s — OK`; changed-test `py_compile` and `git diff --check`
+  exit 0.
+- Protected review: only ACK ordering, focused test, CI gate and audit docs
+  changed; approval/payment/wallet/provider/engine code is untouched.
+
+### S12.35.496 — Provider-choice malformed UID (deferred)
+
+- Evidence: `provider_keyboard()` emits the real `prov|voice|...|uid` and
+  `prov|image|...|uid` values; registration is the exact `^prov\|` handler.
+  The current handler parses `uid = int(uid_str)` before `query.answer()`, so a
+  stale/malformed UID can raise before a safe callback alert.
+- Scope decision: deferred. This is the protected Voice/Image provider-choice
+  boundary. No patch, test gate, provider call, wallet mutation or engine
+  change is made in the UI-only batch.
+- Reopen condition: explicit Owner approval for a narrow malformed-UID guard at
+  this provider-choice boundary, with no changes to provider/voice/image work.
+
 ### S12.35.291 — Admin tax report selector Back origin
+
+### S12.35.497 — Admin Ticket status callback out-of-range ID
+
+- Contract: dispatch the actual registered `ticket|st|<id>|<status>` callback
+  through `handle_ticket_callback` with an Admin actor. A malformed or
+  SQLite-int64-out-of-range ID must receive exactly one unsupported-action
+  alert before `get_support_ticket`; a valid in-range ID keeps the existing
+  not-found/status path. Do not update a ticket or touch payment, wallet,
+  provider, job, product-engine or AutoPost state.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  the registered route accepted `ticket|st|9223372036854775808|resolved`,
+  called `get_support_ticket(9223372036854775808)`, and a SQLite-style fixture
+  raised `OverflowError: Python int too large to convert to SQLite INTEGER`
+  before the callback could acknowledge safely. The ordinary in-range stale
+  route still returned its existing one “Không tìm thấy ticket.” alert.
+- Minimal fix: added a local `ticket_status_id_ok` predicate matching the
+  existing ASCII-decimal/int64 boundary used for detail IDs and applied it
+  only to the `st` pre-lookup check. No status, lookup, ownership, Back or
+  admin authorization logic was refactored.
+- GREEN: the registered-handler fixture file ran four direct no-I/O cases —
+  `RUN 4`, each `OK`, and `ALL_OK`; the out-of-range case produced exactly one
+  unsupported alert and zero lookup calls. `git diff --check` exited 0.
+- Protected review: only `handle_ticket_callback`'s `st` ID guard, its focused
+  regression, one safe-navigation CI test entry, and audit evidence changed.
+  Provider calls, wallet mutations, production writes and real Telegram sends:
+  0. Status: locally verified; consolidated CI, PR delivery and live-client
+  latency remain separate gates.
+
+### S12.35.498 — Admin Ticket list callback out-of-range offset
+
+- Contract: dispatch the actual registered `ticket|al|<kind>|<offset>` route
+  with an Admin actor. A malformed or SQLite-int64-out-of-range offset must
+  receive one expired-button alert before `support_admin_list_payload`; a valid
+  offset keeps the existing list/pagination behavior. Do not read or mutate
+  ticket data in the fixture and do not enter wallet, payment, provider, job,
+  product-engine or AutoPost paths.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  `ticket|al|new|9223372036854775808` passed the decimal check, sent one normal
+  ACK, then reached the list getter. A SQLite-style getter raised
+  `OverflowError: Python int too large to convert to SQLite INTEGER` instead of
+  recovering the expired button.
+- Minimal fix: added only the existing int64 boundary (`ASCII decimal`, at most
+  19 digits and `<= 9223372036854775807`) to the `al` pre-lookup predicate.
+  The list query, page ordering, status filters and Back callbacks are
+  unchanged.
+- GREEN: the exact registered-handler fixture covers nonnumeric and
+  out-of-range offsets; both return one expired-button alert and do not reach
+  the list seam. Test-file compile and `git diff --check` exit 0.
+- Protected review: only the `al` offset guard, its focused regression, one
+  safe-navigation CI entry and audit evidence changed. Provider calls, wallet
+  mutations, production writes and real Telegram sends: 0. Status: locally
+  verified; consolidated CI, PR delivery and live-client latency remain
+  separate gates.
+
+### S12.35.499 — Customer Ticket summary callback out-of-range ID
+
+- Contract: dispatch the actual registered
+  `ticket|summary|<id>|profile_result|feedback_result` callback with a
+  customer actor. A malformed or SQLite-int64-out-of-range ID must receive one
+  unsupported-action alert before `get_support_ticket`; valid IDs and the two
+  existing result origins keep their current summary/Back behavior.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  `ticket|summary|9223372036854775808|profile_result` was ACKed, reached the
+  ticket getter and a SQLite-style fixture raised
+  `OverflowError: Python int too large to convert to SQLite INTEGER`.
+- Minimal fix: the existing early summary ACK predicate now applies the same
+  ASCII-decimal/int64 boundary used by Ticket detail IDs, and the summary
+  branch rejects any value that did not pass that predicate before lookup.
+  Summary rendering, origin mapping and Back controls are unchanged.
+- GREEN: the exact registered-handler fixture covers a nonnumeric and an
+  out-of-range summary ID; each returned one `Action not supported` alert and
+  the getter seam was not reached. Test-file compile and `git diff --check`
+  exit 0.
+- Protected review: only the summary ID guard, its focused regression, one
+  safe-navigation CI entry and audit evidence changed. Provider calls, wallet
+  mutations, production writes and real Telegram sends: 0. Status: locally
+  verified; consolidated CI, PR delivery and live-client latency remain
+  separate gates.
+
+### S12.35.500 — Customer Ticket action ID overflow (`reply_user`/`attach`/`done`)
+
+- Contract: dispatch the actual registered customer Ticket action callbacks
+  `ticket|reply_user|<id>`, `ticket|attach|<id>` and `ticket|done|<id>`. A
+  malformed or SQLite-int64-out-of-range ID must receive one unsupported
+  alert before `get_support_ticket`, pending-state changes or the action;
+  valid IDs retain the existing behavior and Back ancestry.
+- RED on exact current main `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`:
+  each of the three callbacks with ID `9223372036854775808` passed the
+  decimal check, ACKed once, reached the ticket getter and raised a
+  SQLite-style `OverflowError`.
+- Minimal fix: added one local ASCII-decimal/int64 Ticket ID predicate at the
+  handler boundary, reused it for detail/status/summary/customer-action
+  admission, and replaced the customer-action decimal-only lookup check. No
+  valid action branch, pending state, ownership or Back builder was changed.
+- GREEN: the exact registered-handler fixture covers all three actions with
+  both out-of-range and nonnumeric IDs; every case returns one unsupported
+  alert and does not reach the getter. Test-file compile and
+  `git diff --check` exit 0.
+- Protected review: only the shared Ticket ID admission branch, its focused
+  regression, one safe-navigation CI entry and audit evidence changed.
+  Provider calls, wallet mutations, production writes and real Telegram sends:
+  0. Status: locally verified; consolidated CI, PR delivery and live-client
+  latency remain separate gates.
 
 - Contract: enter the Admin VAT/CIT module through `menu|finance_tax_vat`, open its emitted VAT/CIT report selector, and dispatch that selector's emitted Back through the registered `menu|` handler. Back must restore the immediate tax module, not Finance root; public access must be rejected before report helpers.
 - Scope: inert rendering only. Do not query production reports, generate exports, change tax calculations, touch finance/wallet state, providers, jobs, AutoPost, or protected product engines.
@@ -3340,3 +3580,227 @@ The Owner-approved strict-host SSH query for the preceding 24 hours completed su
   finance/wallet mutation, job, AutoPost, protected engine, or real Telegram.
   Full bot compilation, batch CI, PR/delivery, and live UI latency remain open.
 - Status: locally verified; final batch CI/delivery pending.
+
+### S12.35.501 — Internal Archive view/file out-of-range document ID
+
+- Contract: dispatch the actual registered `archive|view|<id>` and
+  `archive|file|<id>` callbacks as an Admin. A malformed or SQLite-int64-
+  out-of-range decimal ID must receive one invalid-ID alert before
+  `get_internal_document`; valid IDs keep the existing view/file behavior,
+  ACK ordering, stale recovery and Back controls.
+- Scope: only the `handle_internal_archive_callback` ID admission guard and a
+  focused inert fixture. Do not alter archive storage, file sending, pending
+  cleanup, provider, wallet, job, Product/Edit/Image/Video/SubDub/Voice/Music
+  engine or AutoPost code.
+- RED on exact `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`: both
+  registered routes accepted `9223372036854775808`, ACKed once, reached a
+  SQLite-style getter and raised `OverflowError: Python int too large to
+  convert to SQLite INTEGER`.
+- Acceptance: reject non-ASCII/non-decimal, over-19-digit and above-int64 IDs
+  before the getter with one alert; preserve the current one early ACK and
+  valid in-range view/file fixtures. Record focused GREEN, test compile and
+  diff/scope review before moving to another finding.
+- GREEN: the registered-handler fixture covered both `view` and `file` with
+  Arabic-Indic digits, the first above-int64 value, and a 20-digit value;
+  `RUN 6` / `ALL_OK` confirmed one invalid-ID alert, zero document lookups,
+  zero file sends, and no pending cleanup for every case. The existing
+  ACK-before-lookup regression also returned `OK`; changed-test `py_compile`
+  exited 0 and `git diff --check` exited 0.
+- Minimal fix: added only a local ASCII-decimal/int64 predicate in
+  `handle_internal_archive_callback` and reused it for the existing `view`/
+  `file` admission branch. Valid lookup, ACK ordering, stale recovery, file
+  delivery and Back keyboards are unchanged.
+- Protected review/limits: only Archive admission, its existing focused test,
+  CI inclusion (the test module was already selected), checklist, tester plan
+  and durable state changed. No archive storage/file write, DB, wallet,
+  provider, job, Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost,
+  Telegram send, merge, deploy or restart occurred. Full source compile and
+  consolidated CI remain separate gates.
+
+### S12.35.502 — Knowledge Vault prompt/asset callback out-of-range ID
+
+- Contract: dispatch the registered `^vault\\|` handler for `vault|use|<id>`,
+  `vault|approve_prompt|<id>` and `vault|approve_asset|<id>`. A malformed or
+  SQLite-int64-out-of-range ID must receive exactly one invalid-ID alert before
+  the Vault object is called; valid IDs retain the existing one early ACK and
+  use/approval behavior.
+- Scope: only callback admission/ACK ordering and a no-I/O fixture. Do not
+  alter prompt text, asset import/approval semantics, Vault storage, provider,
+  wallet, job, Product/Edit/Image/Video/SubDub/Voice/Music engine or AutoPost.
+- RED on exact `origin/main=7cd336dedd6f3946cd3fe0772b4793bf47935747`: each
+  action ACKed once and passed `9223372036854775808` to its Vault seam; a
+  SQLite-style fixture raised `OverflowError: Python int too large to convert
+  to SQLite INTEGER`.
+- Acceptance: non-ASCII/non-decimal, over-19-digit and above-int64 IDs return
+  one alert with zero Vault calls; valid in-range actions keep their current
+  ACK and branch. Record focused GREEN, test compile and diff/scope review.
+- GREEN: the registered-handler fixture covered all three actions with Arabic-
+  Indic digits, the first above-int64 value, and a 20-digit value; `VAULT_FOCUSED_RUN 2` /
+  `ALL_OK` confirmed one invalid-ID alert, zero Vault factory calls and zero
+  Vault method calls for every malformed case. Valid `441` cases retained one
+  normal ACK and the original `get_prompt`/`approve_prompt`/`approve_asset`
+  branches. Test `py_compile` exited 0 and `git diff --check` exited 0.
+- Minimal fix: moved the existing ACK after a local Vault item ID admission
+  check for only these three ID-bearing actions; invalid callbacks now get one
+  alert, while all other actions and valid branches keep their prior ACK.
+- Protected review/limits: only Vault callback admission/ACK order, its focused
+  regression, CI selection, checklist, tester plan and durable state changed.
+  Prompt/asset content, storage/import/approval semantics, provider, wallet,
+  job, Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, Telegram
+  sends, merge, deploy and restart were not run or changed.
+
+### S12.35.503 — Document Tools confirm ACK ordering
+
+- Contract: dispatch the actual registered `docflow|confirm` callback from the
+  emitted Document Tools confirmation keyboard. Pending-state/config/minimum-file
+  admission is in-memory only; a valid confirmation must ACK once before the
+  language lookup/render path. The too-few-files branch must keep one alert as
+  its only ACK. Do not process files, send files, charge Xu, call providers or
+  mutate production data.
+- RED on the current callback source: `handle_doc_tool_callback` read
+  `get_user_language(uid)` before `query.answer()` for `confirm`; a slow language
+  read could therefore hold the Telegram spinner before the response. The
+  existing too-few-files path also performed that read before its alert.
+- Minimal fix: moved only the existing in-memory state/config/minimum-file
+  admission ahead of the confirm ACK and moved `get_user_language` after that
+  single ACK. Non-confirm actions keep their existing early ACK; document
+  processing, file delivery, charging and render helpers are unchanged.
+- GREEN: focused regression `test_confirm_acknowledges_before_language_lookup`
+  locks event order `ACK -> language` for a valid emitted callback; the existing
+  too-few-files regression still asserts one alert and no render. Changed-test
+  `py_compile` exited `0`; `git diff --check` exited `0`. PR #1432 exact head
+  `586b7004430878a77ede435bc62c4ff3c131af29` passed CI run `38755547063` and
+  source-compile run `38755547047`.
+- Protected review/limits: only `bot.py` callback ordering and its focused
+  regression changed. No provider, wallet, job, production DB, Telegram send,
+  Product/Edit/Image/Video/SubDub/Voice/Music engine, AutoPost, merge, deploy or
+  restart was performed. This closes the callback ordering defect; live client
+  latency remains a separate A7 gate.
+
+### S12.35.505 — Admin Support/Broadcast Lite root stale suffixes
+
+- Contract: dispatch the Admin menu's emitted `menu|admin_support` and
+  `menu|admin_broadcast_lite` roots plus their stale/suffixed variants through
+  the exact registered `handle_menu_callback`. Each exact root must preserve
+  its existing Admin page; each suffixed root must return one expired-button
+  alert before pending cleanup or render. Do not read or mutate Ticket,
+  Broadcast, wallet/payment, provider, job, product-engine or AutoPost state.
+- RED on the current source: `admin_module_keyboard("support")` emits
+  `menu|admin_support`, and `admin_control_center_keyboard()` emits
+  `menu|admin_broadcast_lite`; both are registered page roots, but
+  `admin_exact_root_labels` omitted them. The inert registered handler accepted
+  each suffixed callback, acknowledged normally, cleared pending-state seams
+  and rendered a fallback screen instead of rejecting the stale callback.
+- Minimal fix: add only `admin_support: "CSKH / Góp ý"` and
+  `admin_broadcast_lite: "Thông báo khách hàng"` to the existing exact-root
+  label map. Both exact roots and their Ticket/Broadcast child callbacks remain
+  unchanged.
+- GREEN: `python.exe -S -m unittest -v
+  tests.test_admin_submenu_root_suffix_guards_current_main` → `Ran 1 test in
+  1.842s — OK`; the matrix now covers 13 producer roots including
+  `admin_support` and `admin_broadcast_lite`, and each stale suffix returns one alert with no edit or
+  cleanup effect. Changed test `py_compile` exited `0`; `git diff --check`
+  exited `0`.
+- Protected review/limits: changed files are only `bot.py` and the existing
+  stale-root regression. No Product/Edit/Image/Video/SubDub/Voice/Music route
+  or engine, provider/worker/job, wallet/PayOS, AutoPost, ENV/secrets,
+  production data, real Telegram send, merge, deploy or restart was touched.
+  Full source compile/CI and live-client timing remain separate release gates.
+
+### Current continuation recheck — Admin Growth registered trail (2026-10-16)
+
+- Contract: re-audit the current `admin_growth` producer/handler pair without
+  opening a new implementation spec unless a registered-handler RED appears.
+  Exercise every reachable read-only Marketing callback, immediate/nested Back
+  ancestry, callback byte bounds, malformed-trail rejection before report/list
+  reads, public denial, and the two documented legacy guide callbacks.
+- Source boundary: `admin_control_center_keyboard()` emits
+  `admin_growth|main`; the exact registered route remains
+  `^admin_growth\\|` → `handle_admin_growth_callback`. No producer, handler,
+  report helper, publish action, wallet, provider, job, product engine or
+  AutoPost code was changed in this recheck.
+- Verification: the source-extracted inert runner reached 33 distinct emitted
+  callback values. Every one produced exactly one ACK and one render; all
+  emitted callback values stayed within Telegram's 64-byte callback limit.
+  Eleven malformed/truncated/invalid parent trails returned one alert with no
+  edit. Three public-user callbacks returned the existing admin-only screen
+  without invoking any report/list read seam. The only two accepted values not
+  emitted by the current keyboards are the existing backward-compatible
+  unscoped `admin_growth|aff_add` and `admin_growth|aff_import` guides; their
+  existing Affiliate Back behavior is covered and was not changed.
+- Result: `ADMIN_GROWTH_RECHECK=ALL_OK`; no new RED, duplicate ACK, wrong Back
+  destination, stale-read, or missing-handler defect was reproduced. No
+  implementation spec is opened and no product code is changed. The ordinary
+  Windows `asyncio.run()` test wrapper remains unsuitable here; this result
+  uses the established immediate no-I/O driver and is not a live Telegram or
+  latency claim.
+- Side effects/limits: fixture/source review only; no production DB/report,
+  publish operation, provider, wallet, protected engine, AutoPost, Telegram
+  send, merge, deploy or restart. A7 click-correlated latency and final batch
+  delivery gates remain open.
+
+### Batch release gate recheck — 15/10/2026 (pre-delivery snapshot)
+
+- At the time of this snapshot PR #1432 was OPEN and MERGEABLE at exact head
+  `586b7004430878a77ede435bc62c4ff3c131af29`; the branch-introduced
+  diff from its merge base contains no `services/`, `providers/`, worker,
+  `remote_worker`, config, wallet or AutoPost files. The two main-only commits
+  (`f3fe738f` and `358e28de`) are not part of the branch patch and remain on
+  current main.
+- CI is GREEN for the exact head: full hygiene/regression run
+  `38755547063` and source-compile/tokenize run `38755547047`. The latter ran
+  `py_compile bot.py`, tokenize and the complete-source guard on Ubuntu.
+- Read-only VPS recheck at that time remained runtime SHA `f3fe738f3764e61a7edc85c386c917f167fd8d8d`,
+  `toanaas-bot.service`, `toanaas-web.service` and `nginx.service` all
+  `active/running`, `NRestarts=0`, and internal `127.0.0.1:8080/health` returns
+  `status=ok`. PR #1432 is not deployed; no restart occurred.
+- The merge/deploy state in this historical snapshot is superseded by the
+  post-delivery readback below. A7 was, and remains, partial because the
+  reported click-to-screen duration has no matching anonymous server event;
+  no hardware/network cause is inferred.
+
+### Post-delivery closure — 15/10/2026
+
+- PR #1432 is **MERGED**: head `44156d7a7952cb27e698c0be4cbe6c3daf47fcc7`,
+  merge commit `55abb1d0701a2e6f7e399d6583a2ad2b91687afc`. Exact-head CI runs
+  `38758593472` (full hygiene/regression) and `38758593047` (source compile)
+  both completed `SUCCESS`.
+- The single approved bot-only deploy `38761999018` completed `SUCCESS` with
+  `target_sha=55abb1d0701a2e6f7e399d6583a2ad2b91687afc` and
+  `deploy_workers=false`. Read-only VPS verification reports the same
+  `BOT_SHA`, `toanaas-bot.service`, `toanaas-web.service` and `nginx.service`
+  `active`, `NRestarts=0`, and `/health` `status=ok`.
+- The protected comparator remains clean: no Product/Edit/Image/Video/SubDub/
+  Voice/Music route or engine, provider/worker, AutoPost, wallet/PayOS,
+  ENV/secret or production-data change was introduced in this UI/callback
+  delivery. Provider calls, wallet mutations and production writes: `0`.
+- Locked-green specs S12.35.477–S12.35.503 are now delivered and runtime
+  aligned. This closes the reproduced stale-root, ACK-order and bounded-ID
+  defects; it does **not** turn fixture coverage into proof of every Telegram
+  viewport or client action.
+- A7 remains open: the Owner's Account → Back 2–3 second report has no exact
+  click-correlated anonymous event. No claim is made about network/device/VPS
+  cause or all-button smoothness; no speculative latency patch or hardware
+  purchase is justified. Goal status remains ACTIVE until that evidence gate is
+  either collected or explicitly deferred by the Owner.
+- S12.35.505 is locally GREEN but not yet delivered to GitHub/runtime in this
+  continuation; keep merge/deploy status separate from the fixture result.
+
+### Superseding post-delivery readback — 16/10/2026
+
+- S12.35.505 is now **MERGED, DEPLOYED and LIVE-VERIFIED**. PR #1434 merged at
+  `3d17231cdfbffecdf999b3398c189bb83f36558e`; the single bot-only workflow
+  [38784324561](https://github.com/manhtoangreensky-wq/bot/actions/runs/38784324561)
+  completed `SUCCESS` with `deploy_workers=false`.
+- Read-only VPS evidence: `BOT_SHA=3d17231cdfbffecdf999b3398c189bb83f36558e`,
+  `bot.py` blob `74335a9b49a8c9b5ac1256c527d2fce1aee6d2e6`, bot/web/nginx
+  `active`, `NRestarts=0`, and `/health` returned `status=ok`. The worker
+  remained at `f3fe738f3764e61a7edc85c386c917f167fd8d8d`.
+- Protected-scope comparator remains clean: no Product/Edit/Image/Video/SubDub/
+  Voice/Music route or engine, provider, worker, AutoPost, wallet/PayOS,
+  ENV/secret or production-data logic changed in this continuation. Provider
+  calls, wallet mutations, production writes and real Telegram sends are `0`.
+- A7 remains explicitly open/deferred. Manual `<1s` results for tested routes
+  do not correlate the Owner's Account → Back report to an anonymous event and
+  do not identify a network/device/VPS cause; no speculative latency patch or
+  hardware purchase is justified.
