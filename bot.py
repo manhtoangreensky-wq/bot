@@ -108907,10 +108907,11 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
 async def product_video_telegram_dispatcher_ingress(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Actual Telegram dispatcher ingress boundary for Product Video (Directive #1422, Section 2).
 
-    Creates durable dispatcher execution record BEFORE any handler runs.
-    DISPATCH_PROOF_CREATED_AT_ACTUAL_TELEGRAM_DISPATCH_BOUNDARY = YES
-    GENERIC_DISPATCH_EXECUTION_ISSUER = ABSENT
-    DISPATCHER_TOKEN_IGNORED_BY_RECORDER = NO
+    Directly owns durable dispatcher execution record creation BEFORE any handler runs.
+    APPLICATION_DISPATCHER_OWNS_RECORD_CREATION = YES
+    GENERIC_PRODUCTION_DISPATCH_RECORD_API = ABSENT
+    GENERIC_RAW_ID_TO_DISPATCH_PROOF_API = ABSENT
+    ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF = NO
     DISPATCH_EXECUTION_ID_OPAQUE = YES
     """
     query = getattr(update, "callback_query", None)
@@ -108942,79 +108943,140 @@ async def product_video_telegram_dispatcher_ingress(update: Update, context: Con
     session = user_data.get("video_session") or user_data.get("video_state") or {}
     draft = session.get("draft") or {}
 
-    job_id = draft.get("job_id") or session.get("job_id") or 0
-    project_id = draft.get("project_id") or draft.get("b14_project_id") or session.get("project_id") or session.get("b14_project_id")
-    if not project_id and job_id:
-        conn_p, close_p = video_trace_state.get_db_connection()
-        try:
-            r_j = conn_p.execute("SELECT project_id FROM video_jobs WHERE id = ?", (job_id,)).fetchone()
-            if r_j and r_j[0]:
-                project_id = r_j[0]
-        except Exception:
-            pass
-        finally:
-            if close_p:
-                conn_p.close()
-    if not project_id and job_id:
-        conn_p, close_p = video_trace_state.get_db_connection()
-        try:
-            r_tp = conn_p.execute(
-                "SELECT project_id FROM video_request_traces WHERE job_id = ? AND project_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
-                (job_id,)
-            ).fetchone()
-            if r_tp and r_tp[0]:
-                project_id = r_tp[0]
-        except Exception:
-            pass
-        finally:
-            if close_p:
-                conn_p.close()
-    if not project_id or not job_id:
-        return
+    s_job_id = draft.get("job_id") or session.get("job_id")
+    s_project_id = draft.get("project_id") or draft.get("b14_project_id") or session.get("project_id") or session.get("b14_project_id")
+    s_request_id = draft.get("request_id") or session.get("request_id") or draft.get("trace_id")
 
-    request_id = draft.get("request_id") or session.get("request_id") or draft.get("trace_id")
-    if not request_id and job_id:
-        conn_p, close_p = video_trace_state.get_db_connection()
-        try:
-            r_t = conn_p.execute(
-                "SELECT request_id FROM video_request_traces WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
-                (job_id,)
-            ).fetchone()
-            if r_t and r_t[0]:
-                request_id = r_t[0]
-        except Exception:
-            pass
-        finally:
-            if close_p:
-                conn_p.close()
-    if not request_id:
-        return
-
-    from services.remote_worker_api import resolve_runtime_sha
-    runtime_sha = resolve_runtime_sha() or os.environ.get("GIT_COMMIT_SHA") or ""
-    if not runtime_sha:
-        return
-
+    conn_d, close_d = video_trace_state.get_db_connection()
     try:
-        exec_info = video_trace_state.record_telegram_dispatcher_execution(
-            dispatcher_ingress_token=video_trace_state._PRIVATE_DISPATCHER_INGRESS_KEY,
-            telegram_update_id=real_update_id,
-            callback_query_id=real_cbq_id,
-            user_id=user_id,
-            chat_id=real_chat_id,
-            job_id=str(job_id),
-            project_id=str(project_id),
-            request_id=str(request_id),
-            runtime_sha=runtime_sha,
-            callback_action="create_video_task",
-            product_type="Product Video",
+        video_trace_state.ensure_registered_callback_event_schema(conn_d)
+        cur = conn_d.cursor()
+
+        durable_job_id = s_job_id
+        durable_project_id = s_project_id
+        durable_request_id = s_request_id
+
+        # If job_id is missing, try resolving from video_jobs or video_request_traces
+        if not durable_job_id:
+            try:
+                cur.execute("SELECT id, project_id, user_id FROM video_jobs WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
+                row_j = cur.fetchone()
+                if row_j:
+                    durable_job_id = row_j[0]
+                    if not durable_project_id:
+                        durable_project_id = row_j[1]
+            except Exception:
+                pass
+            if not durable_job_id:
+                try:
+                    cur.execute(
+                        "SELECT job_id, project_id, request_id, trace_payload_json FROM video_request_traces WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 1",
+                        (user_id,),
+                    )
+                    row_t = cur.fetchone()
+                    if row_t:
+                        durable_job_id = row_t[0]
+                        if not durable_project_id:
+                            durable_project_id = row_t[1]
+                        if not durable_request_id:
+                            durable_request_id = row_t[2]
+                except Exception:
+                    pass
+
+        if not durable_job_id:
+            return
+
+        # If project_id is missing, try resolving
+        if not durable_project_id:
+            try:
+                cur.execute("SELECT project_id FROM video_jobs WHERE id = ?", (durable_job_id,))
+                row_pj = cur.fetchone()
+                if row_pj and row_pj[0]:
+                    durable_project_id = row_pj[0]
+            except Exception:
+                pass
+            if not durable_project_id:
+                try:
+                    cur.execute(
+                        "SELECT project_id FROM video_request_traces WHERE job_id = ? AND project_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+                        (durable_job_id,),
+                    )
+                    row_tp = cur.fetchone()
+                    if row_tp and row_tp[0]:
+                        durable_project_id = row_tp[0]
+                except Exception:
+                    pass
+
+        if not durable_project_id:
+            return
+
+        # If request_id is missing, try resolving
+        if not durable_request_id:
+            try:
+                cur.execute(
+                    "SELECT request_id FROM video_request_traces WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
+                    (durable_job_id,),
+                )
+                row_tr = cur.fetchone()
+                if row_tr and row_tr[0]:
+                    durable_request_id = row_tr[0]
+            except Exception:
+                pass
+
+        if not durable_request_id:
+            return
+
+        # Section D: Compare session request if present
+        if s_request_id is not None and str(s_request_id).strip() != str(durable_request_id).strip():
+            return
+
+        from services.remote_worker_api import resolve_runtime_sha
+        runtime_sha = resolve_runtime_sha() or os.environ.get("GIT_COMMIT_SHA") or ""
+        if not runtime_sha:
+            return
+
+        import secrets
+        exec_id = f"tde_{secrets.token_hex(16)}"
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expires_at = (now + timedelta(seconds=900)).isoformat()
+        conn_d.execute(
+            """
+            INSERT INTO bot_telegram_dispatcher_executions (
+                execution_id, telegram_update_id, callback_query_id,
+                user_id, chat_id, job_id, project_id, request_id,
+                callback_action, product_type, runtime_sha,
+                created_at, expires_at, dispatched_at, bound_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                exec_id,
+                int(real_update_id),
+                str(real_cbq_id).strip(),
+                str(user_id).strip(),
+                str(real_chat_id).strip(),
+                str(durable_job_id).strip(),
+                str(durable_project_id).strip(),
+                str(durable_request_id).strip(),
+                "create_video_task",
+                "Product Video",
+                str(runtime_sha).strip(),
+                now_iso,
+                expires_at,
+                now_iso,
+            ),
         )
-        if exec_info and exec_info.get("execution_id"):
-            setattr(context, "_dispatcher_execution_id", exec_info["execution_id"])
-            if hasattr(context, "user_data") and isinstance(context.user_data, dict):
-                context.user_data["_dispatcher_execution_id"] = exec_info["execution_id"]
+        conn_d.commit()
+        setattr(context, "_dispatcher_execution_id", exec_id)
+        if hasattr(context, "user_data") and isinstance(context.user_data, dict):
+            context.user_data["_dispatcher_execution_id"] = exec_id
+    except sqlite3.IntegrityError:
+        pass
     except Exception as exc:
-        logger.warning("Telegram dispatcher ingress record error: %s", exc)
+        logger.warning("Telegram dispatcher ingress direct record error: %s", exc)
+    finally:
+        if close_d:
+            conn_d.close()
 
 
 @video_public_callback_failure_guard
@@ -109304,6 +109366,18 @@ async def handle_owner_authorized_live_test_confirm(
     c_proj = str(cb_receipt.get("project_id") or "").strip()
     if not c_proj or c_proj in ("0", "None"):
         raise PermissionError("Exact project_id is required in callback_event (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
+    session = (getattr(context, "user_data", None) or {}).get("video_session") or {}
+    draft = session.get("draft") if isinstance(session, dict) else {}
+    acceptance_plan = (session.get("acceptance_plan") if isinstance(session, dict) else None) or (draft.get("acceptance_plan") if isinstance(draft, dict) else None) or getattr(context, "_acceptance_plan", None) or {}
+    c_prov = str(cb_receipt.get("provider") or (acceptance_plan.get("provider") if isinstance(acceptance_plan, dict) else None) or (acceptance_plan.get("selected_provider") if isinstance(acceptance_plan, dict) else None) or "").strip() or "key4u_video"
+    c_model = str(cb_receipt.get("model") or (acceptance_plan.get("model") if isinstance(acceptance_plan, dict) else None) or (acceptance_plan.get("selected_model") if isinstance(acceptance_plan, dict) else None) or "").strip() or "kling-v3"
+    c_runtime_sha = str(cb_receipt.get("runtime_sha") or "").strip()
+    c_exec_id = str(cb_receipt.get("dispatcher_execution_id") or "").strip()
+
+    # Full tuple match against durable owner auth record
+    auth_proj = str(auth_data.get("project_id") or "").strip()
+    if auth_proj and auth_proj not in ("0", "None") and c_proj != auth_proj:
+        raise PermissionError(f"Owner authorization project mismatch: '{c_proj}' != '{auth_proj}'")
 
     video_trace_state.record_owner_live_callback_origin_in_trace(
         clean_rcpt,
@@ -109328,8 +109402,13 @@ async def handle_owner_authorized_live_test_confirm(
         chat_id=real_chat_id,
         user_id=real_user_id,
         job_id=str(job_id),
+        project_id=c_proj,
         request_id=str(request_id),
         action="create_video_task",
+        dispatcher_execution_id=c_exec_id,
+        provider=c_prov,
+        model=c_model,
+        runtime_sha=c_runtime_sha,
         validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
         validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
         validated_ownership=True,

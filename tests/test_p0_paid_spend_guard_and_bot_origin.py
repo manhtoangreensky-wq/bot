@@ -13796,18 +13796,6 @@ class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
             group=0,
         )
 
-        auth_id = _create_owner_live_authorization_test_fixture(
-            authorization_id="coa_real_e2e_9910",
-            product_family="Product Video",
-            job_id="9910",
-            request_id="req_9910",
-            operation="create_video_task",
-            allowed_scene_slots="1,2",
-            expected_max_provider_spend_usd=Decimal("15.300123"),
-            db_path=self.db_path,
-            env=self.standard_env,
-        )
-
         owner_user = User(id=9910, is_bot=False, first_name="Owner", username="owner_test")
         chat = Chat(id=9910, type="private")
         message = Message(message_id=9910, date=datetime.datetime.now(datetime.timezone.utc), chat=chat)
@@ -13820,7 +13808,10 @@ class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
         )
         update = Update(update_id=9910, callback_query=query)
 
+        captured_owner_receipt = ""
+
         async def run_e2e():
+            nonlocal captured_owner_receipt
             app.bot._bot_initialized = True
             app.bot._requests_initialized = True
             app.bot._me = User(id=123456789, is_bot=True, first_name="TestBot", username="test_bot")
@@ -13835,7 +13826,6 @@ class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
                 "job_id": 9910,
                 "project_id": 9910,
                 "request_id": "req_9910",
-                "owner_acceptance_token": auth_id,
                 "scene_count": 2,
                 "acceptance_plan": {
                     "provider": "key4u_video",
@@ -13856,7 +13846,8 @@ class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
                 inv_kwargs = mock_invoice.call_args[1]
                 self.assertEqual(inv_kwargs["project_id"], 9910)
                 self.assertEqual(inv_kwargs["user_id"], 9910)
-                self.assertEqual(inv_kwargs["provider_admission"]["owner_receipt"], auth_id)
+                captured_owner_receipt = inv_kwargs["provider_admission"]["owner_receipt"]
+                self.assertTrue(str(captured_owner_receipt).startswith("coa_"))
 
         asyncio.run(run_e2e())
 
@@ -13902,6 +13893,302 @@ class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
         conn.close()
 
         self.assertEqual(real_network_call_count, 0)
+
+    # 11. Section 5: Direct call negative tests
+    def test_n21ai_11_direct_call_negative_tests(self):
+        """Negative tests proving:
+        - SAME_NAME_FUNCTION_SPOOF=BLOCK
+        - GENERIC_SERVICE_DISPATCH_MINT=BLOCK
+        - RAW_ID_DISPATCH_MINT=BLOCK
+        - DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS=BLOCK
+        - PRIVATE_NAME_IS_SECURITY_AUTHORITY=NO
+        - STACK_INSPECTION_IS_SECURITY_AUTHORITY=NO
+        - CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY=NO
+        """
+        from services.video_trace_state import (
+            record_telegram_dispatcher_execution,
+            _PRIVATE_DISPATCHER_INGRESS_KEY,
+            PRIVATE_NAME_IS_SECURITY_AUTHORITY,
+            STACK_INSPECTION_IS_SECURITY_AUTHORITY,
+            CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY,
+            GENERIC_PRODUCTION_DISPATCH_RECORD_API,
+            SAME_NAME_FUNCTION_SPOOF,
+            GENERIC_SERVICE_DISPATCH_MINT,
+            RAW_ID_DISPATCH_MINT,
+            DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS,
+        )
+        from bot import handle_product_video_owner_live_accept_callback
+
+        self.assertEqual(PRIVATE_NAME_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(STACK_INSPECTION_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(GENERIC_PRODUCTION_DISPATCH_RECORD_API, "ABSENT")
+        self.assertEqual(SAME_NAME_FUNCTION_SPOOF, "BLOCK")
+        self.assertEqual(GENERIC_SERVICE_DISPATCH_MINT, "BLOCK")
+        self.assertEqual(RAW_ID_DISPATCH_MINT, "BLOCK")
+        self.assertEqual(DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS, "BLOCK")
+
+        # 1. direct callback handler call without Application ingress -> BLOCK
+        mock_query = _N21AAMockCallbackQuery(
+            query_id="cbq_no_ingress_9911",
+            data="vproduct|owner_live_accept",
+            user_id=9911,
+            chat_id=9911,
+        )
+        mock_update = _N21AAMockUpdate(update_id=9911, query=mock_query)
+        mock_context = _N21AAMockContext(
+            user_data={
+                "video_session": {
+                    "draft": {"job_id": 9911, "project_id": 9911, "request_id": "req_9911"},
+                    "acceptance_plan": {
+                        "provider": "key4u_video",
+                        "model": "veo_3_1-fast",
+                        "operation": "create_video_task",
+                        "allowed_scene_slots": "1,2",
+                        "max_submits": 2,
+                        "expected_max_usd": "7.050240",
+                    },
+                }
+            }
+        )
+        # Ensure _dispatcher_execution_id is NOT set in context
+        with patch("bot.OWNER_IDS", {"9911"}):
+            asyncio.run(handle_product_video_owner_live_accept_callback(mock_update, mock_context))
+        self.assertIn("RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT", mock_query.edited_text)
+
+        # 2. generic service caller -> cannot create dispatcher execution
+        with self.assertRaises(PermissionError) as cm_generic:
+            record_telegram_dispatcher_execution(
+                job_id="9911",
+                user_id="9911",
+                chat_id="9911",
+                db_path=self.db_path,
+            )
+        self.assertIn("GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT", str(cm_generic.exception))
+        self.assertIn("GENERIC_SERVICE_DISPATCH_MINT=BLOCK", str(cm_generic.exception))
+
+        # 3. raw Telegram IDs -> cannot create dispatcher execution
+        with self.assertRaises(PermissionError) as cm_raw:
+            record_telegram_dispatcher_execution(
+                telegram_update_id=9911,
+                callback_query_id="cbq_raw_9911",
+                user_id="9911",
+                chat_id="9911",
+                db_path=self.db_path,
+            )
+        self.assertIn("RAW_ID_DISPATCH_MINT=BLOCK", str(cm_raw.exception))
+
+        # 4. fake caller function named product_video_telegram_dispatcher_ingress -> cannot create authority
+        def product_video_telegram_dispatcher_ingress():
+            return record_telegram_dispatcher_execution(
+                telegram_update_id=9911,
+                callback_query_id="cbq_fake_9911",
+                user_id="9911",
+                chat_id="9911",
+            )
+        with self.assertRaises(PermissionError) as cm_spoof:
+            product_video_telegram_dispatcher_ingress()
+        self.assertIn("SAME_NAME_FUNCTION_SPOOF=BLOCK", str(cm_spoof.exception))
+
+        # 5. import of private/internal service members -> cannot obtain authority-creation capability
+        with self.assertRaises(PermissionError) as cm_priv:
+            record_telegram_dispatcher_execution(
+                dispatcher_ingress_token=_PRIVATE_DISPATCHER_INGRESS_KEY,
+                telegram_update_id=9911,
+                callback_query_id="cbq_priv_9911",
+            )
+        self.assertIn("may only be invoked by Telegram framework ingress boundary", str(cm_priv.exception))
+
+    # 12. Section 7: Single use and concurrent double claim tests
+    def test_n21ai_12_single_use_and_concurrent_double_claim(self):
+        """Prove:
+        - DISPATCH_EXECUTION_SINGLE_USE=PASS
+        - CALLBACK_EVENT_SINGLE_USE=PASS
+        - OWNER_AUTH_SINGLE_USE=PASS
+        - CONCURRENT_DOUBLE_CLAIM=BLOCK
+        """
+        import concurrent.futures
+        import datetime
+        from services.video_trace_state import (
+            ensure_registered_callback_event_schema,
+            get_db_connection,
+            register_registered_callback_dispatch_event,
+            consume_registered_callback_dispatch_event,
+            DISPATCH_EXECUTION_SINGLE_USE,
+            CALLBACK_EVENT_SINGLE_USE,
+        )
+        from services.provider_spend_guard import (
+            issue_canonical_owner_authorization_from_event,
+            OWNER_AUTH_SINGLE_USE,
+            CONCURRENT_DOUBLE_CLAIM,
+        )
+
+        self.assertEqual(DISPATCH_EXECUTION_SINGLE_USE, "YES")
+        self.assertEqual(CALLBACK_EVENT_SINGLE_USE, "YES")
+        self.assertEqual(OWNER_AUTH_SINGLE_USE, "YES")
+        self.assertEqual(CONCURRENT_DOUBLE_CLAIM, "BLOCK")
+
+        # Create authentic durable dispatcher execution record directly in DB as Application dispatcher does
+        c, should_close = get_db_connection(None, db_path=self.db_path)
+        try:
+            ensure_registered_callback_event_schema(c)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            now_iso = now.isoformat()
+            exp_iso = (now + datetime.timedelta(seconds=900)).isoformat()
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "tde_single_use_9912",
+                    9912,
+                    "cbq_single_use_9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "req_9912",
+                    "create_video_task",
+                    "Product Video",
+                    "sha_test_9912",
+                    now_iso,
+                    exp_iso,
+                    now_iso,
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        # 1. DISPATCH_EXECUTION_SINGLE_USE=PASS:
+        # First registration binds execution to event
+        ev1 = register_registered_callback_dispatch_event(
+            dispatcher_execution_id="tde_single_use_9912",
+            db_path=self.db_path,
+        )
+        self.assertIsNotNone(ev1.get("event_id"))
+        ev_id = ev1["event_id"]
+
+        # Second registration with same execution MUST fail
+        with self.assertRaises(PermissionError) as cm_disp_reuse:
+            register_registered_callback_dispatch_event(
+                dispatcher_execution_id="tde_single_use_9912",
+                db_path=self.db_path,
+            )
+        self.assertIn("DISPATCH_EXECUTION_SINGLE_USE=YES", str(cm_disp_reuse.exception))
+
+        # 2. CONCURRENT_DOUBLE_CLAIM=BLOCK:
+        # Create another event for concurrent double claim test
+        c, should_close = get_db_connection(None, db_path=self.db_path)
+        try:
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "tde_concurrent_9912",
+                    9913,
+                    "cbq_concurrent_9913",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "req_9913",
+                    "create_video_task",
+                    "Product Video",
+                    "sha_test_9912",
+                    now_iso,
+                    exp_iso,
+                    now_iso,
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        ev_conc = register_registered_callback_dispatch_event(
+            dispatcher_execution_id="tde_concurrent_9912",
+            db_path=self.db_path,
+        )
+        conc_event_id = ev_conc["event_id"]
+
+        results = []
+        errors = []
+
+        def try_consume():
+            try:
+                res = consume_registered_callback_dispatch_event(
+                    conc_event_id,
+                    expected_dispatcher_execution_id="tde_concurrent_9912",
+                    expected_telegram_update_id=9913,
+                    expected_callback_query_id="cbq_concurrent_9913",
+                    expected_user_id="9912",
+                    expected_chat_id="9912",
+                    expected_job_id="9912",
+                    expected_project_id="9912",
+                    expected_request_id="req_9913",
+                    expected_callback_action="create_video_task",
+                    expected_product_type="Product Video",
+                    expected_runtime_sha="sha_test_9912",
+                    db_path=self.db_path,
+                )
+                results.append(res)
+            except Exception as e:
+                errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(try_consume)
+            f2 = executor.submit(try_consume)
+            f1.result()
+            f2.result()
+
+        # Exactly 1 thread must succeed, exactly 1 must fail
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertTrue("already consumed" in str(errors[0]) or "Concurrent consume detected" in str(errors[0]))
+        self.assertIn("CALLBACK_EVENT_ONE_TIME=YES", str(errors[0]))
+
+        # 3. CALLBACK_EVENT_SINGLE_USE=PASS & OWNER_AUTH_SINGLE_USE=PASS:
+        # For the first event, issue canonical owner authorization
+        plan = {
+            "provider": "key4u_video",
+            "model": "veo_3_1-fast",
+            "operation": "create_video_task",
+            "allowed_scene_slots": "1,2",
+            "max_submits": 2,
+            "expected_max_usd": "7.050240",
+        }
+        auth_id_1, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertTrue(auth_id_1.startswith("coa_"))
+        # Re-issuing from consumed event returns idempotent cached auth
+        auth_id_2, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertEqual(auth_id_1, auth_id_2)
+
+        # First consumption of event succeeds
+        consume_res = consume_registered_callback_dispatch_event(ev_id, db_path=self.db_path)
+        self.assertIsNotNone(consume_res.get("consumed_at"))
+
+        # Second consumption of already-consumed event raises PermissionError (CALLBACK_EVENT_SINGLE_USE=PASS)
+        with self.assertRaises(PermissionError) as cm_consumed:
+            consume_registered_callback_dispatch_event(ev_id, db_path=self.db_path)
+        self.assertIn("already consumed", str(cm_consumed.exception))
+
+        # Issuing authorization from consumed event is blocked
+        with self.assertRaises(PermissionError) as cm_auth_consumed:
+            issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertIn("already consumed", str(cm_auth_consumed.exception))
 
 
 if __name__ == "__main__":

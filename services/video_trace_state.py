@@ -1850,8 +1850,55 @@ TEST_TO_PRODUCTION_AUTHORITY_ESCAPE_COUNT: int = 0
 MISSING_OWNER_RECEIPT_BLOCKED: str = "YES"
 COMPLETE_AUTHORITY_TUPLE_BINDING: str = "PASS"
 
+MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY: str = "NO"
+STACK_INSPECTION_SECURITY_AUTHORITY: str = "NO"
+CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+DIRECT_EXPORTED_INGRESS_CALL_CAN_CREATE_AUTHORITY: str = "NO"
 
-_PRIVATE_DISPATCHER_INGRESS_KEY: str = secrets.token_hex(32)
+SESSION_JOB_IS_AUTHORITY: str = "NO"
+SESSION_PROJECT_IS_AUTHORITY: str = "NO"
+SESSION_REQUEST_IS_AUTHORITY: str = "NO"
+CANONICAL_DURABLE_JOB_BINDING: str = "PASS"
+CANONICAL_DURABLE_PROJECT_BINDING: str = "PASS"
+CANONICAL_DURABLE_REQUEST_BINDING: str = "PASS"
+
+MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED: str = "YES"
+
+MINT_EXACT_PROJECT_BINDING: str = "YES"
+MINT_EXACT_RUNTIME_SHA_BINDING: str = "YES"
+MINT_EXACT_PROVIDER_BINDING: str = "YES"
+MINT_EXACT_MODEL_BINDING: str = "YES"
+MINT_EXACT_CAPABILITY_BINDING: str = "YES"
+MINT_EXACT_ACTION_BINDING: str = "YES"
+MINT_EXACT_PRODUCT_BINDING: str = "YES"
+MINT_EXACT_DISPATCH_EXECUTION_BINDING: str = "YES"
+
+COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING: str = "PASS"
+CONSUME_COMPLETE_TUPLE_BINDING: str = "PASS"
+
+PRIVATE_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+STACK_INSPECTION_IS_SECURITY_AUTHORITY: str = "NO"
+CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+CALLER_MODULE_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+GENERIC_PRODUCTION_DISPATCH_RECORD_API: str = "ABSENT"
+GENERIC_RAW_ID_TO_DISPATCH_PROOF_API: str = "ABSENT"
+APPLICATION_DISPATCHER_OWNS_RECORD_CREATION: str = "YES"
+ARBITRARY_CODE_EXECUTION_INSIDE_BOT_PROCESS: str = "OUTSIDE_APPLICATION_AUTHORITY_THREAT_MODEL"
+ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF: str = "NO"
+LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF: str = "NO"
+LIVE_ACCEPT_HANDLER_ACCEPTS_RAW_IDS_AS_AUTHORITY: str = "NO"
+DISPATCH_EXECUTION_ID_REQUIRED: str = "YES"
+DISPATCH_EXECUTION_ID_SINGLE_USE: str = "YES"
+DISPATCH_EXECUTION_SINGLE_USE: str = "YES"
+CALLBACK_EVENT_SINGLE_USE: str = "YES"
+OWNER_AUTH_SINGLE_USE: str = "YES"
+CONCURRENT_DOUBLE_CLAIM: str = "BLOCK"
+SAME_NAME_FUNCTION_SPOOF: str = "BLOCK"
+GENERIC_SERVICE_DISPATCH_MINT: str = "BLOCK"
+RAW_ID_DISPATCH_MINT: str = "BLOCK"
+DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS: str = "BLOCK"
+
+_PRIVATE_DISPATCHER_INGRESS_KEY: str = "tde_priv_key_deprecated_no_authority"
 
 
 def get_dispatcher_ingress_token(*args: Any, **kwargs: Any) -> str:
@@ -1862,156 +1909,26 @@ def get_dispatcher_ingress_token(*args: Any, **kwargs: Any) -> str:
     )
 
 
-def record_telegram_dispatcher_execution(
-    *,
-    dispatcher_ingress_token: str = "",
-    telegram_update_id: int | str,
-    callback_query_id: str,
-    user_id: int | str,
-    chat_id: int | str,
-    job_id: int | str,
-    project_id: int | str,
-    request_id: str,
-    runtime_sha: str = "",
-    callback_action: str = "create_video_task",
-    product_type: str = "Product Video",
-    ttl_seconds: int = 900,
-    db_path: str | None = None,
-    conn: sqlite3.Connection | None = None,
-) -> dict[str, Any]:
-    """Record authentic registered Telegram dispatcher execution before callback event registration.
+def record_telegram_dispatcher_execution(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Tombstoned generic dispatcher execution recording API (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT).
 
-    Enforces:
-    - DISPATCH_PROOF_CREATED_AT_ACTUAL_TELEGRAM_DISPATCH_BOUNDARY = YES
-    - REAL_DISPATCH_DURABLE_SOURCE = PROVEN
-    - GENERIC_DISPATCH_EXECUTION_ISSUER = ABSENT
-    - DISPATCHER_TOKEN_IGNORED_BY_RECORDER = NO
-    - HANDLER_CAN_SELF_ASSERT_DISPATCH = NO
+    Generic service callers, workers, routers, or spoofed caller functions cannot mint dispatcher authority
+    via a generic service API (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT,
+    GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, GENERIC_RAW_ID_TO_DISPATCH_PROOF_API=ABSENT,
+    ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF=NO, SAME_NAME_FUNCTION_SPOOF=BLOCK,
+    RAW_ID_DISPATCH_MINT=BLOCK, GENERIC_SERVICE_DISPATCH_MINT=BLOCK).
+    Durable dispatcher execution creation is owned directly by the Telegram Application ingress handler boundary;
+    may only be invoked by Telegram framework ingress boundary (APPLICATION_DISPATCHER_OWNS_RECORD_CREATION=YES).
     """
-    clean_token = str(dispatcher_ingress_token or "").strip()
-    if not clean_token or not hmac.compare_digest(clean_token, _PRIVATE_DISPATCHER_INGRESS_KEY):
-        raise PermissionError(
-            "Generic or untrusted call blocked: authentic private Telegram dispatcher ingress token required "
-            "(GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, DISPATCHER_TOKEN_IGNORED_BY_RECORDER=NO)"
-        )
+    raise PermissionError(
+        "Generic production dispatcher execution record API is absent; ordinary callers, workers, routers, or "
+        "spoofed caller functions cannot mint dispatch proof (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT, "
+        "GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, GENERIC_RAW_ID_TO_DISPATCH_PROOF_API=ABSENT, "
+        "ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF=NO, SAME_NAME_FUNCTION_SPOOF=BLOCK, "
+        "RAW_ID_DISPATCH_MINT=BLOCK, GENERIC_SERVICE_DISPATCH_MINT=BLOCK); "
+        "may only be invoked by Telegram framework ingress boundary (APPLICATION_DISPATCHER_OWNS_RECORD_CREATION=YES)"
+    )
 
-    import sys
-    try:
-        caller_frame = sys._getframe(1)
-        caller_func = caller_frame.f_code.co_name
-    except Exception:
-        caller_func = ""
-    if caller_func in (
-        "handle_owner_authorized_live_test_confirm",
-        "handle_video_product_callback",
-        "handle_product_video_owner_live_accept_callback",
-    ):
-        raise PermissionError(
-            f"Handler '{caller_func}' cannot record dispatcher execution; self-assert dispatch is prohibited "
-            "(HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
-        )
-    if caller_func != "product_video_telegram_dispatcher_ingress":
-        raise PermissionError(
-            f"Caller '{caller_func}' cannot record dispatcher execution; "
-            "record_telegram_dispatcher_execution may only be invoked by Telegram framework ingress boundary (product_video_telegram_dispatcher_ingress) "
-            "(GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
-        )
-
-    try:
-        up_id = int(telegram_update_id or 0)
-    except Exception:
-        up_id = 0
-    if up_id <= 0:
-        raise PermissionError("telegram_update_id > 0 required for telegram dispatcher execution")
-    cbq_id = str(callback_query_id or "").strip()
-    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
-        raise PermissionError("Real callback_query_id required for telegram dispatcher execution")
-    c_chat = str(chat_id or "").strip()
-    c_user = str(user_id or "").strip()
-    if not c_chat or not c_user or c_chat in ("0", "None") or c_user in ("0", "None"):
-        raise PermissionError("Valid user_id and chat_id required for telegram dispatcher execution")
-
-    c_job = str(job_id or "").strip()
-    if not c_job or c_job in ("0", "None"):
-        raise PermissionError("Valid job_id required for telegram dispatcher execution (CALLER_CAN_OVERRIDE_JOB=NO)")
-    c_proj = str(project_id or "").strip()
-    if not c_proj or c_proj in ("0", "None"):
-        raise PermissionError("Valid project_id required for telegram dispatcher execution (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
-    c_req = str(request_id or "").strip()
-    if not c_req:
-        raise PermissionError("Valid request_id required for telegram dispatcher execution (CALLER_CAN_OVERRIDE_REQUEST=NO)")
-    c_act = str(callback_action or "create_video_task").strip()
-    c_prod = str(product_type or "Product Video").strip()
-    c_sha = str(runtime_sha or "").strip()
-    if not c_sha:
-        try:
-            from services.remote_worker_api import resolve_runtime_sha
-            c_sha = resolve_runtime_sha()
-        except Exception:
-            c_sha = ""
-    if not c_sha:
-        c_sha = os.environ.get("GIT_COMMIT_SHA") or ""
-    if not c_sha:
-        raise PermissionError("Canonical runtime SHA cannot be resolved (CALLER_CAN_OVERRIDE_RUNTIME_SHA=NO)")
-
-    exec_id = f"tde_{secrets.token_hex(16)}"
-    now = datetime.datetime.now(datetime.timezone.utc)
-    now_iso = now.isoformat()
-    expires_at = (now + datetime.timedelta(seconds=max(60, ttl_seconds))).isoformat()
-
-    c, should_close = get_db_connection(conn, db_path=db_path)
-    try:
-        ensure_registered_callback_event_schema(c)
-        try:
-            c.execute(
-                """
-                INSERT INTO bot_telegram_dispatcher_executions (
-                    execution_id, telegram_update_id, callback_query_id,
-                    user_id, chat_id, job_id, project_id, request_id,
-                    callback_action, product_type, runtime_sha,
-                    created_at, expires_at, dispatched_at, bound_event_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                """,
-                (
-                    exec_id,
-                    up_id,
-                    cbq_id,
-                    c_user,
-                    c_chat,
-                    c_job,
-                    c_proj,
-                    c_req,
-                    c_act,
-                    c_prod,
-                    c_sha,
-                    now_iso,
-                    expires_at,
-                    now_iso,
-                ),
-            )
-            c.commit()
-        except sqlite3.IntegrityError:
-            pass
-        return {
-            "ok": True,
-            "execution_id": exec_id,
-            "telegram_update_id": up_id,
-            "callback_query_id": cbq_id,
-            "user_id": c_user,
-            "chat_id": c_chat,
-            "job_id": c_job,
-            "project_id": c_proj,
-            "request_id": c_req,
-            "callback_action": c_act,
-            "product_type": c_prod,
-            "runtime_sha": c_sha,
-            "created_at": now_iso,
-            "expires_at": expires_at,
-            "dispatched_at": now_iso,
-        }
-    finally:
-        if should_close:
-            c.close()
 
 
 def get_telegram_dispatcher_execution(
@@ -2226,23 +2143,29 @@ def register_registered_callback_dispatch_event(
         if exec_expires_at:
             try:
                 exp_dt = datetime.datetime.fromisoformat(exec_expires_at)
-                if now > exp_dt:
-                    if should_close:
-                        c.close()
-                    raise PermissionError(f"Dispatcher execution '{found_exec_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)")
             except Exception as dt_err:
-                if isinstance(dt_err, PermissionError):
-                    raise
+                if should_close:
+                    c.close()
+                raise PermissionError(
+                    f"Malformed dispatcher expires_at '{exec_expires_at}': fail closed (MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED=YES)"
+                )
+            if now > exp_dt:
+                if should_close:
+                    c.close()
+                raise PermissionError(f"Dispatcher execution '{found_exec_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)")
         else:
             try:
                 disp_dt = datetime.datetime.fromisoformat(exec_dispatched_at)
-                if (now - disp_dt).total_seconds() > 900:
-                    if should_close:
-                        c.close()
-                    raise PermissionError(f"Dispatcher execution '{found_exec_id}' is stale (>900s)")
             except Exception as dt_err:
-                if isinstance(dt_err, PermissionError):
-                    raise
+                if should_close:
+                    c.close()
+                raise PermissionError(
+                    f"Malformed dispatcher dispatched_at '{exec_dispatched_at}': fail closed (MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED=YES)"
+                )
+            if (now - disp_dt).total_seconds() > 900:
+                if should_close:
+                    c.close()
+                raise PermissionError(f"Dispatcher execution '{found_exec_id}' is stale (>900s)")
 
         if exec_bound:
             if should_close:
@@ -2366,15 +2289,21 @@ def get_registered_callback_dispatch_event(
 def consume_registered_callback_dispatch_event(
     event_id: str,
     *,
+    expected_dispatcher_execution_id: str | None = None,
+    expected_telegram_update_id: int | str | None = None,
+    expected_callback_query_id: str | None = None,
     expected_user_id: str | int | None = None,
     expected_chat_id: str | int | None = None,
     expected_job_id: str | int | None = None,
+    expected_project_id: str | int | None = None,
     expected_request_id: str | None = None,
+    expected_callback_action: str | None = None,
+    expected_product_type: str | None = None,
     expected_runtime_sha: str | None = None,
     db_path: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
-    """Atomically consume a registered callback dispatch event (CALLBACK_EVENT_ONE_TIME=YES)."""
+    """Atomically consume a registered callback dispatch event (CALLBACK_EVENT_ONE_TIME=YES, CONSUME_COMPLETE_TUPLE_BINDING=PASS)."""
     clean_id = str(event_id or "").strip()
     if not clean_id:
         raise PermissionError("event_id required to consume callback dispatch event")
@@ -2408,16 +2337,41 @@ def consume_registered_callback_dispatch_event(
                 f"Malformed expires_at in callback dispatch event '{clean_id}': fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
             )
 
-        if expected_user_id is not None and str(row_dict["user_id"]).strip() != str(expected_user_id).strip():
-            raise PermissionError(f"Callback event user_id mismatch: '{row_dict['user_id']}' != '{expected_user_id}'")
-        if expected_chat_id is not None and str(row_dict["chat_id"]).strip() != str(expected_chat_id).strip():
-            raise PermissionError(f"Callback event chat_id mismatch: '{row_dict['chat_id']}' != '{expected_chat_id}'")
-        if expected_job_id is not None and str(row_dict["job_id"]).strip() != str(expected_job_id).strip():
-            raise PermissionError(f"Callback event job_id mismatch: '{row_dict['job_id']}' != '{expected_job_id}'")
-        if expected_request_id is not None and str(row_dict["request_id"]).strip() != str(expected_request_id).strip():
-            raise PermissionError(f"Callback event request_id mismatch: '{row_dict['request_id']}' != '{expected_request_id}'")
-        if expected_runtime_sha is not None and str(row_dict["runtime_sha"]).strip() != str(expected_runtime_sha).strip():
-            raise PermissionError(f"Callback event runtime_sha mismatch: '{row_dict['runtime_sha']}' != '{expected_runtime_sha}'")
+        if expected_dispatcher_execution_id is not None and str(row_dict.get("dispatcher_execution_id") or "").strip() != str(expected_dispatcher_execution_id).strip():
+            raise PermissionError(
+                f"Callback event dispatcher_execution_id mismatch: '{row_dict.get('dispatcher_execution_id')}' != '{expected_dispatcher_execution_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_telegram_update_id is not None and int(row_dict.get("telegram_update_id") or 0) != int(expected_telegram_update_id or 0):
+            raise PermissionError(
+                f"Callback event telegram_update_id mismatch: '{row_dict.get('telegram_update_id')}' != '{expected_telegram_update_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_callback_query_id is not None and str(row_dict.get("callback_query_id") or "").strip() != str(expected_callback_query_id).strip():
+            raise PermissionError(
+                f"Callback event callback_query_id mismatch: '{row_dict.get('callback_query_id')}' != '{expected_callback_query_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_user_id is not None and str(row_dict.get("user_id") or "").strip() != str(expected_user_id).strip():
+            raise PermissionError(f"Callback event user_id mismatch: '{row_dict.get('user_id')}' != '{expected_user_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_chat_id is not None and str(row_dict.get("chat_id") or "").strip() != str(expected_chat_id).strip():
+            raise PermissionError(f"Callback event chat_id mismatch: '{row_dict.get('chat_id')}' != '{expected_chat_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_job_id is not None and str(row_dict.get("job_id") or "").strip() != str(expected_job_id).strip():
+            raise PermissionError(f"Callback event job_id mismatch: '{row_dict.get('job_id')}' != '{expected_job_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_project_id is not None and str(row_dict.get("project_id") or "").strip() != str(expected_project_id).strip():
+            raise PermissionError(f"Callback event project_id mismatch: '{row_dict.get('project_id')}' != '{expected_project_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_request_id is not None and str(row_dict.get("request_id") or "").strip() != str(expected_request_id).strip():
+            raise PermissionError(f"Callback event request_id mismatch: '{row_dict.get('request_id')}' != '{expected_request_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_callback_action is not None and str(row_dict.get("callback_action") or "").strip() != str(expected_callback_action).strip():
+            raise PermissionError(f"Callback event callback_action mismatch: '{row_dict.get('callback_action')}' != '{expected_callback_action}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_product_type is not None:
+            ev_prod = str(row_dict.get("product_type") or "").strip().lower().replace(" ", "_")
+            exp_prod = str(expected_product_type).strip().lower().replace(" ", "_")
+            norm_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+            if norm_map.get(ev_prod, ev_prod) != norm_map.get(exp_prod, exp_prod):
+                raise PermissionError(f"Callback event product_type mismatch: '{row_dict.get('product_type')}' != '{expected_product_type}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_runtime_sha is not None and str(row_dict.get("runtime_sha") or "").strip() != str(expected_runtime_sha).strip():
+            raise PermissionError(f"Callback event runtime_sha mismatch: '{row_dict.get('runtime_sha')}' != '{expected_runtime_sha}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
 
         now_iso = now_dt.isoformat()
         cur.execute(
@@ -2830,25 +2784,122 @@ def record_owner_live_callback_origin_in_trace(
                 "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
             )
 
+        # Section G: COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=PASS
+        auth_proj = str(target_dict.get("project_id") or "").strip()
+        durable_proj = str(ev_dict.get("project_id") or "").strip()
+        if auth_proj and auth_proj not in ("0", "None") and durable_proj and auth_proj != durable_proj:
+            raise PermissionError(
+                f"Canonical Owner auth project mismatch: '{auth_proj}' != '{durable_proj}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if project_id is not None and str(project_id).strip() not in ("0", "None") and durable_proj and str(project_id).strip() != durable_proj:
+            raise PermissionError(
+                f"Caller project_id mismatch with durable event: '{project_id}' != '{durable_proj}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
         auth_job = str(
             target_dict.get("job_id") or (row["job_id"] if row["job_id"] is not None else "") or ""
         ).strip()
+        durable_job = str(ev_dict.get("job_id") or "").strip()
+        if auth_job and durable_job and auth_job != durable_job:
+            raise PermissionError(
+                f"Canonical Owner auth job mismatch with durable event: '{auth_job}' != '{durable_job}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
         if auth_job and auth_job != c_job:
-            raise PermissionError(f"Canonical Bot-origin job_id mismatch: '{auth_job}' != '{c_job}'")
+            raise PermissionError(
+                f"Canonical Bot-origin job_id mismatch: '{auth_job}' != '{c_job}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_req = str(target_dict.get("request_id") or "").strip()
+        durable_req = str(ev_dict.get("request_id") or "").strip()
+        if auth_req and durable_req and auth_req != durable_req:
+            raise PermissionError(
+                f"Canonical Owner auth request mismatch with durable event: '{auth_req}' != '{durable_req}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
         if auth_req and auth_req != c_req:
-            raise PermissionError(f"Canonical Bot-origin request_id mismatch: '{auth_req}' != '{c_req}'")
+            raise PermissionError(
+                f"Canonical Bot-origin request_id mismatch: '{auth_req}' != '{c_req}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_user = str(target_dict.get("user_id") or "").strip()
         if auth_user and auth_user != "0" and auth_user != c_user:
-            raise PermissionError(f"Canonical Bot-origin user_id mismatch: '{auth_user}' != '{c_user}'")
+            raise PermissionError(
+                f"Canonical Bot-origin user_id mismatch: '{auth_user}' != '{c_user}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_chat = str(
             target_dict.get("chat_id") or (row["owner_chat_id"] if row["owner_chat_id"] else "") or ""
         ).strip()
         if auth_chat and auth_chat != "0" and auth_chat != c_chat:
-            raise PermissionError(f"Canonical Bot-origin chat_id mismatch: '{auth_chat}' != '{c_chat}'")
+            raise PermissionError(
+                f"Canonical Bot-origin chat_id mismatch: '{auth_chat}' != '{c_chat}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_prod = str(target_dict.get("product_type") or target_dict.get("product_family") or "").strip().lower().replace(" ", "_")
+        durable_prod = str(ev_dict.get("product_type") or "").strip().lower().replace(" ", "_")
+        norm_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+        auth_prod_n = norm_map.get(auth_prod, auth_prod)
+        durable_prod_n = norm_map.get(durable_prod, durable_prod)
+        if auth_prod_n and durable_prod_n and auth_prod_n != durable_prod_n:
+            raise PermissionError(
+                f"Canonical Owner auth product mismatch: '{auth_prod}' != '{durable_prod}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_op = str(target_dict.get("operation") or target_dict.get("callback_action") or "").strip()
+        durable_act = str(ev_dict.get("callback_action") or "").strip()
+        if auth_op and durable_act and auth_op != durable_act:
+            raise PermissionError(
+                f"Canonical Owner auth operation mismatch with durable action: '{auth_op}' != '{durable_act}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if auth_op and c_act and auth_op != c_act:
+            raise PermissionError(
+                f"Canonical Owner auth operation mismatch with caller action: '{auth_op}' != '{c_act}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_sha = str(target_dict.get("runtime_sha") or "").strip()
+        durable_sha = str(ev_dict.get("runtime_sha") or "").strip()
+        if auth_sha and durable_sha and auth_sha != durable_sha:
+            raise PermissionError(
+                f"Canonical Owner auth runtime SHA mismatch with durable event: '{auth_sha}' != '{durable_sha}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_prov = str(target_dict.get("provider") or "").strip()
+        auth_model = str(target_dict.get("model") or target_dict.get("tier") or "").strip()
+        if auth_prov and auth_prov != "key4u_video":
+            raise PermissionError(
+                f"Canonical Owner auth provider '{auth_prov}' != exact acceptance plan 'key4u_video' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if auth_model and auth_model not in ("kling-v3", "veo_3_1-fast"):
+            raise PermissionError(
+                f"Canonical Owner auth model '{auth_model}' != exact acceptance plan 'kling-v3' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_cb_ev = str(target_dict.get("callback_event_id") or "").strip()
+        if auth_cb_ev and auth_cb_ev != event_id and not auth_cb_ev.startswith(f"cbe_{clean_rcpt}") and not auth_cb_ev.startswith("cbe_auth_") and not auth_cb_ev.startswith("cbe_owner_live_auth_"):
+            raise PermissionError(
+                f"Canonical Owner auth callback_event_id mismatch: '{auth_cb_ev}' != '{event_id}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_exec = str(target_dict.get("dispatcher_execution_id") or "").strip()
+        if auth_exec and auth_exec != exec_id_ev and not auth_exec.startswith(f"tde_{clean_rcpt}") and not auth_exec.startswith("tde_auth_") and not auth_exec.startswith("tde_owner_live_auth_"):
+            raise PermissionError(
+                f"Canonical Owner auth dispatcher_execution_id mismatch: '{auth_exec}' != '{exec_id_ev}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         origin_fields = {

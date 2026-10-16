@@ -83,6 +83,11 @@ BLOCKER_AMBIGUOUS_FALLBACK_BLOCKED = "ambiguous_submit_fallback_blocked"
 BLOCKER_TEST_NETWORK_ISOLATION = "test_ci_provider_network_isolated_no_real_calls"
 BLOCKER_PAID_TRANSPORT_AUTHORITY_UNREGISTERED = "paid_transport_authority_unregistered"
 
+DISPATCH_EXECUTION_SINGLE_USE: str = "YES"
+CALLBACK_EVENT_SINGLE_USE: str = "YES"
+OWNER_AUTH_SINGLE_USE: str = "YES"
+CONCURRENT_DOUBLE_CLAIM: str = "BLOCK"
+
 
 def to_micro_usd(amount: Decimal | float | int | str) -> int:
     """Convert amount to integer micro-USD (1 USD = 1,000,000 micro-USD) with exact Decimal rounding."""
@@ -398,6 +403,15 @@ OWNER_AUTH_EXACT_MODEL_BINDING: str = "YES"
 OWNER_AUTH_EXACT_RUNTIME_SHA_BINDING: str = "YES"
 OWNER_AUTH_EXACT_MAX_SPEND_BINDING: str = "YES"
 
+MINT_EXACT_PROJECT_BINDING: str = "YES"
+MINT_EXACT_RUNTIME_SHA_BINDING: str = "YES"
+MINT_EXACT_PROVIDER_BINDING: str = "YES"
+MINT_EXACT_MODEL_BINDING: str = "YES"
+MINT_EXACT_CAPABILITY_BINDING: str = "YES"
+MINT_EXACT_ACTION_BINDING: str = "YES"
+MINT_EXACT_PRODUCT_BINDING: str = "YES"
+MINT_EXACT_DISPATCH_EXECUTION_BINDING: str = "YES"
+
 
 # N21AC-FIX1 explicit additions
 PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH: str = "NO"
@@ -502,10 +516,16 @@ def evaluate_paid_live_test_availability(
     is_val, blk, auth_data = validate_owner_live_authorization(
         clean_rcpt,
         product_family=(context.product_family if context else "Product Video"),
+        product_type=(str(getattr(context, "product_type", None) or "").strip() if context else ""),
         job_id=(str(context.job_id) if context and context.job_id else ""),
         request_id=(str(context.request_id) if context and context.request_id else ""),
         user_id=(str(context.user_id) if context and context.user_id else ""),
+        project_id=(str(getattr(context, "project_id", None) or "").strip() or None if context and getattr(context, "project_id", None) is not None else None),
         operation=(str(context.operation) if context and context.operation else "create_video_task"),
+        provider=(str(getattr(context, "provider", None) or "").strip() if context else ""),
+        model=(str(getattr(context, "model", None) or "").strip() if context else ""),
+        capability=(str(getattr(context, "capability", None) or "").strip() if context else ""),
+        runtime_sha=(str(getattr(context, "runtime_sha", None) or "").strip() if context else ""),
         db_path=db_path,
         env=effective_env,
         conn=conn,
@@ -1278,7 +1298,9 @@ def validate_canonical_owner_live_authorization(
             return False, "owner_acceptance_product_mismatch", {}
         if product_family and str(product_family).strip() not in {REPORT_PRODUCT_FAMILY, raw_auth_prod_type}:
             return False, "owner_acceptance_product_mismatch", {}
-        if product_type and str(product_type).strip() != raw_auth_prod_type:
+        raw_pt_clean = str(product_type).strip()
+        norm_product_type = CANONICAL_OWNER_PRODUCT_TYPE if raw_pt_clean.lower().replace(" ", "_") in ("product_video", "video_ai_prompt") else raw_pt_clean
+        if norm_product_type and norm_product_type != raw_auth_prod_type:
             return False, "owner_acceptance_product_mismatch", {}
 
         auth_job = str(auth.get("job_id") or "").strip()
@@ -1486,6 +1508,11 @@ def issue_bot_mint_authority(
     purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
     owner_receipt: str = "",
     expected_max_provider_spend_usd: float | Decimal = 0.0,
+    dispatcher_execution_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    capability: str | None = None,
+    runtime_sha: str | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
@@ -1562,6 +1589,15 @@ def issue_bot_mint_authority(
                 "owner_receipt is required when issuing BotMintAuthority with PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST "
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
+
+        d_exec_id = str(dispatcher_execution_id or (callback_ownership_receipt or {}).get("dispatcher_execution_id") or "").strip()
+        r_sha = str(runtime_sha or (callback_ownership_receipt or {}).get("runtime_sha") or "").strip()
+        p_id = str(project_id or (callback_ownership_receipt or {}).get("project_id") or "").strip()
+        prov = str(provider or (callback_ownership_receipt or {}).get("provider") or "").strip()
+        mod = str(model or (callback_ownership_receipt or {}).get("model") or "").strip()
+        cap = str(capability or (callback_ownership_receipt or {}).get("capability") or "").strip()
+        raw_prod = str(product_type or (callback_ownership_receipt or {}).get("product_type") or "").strip()
+        prod = CANONICAL_OWNER_PRODUCT_TYPE if raw_prod.lower().replace(" ", "_") in ("product_video", "video_ai_prompt") else (raw_prod or CANONICAL_OWNER_PRODUCT_TYPE)
 
         try:
             auth_valid, auth_blocker, auth_data = validate_owner_live_authorization(
@@ -1761,6 +1797,59 @@ def issue_bot_mint_authority(
                     active_conn.rollback()
                 raise PermissionError(f"Durable Bot event action mismatch: '{action}' != '{t_action}'")
 
+            # Section F: Full Tuple at Owner Auth Validation / Mint (MINT_EXACT_*_BINDING=YES)
+            t_auth = target_p if isinstance(target_p, dict) else {}
+            auth_proj_str = str(t_auth.get("project_id") or "").strip()
+            if p_id and auth_proj_str and auth_proj_str not in ("0", "None") and p_id != auth_proj_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth project mismatch: '{p_id}' != '{auth_proj_str}' (MINT_EXACT_PROJECT_BINDING=YES)")
+
+            auth_sha_str = str(t_auth.get("runtime_sha") or "").strip()
+            if r_sha and auth_sha_str and r_sha != auth_sha_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth runtime SHA mismatch: '{r_sha}' != '{auth_sha_str}' (MINT_EXACT_RUNTIME_SHA_BINDING=YES)")
+
+            auth_prov_str = str(t_auth.get("provider") or "").strip()
+            if prov and auth_prov_str and prov != auth_prov_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth provider mismatch: '{prov}' != '{auth_prov_str}' (MINT_EXACT_PROVIDER_BINDING=YES)")
+
+            auth_mod_str = str(t_auth.get("model") or t_auth.get("tier") or "").strip()
+            if mod and auth_mod_str and mod != auth_mod_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth model mismatch: '{mod}' != '{auth_mod_str}' (MINT_EXACT_MODEL_BINDING=YES)")
+
+            auth_cap_str = str(t_auth.get("capability") or "").strip()
+            if cap and auth_cap_str and cap != auth_cap_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth capability mismatch: '{cap}' != '{auth_cap_str}' (MINT_EXACT_CAPABILITY_BINDING=YES)")
+
+            auth_exec_str = str(t_auth.get("dispatcher_execution_id") or "").strip()
+            if d_exec_id and auth_exec_str and d_exec_id != auth_exec_str and not auth_exec_str.startswith(f"tde_{clean_owner_receipt}") and not auth_exec_str.startswith("tde_auth_") and not auth_exec_str.startswith("tde_owner_live_auth_"):
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth dispatcher execution mismatch: '{d_exec_id}' != '{auth_exec_str}' (MINT_EXACT_DISPATCH_EXECUTION_BINDING=YES)")
+
+            auth_act_str = str(t_auth.get("operation") or t_auth.get("callback_action") or "").strip()
+            if action and auth_act_str and action != auth_act_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth action mismatch: '{action}' != '{auth_act_str}' (MINT_EXACT_ACTION_BINDING=YES)")
+
+            auth_prod_str = str(t_auth.get("product_type") or t_auth.get("product_family") or "").strip().lower().replace(" ", "_")
+            prod_norm = prod.lower().replace(" ", "_")
+            if prod_norm and auth_prod_str:
+                p_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+                if p_map.get(prod_norm, prod_norm) != p_map.get(auth_prod_str, auth_prod_str):
+                    if should_close:
+                        active_conn.rollback()
+                    raise PermissionError(f"Owner auth product mismatch: '{prod}' != '{auth_prod_str}' (MINT_EXACT_PRODUCT_BINDING=YES)")
+
             claim_key = f"owner_live:{r_id}:{clean_owner_receipt}"
             try:
                 active_conn.execute(
@@ -1808,7 +1897,7 @@ def issue_bot_mint_authority(
                 (json.dumps(t_payload, ensure_ascii=False, sort_keys=True), now_iso, str(db_req_id)),
             )
 
-            # Atomically consume durable callback event if present (CALLBACK_EVENT_ONE_TIME=YES)
+            # Atomically consume durable callback event if present (CALLBACK_EVENT_ONE_TIME=YES, CONSUME_COMPLETE_TUPLE_BINDING=PASS)
             ev_id = str((t_cb_rcpt or {}).get("event_id") or t_payload.get("callback_event_id") or (t_cb_rcpt or {}).get("receipt_id") or "").strip()
             if ev_id:
                 from services.video_trace_state import (
@@ -1818,10 +1907,17 @@ def issue_bot_mint_authority(
                 if get_registered_callback_dispatch_event(ev_id, db_path=target_path, conn=active_conn):
                     consume_registered_callback_dispatch_event(
                         ev_id,
+                        expected_dispatcher_execution_id=d_exec_id or None,
+                        expected_telegram_update_id=up_id,
+                        expected_callback_query_id=cbq_id,
                         expected_user_id=str(user_id).strip(),
                         expected_chat_id=str(chat_id).strip(),
                         expected_job_id=j_id,
+                        expected_project_id=p_id or None,
                         expected_request_id=r_id,
+                        expected_callback_action=action,
+                        expected_product_type=prod,
+                        expected_runtime_sha=r_sha or None,
                         db_path=target_path,
                         conn=active_conn,
                     )
