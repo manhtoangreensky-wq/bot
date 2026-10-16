@@ -108909,6 +108909,9 @@ async def product_video_telegram_dispatcher_ingress(update: Update, context: Con
 
     Creates durable dispatcher execution record BEFORE any handler runs.
     DISPATCH_PROOF_CREATED_AT_ACTUAL_TELEGRAM_DISPATCH_BOUNDARY = YES
+    GENERIC_DISPATCH_EXECUTION_ISSUER = ABSENT
+    DISPATCHER_TOKEN_IGNORED_BY_RECORDER = NO
+    DISPATCH_EXECUTION_ID_OPAQUE = YES
     """
     query = getattr(update, "callback_query", None)
     if not query:
@@ -108935,13 +108938,74 @@ async def product_video_telegram_dispatcher_ingress(update: Update, context: Con
         return
 
     from services import video_trace_state
+    user_data = getattr(context, "user_data", None) or {}
+    session = user_data.get("video_session") or user_data.get("video_state") or {}
+    draft = session.get("draft") or {}
+
+    job_id = draft.get("job_id") or session.get("job_id") or 0
+    project_id = draft.get("project_id") or draft.get("b14_project_id") or session.get("project_id") or session.get("b14_project_id")
+    if not project_id and job_id:
+        conn_p, close_p = video_trace_state.get_db_connection()
+        try:
+            r_j = conn_p.execute("SELECT project_id FROM video_jobs WHERE id = ?", (job_id,)).fetchone()
+            if r_j and r_j[0]:
+                project_id = r_j[0]
+        except Exception:
+            pass
+        finally:
+            if close_p:
+                conn_p.close()
+    if not project_id and job_id:
+        conn_p, close_p = video_trace_state.get_db_connection()
+        try:
+            r_tp = conn_p.execute(
+                "SELECT project_id FROM video_request_traces WHERE job_id = ? AND project_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+                (job_id,)
+            ).fetchone()
+            if r_tp and r_tp[0]:
+                project_id = r_tp[0]
+        except Exception:
+            pass
+        finally:
+            if close_p:
+                conn_p.close()
+    if not project_id or not job_id:
+        return
+
+    request_id = draft.get("request_id") or session.get("request_id") or draft.get("trace_id")
+    if not request_id and job_id:
+        conn_p, close_p = video_trace_state.get_db_connection()
+        try:
+            r_t = conn_p.execute(
+                "SELECT request_id FROM video_request_traces WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (job_id,)
+            ).fetchone()
+            if r_t and r_t[0]:
+                request_id = r_t[0]
+        except Exception:
+            pass
+        finally:
+            if close_p:
+                conn_p.close()
+    if not request_id:
+        return
+
+    from services.remote_worker_api import resolve_runtime_sha
+    runtime_sha = resolve_runtime_sha() or os.environ.get("GIT_COMMIT_SHA") or ""
+    if not runtime_sha:
+        return
+
     try:
         exec_info = video_trace_state.record_telegram_dispatcher_execution(
-            dispatcher_ingress_token=video_trace_state.get_dispatcher_ingress_token(),
+            dispatcher_ingress_token=video_trace_state._PRIVATE_DISPATCHER_INGRESS_KEY,
             telegram_update_id=real_update_id,
             callback_query_id=real_cbq_id,
             user_id=user_id,
             chat_id=real_chat_id,
+            job_id=str(job_id),
+            project_id=str(project_id),
+            request_id=str(request_id),
+            runtime_sha=runtime_sha,
             callback_action="create_video_task",
             product_type="Product Video",
         )
@@ -109026,38 +109090,24 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             )
 
     # Section B: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
-    # Pre-existing dispatcher execution record is strictly required
-    # (LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF=NO, CALLBACK_HANDLER_REQUIRES_PREEXISTING_DISPATCH_EXECUTION=YES)
-    from services import video_trace_state
-    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
-    exec_row = video_trace_state.get_telegram_dispatcher_execution(
-        telegram_update_id=real_update_id,
-        callback_query_id=real_cbq_id,
-        user_id=user_id,
-        chat_id=real_chat_id,
+    # Opaque single-use dispatcher execution ID must be present in context
+    dispatcher_execution_id = (
+        getattr(context, "_dispatcher_execution_id", None)
+        or (getattr(context, "user_data", None) or {}).get("_dispatcher_execution_id")
     )
-    if not exec_row:
+    if not dispatcher_execution_id:
         await query.answer()
         return await safe_edit_or_send(
             query,
-            "Lỗi xác thực: Thiếu chứng từ điều phối Telegram trước đó "
-            "(LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF=NO, CALLBACK_HANDLER_REQUIRES_PREEXISTING_DISPATCH_EXECUTION=YES).",
+            "Lỗi xác thực: Thiếu opaque dispatcher_execution_id từ framework ingress "
+            "(DISPATCH_EXECUTION_ID_OPAQUE=YES, RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT).",
         )
-    dispatcher_execution_id = str((exec_row or {}).get("execution_id") or "").strip()
 
     # Section 4: Durable registered dispatch event is primary authority
+    from services import video_trace_state
     try:
         cb_event = video_trace_state.register_registered_callback_dispatch_event(
             dispatcher_execution_id=dispatcher_execution_id,
-            telegram_update_id=real_update_id,
-            callback_query_id=real_cbq_id,
-            user_id=user_id,
-            chat_id=real_chat_id,
-            job_id=job_id,
-            project_id=job_id,
-            request_id=request_id,
-            callback_action="create_video_task",
-            product_type="Product Video",
             owner_receipt=owner_receipt,
         )
     except Exception as reg_exc:
@@ -109108,7 +109158,6 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             f"Từ chối quyền thực thi kiểm thử trực tiếp: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
         )
 
-
     try:
         plan = await handle_owner_authorized_live_test_confirm(
             update,
@@ -109149,8 +109198,9 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         if conf_id:
             confirm_fn = globals().get("confirm_video_project_invoice")
             if callable(confirm_fn):
+                eff_proj_id = int(cb_event.get("project_id") or job_id or 0)
                 confirm_fn(
-                    project_id=int(job_id or 0),
+                    project_id=eff_proj_id,
                     user_id=user_id,
                     provider_admission={
                         "confirmation_id": conf_id,
@@ -109245,29 +109295,15 @@ async def handle_owner_authorized_live_test_confirm(
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
     from services import video_trace_state
-    if callback_event is not None:
-        cb_receipt = callback_event
-    else:
-        video_trace_state.record_telegram_dispatcher_execution(
-            telegram_update_id=real_update_id,
-            callback_query_id=real_cbq_id,
-            user_id=real_user_id,
-            chat_id=real_chat_id,
-            callback_action="create_video_task",
-            product_type="Product Video",
+    if callback_event is None:
+        raise PermissionError(
+            "Pre-existing durable callback_event is strictly required; self-assert dispatch fallback is absent "
+            "(SELF_ASSERT_DISPATCH_FALLBACK=ABSENT, HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
         )
-        cb_receipt = video_trace_state.register_registered_callback_dispatch_event(
-            telegram_update_id=real_update_id,
-            callback_query_id=real_cbq_id,
-            chat_id=real_chat_id,
-            user_id=real_user_id,
-            job_id=str(job_id),
-            project_id=str(job_id),
-            request_id=str(request_id),
-            callback_action="create_video_task",
-            product_type="Product Video",
-            owner_receipt=clean_rcpt,
-        )
+    cb_receipt = callback_event
+    c_proj = str(cb_receipt.get("project_id") or "").strip()
+    if not c_proj or c_proj in ("0", "None"):
+        raise PermissionError("Exact project_id is required in callback_event (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
 
     video_trace_state.record_owner_live_callback_origin_in_trace(
         clean_rcpt,
@@ -109276,6 +109312,7 @@ async def handle_owner_authorized_live_test_confirm(
         chat_id=real_chat_id,
         user_id=real_user_id,
         job_id=str(job_id),
+        project_id=c_proj,
         request_id=str(request_id),
         callback_action="create_video_task",
         callback_ownership_validated=True,

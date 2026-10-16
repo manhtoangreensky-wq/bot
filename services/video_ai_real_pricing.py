@@ -218,7 +218,7 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             "key4u": {
                 "model": "kling-video",
                 "request_metadata": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": False},
-                "usd_per_scene": "1.020",
+                "usd_per_scene": "7.650061",
                 "pricing_basis": "mỗi lần tạo",
                 "source_reference": "Key4U kling-video detail: Kling-2, v3 std, no audio",
             },
@@ -246,7 +246,7 @@ _MODEL_ROWS: tuple[dict[str, Any], ...] = (
             "key4u": {
                 "model": "kling-video",
                 "request_metadata": {"model_name": "kling-v3", "mode": "std", "duration": 5, "sound": True},
-                "usd_per_scene": "1.530",
+                "usd_per_scene": "7.650061",
                 "pricing_basis": "mỗi lần tạo",
                 "source_reference": "Key4U kling-video detail: Kling-2, v3 std, audio",
             },

@@ -610,7 +610,7 @@ def validate_claimed_job(
                         return False, f"QUALITY_TIER_MISMATCH:{can_auth}!={can_job}"
             else:
                 auth_provider = str(owner_acceptance_auth.get("provider") or "").strip().lower()
-                allowed_auth_providers = ("shopaikey_video", "shopaikey", "key4u_video", "fal_video", "fal.ai", "fal-video")
+                allowed_auth_providers = ("shopaikey_video", "shopaikey", "key4u_video")
                 if auth_provider not in allowed_auth_providers:
                     return False, f"OWNER_ACCEPTANCE_PROVIDER_MISMATCH:{auth_provider}"
                 auth_model = str(
@@ -618,7 +618,7 @@ def validate_claimed_job(
                     or owner_acceptance_auth.get("selected_model")
                     or ""
                 ).strip()
-                allowed_auth_models = ("veo3.1-fast", "fal-ai/wan/v2.2-a14b/video-to-video", "veo3.1-components")
+                allowed_auth_models = ("veo3.1-fast", "kling-v3", "veo3.1-components")
                 if auth_model and auth_model not in allowed_auth_models:
                     return False, f"OWNER_ACCEPTANCE_MODEL_MISMATCH:{auth_model}"
                 auth_cap = str(

@@ -738,7 +738,7 @@ def issue_canonical_owner_authorization_from_event(
         owner_user_id = str(ev.get("user_id") or "").strip()
         owner_chat_id = str(ev.get("chat_id") or "").strip()
         job_id = str(ev.get("job_id") or "").strip()
-        project_id = str(ev.get("project_id") or job_id).strip()
+        project_id = str(ev.get("project_id") or "").strip()
         request_id = str(ev.get("request_id") or "").strip()
         product = str(ev.get("product_type") or "").strip()
         runtime_sha = str(ev.get("runtime_sha") or "").strip()
@@ -749,8 +749,8 @@ def issue_canonical_owner_authorization_from_event(
             raise PermissionError("chat required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
         if not job_id or job_id in ("0", "None"):
             raise PermissionError("job required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
-        if not project_id:
-            raise PermissionError("project required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not project_id or project_id in ("0", "None"):
+            raise PermissionError("project required for canonical Owner authorization (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
         if not request_id:
             raise PermissionError("request required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
         if not product:
@@ -769,6 +769,21 @@ def issue_canonical_owner_authorization_from_event(
         operation = str(acceptance_plan.get("operation") or "").strip()
         if not operation:
             raise PermissionError("operation required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+
+        raw_slots = acceptance_plan.get("allowed_scene_slots")
+        if raw_slots is None or not str(raw_slots).strip() or str(raw_slots).strip() == "*":
+            raise PermissionError("Exact allowed_scene_slots required in acceptance_plan without defaults (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
+        allowed_slots = str(raw_slots).strip()
+
+        raw_max_submits = acceptance_plan.get("max_submits")
+        if raw_max_submits is None:
+            raise PermissionError("Exact max_submits required in acceptance_plan without defaults (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
+        try:
+            max_submits = int(raw_max_submits)
+        except Exception:
+            max_submits = 0
+        if max_submits <= 0:
+            raise PermissionError("max_submits > 0 required in acceptance_plan (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
 
         raw_max_usd = acceptance_plan.get("expected_max_usd")
         if raw_max_usd is None:
@@ -841,8 +856,8 @@ def issue_canonical_owner_authorization_from_event(
             "model": model,
             "tier": model,
             "operation": operation,
-            "allowed_scene_slots": str(acceptance_plan.get("allowed_scene_slots") or "*").strip(),
-            "max_submits": int(acceptance_plan.get("max_submits") or acceptance_plan.get("scene_count") or 2),
+            "allowed_scene_slots": allowed_slots,
+            "max_submits": max_submits,
             "runtime_sha": runtime_sha,
             "max_provider_spend": float(from_micro_usd(max_micro_usd)),
             "max_provider_spend_unit": "USD",
@@ -977,10 +992,6 @@ def validate_owner_live_button_eligibility(
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
-    # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
-
     # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
     is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
         owner_receipt=owner_receipt,
@@ -1676,8 +1687,6 @@ def issue_bot_mint_authority(
             ):
                 if should_close:
                     active_conn.rollback()
-                if PAID_LIVE_TEST_AVAILABLE != "YES":
-                    raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
                 raise PermissionError(
                     f"{BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}: Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
@@ -2137,6 +2146,50 @@ PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
         product_family="Product Video",
         provider="key4u",
         operation="create_video_task",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="key4u_video",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="key4u",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey_video",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey",
+        operation="image_to_video",
         endpoint_class="paid_creation",
         can_create_paid_usage=True,
         pricing_authority="config/product_video_price_route_map_20260827.json",
