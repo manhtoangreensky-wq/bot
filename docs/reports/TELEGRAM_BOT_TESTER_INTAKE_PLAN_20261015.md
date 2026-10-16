@@ -177,3 +177,13 @@ A7 remains a deliberately open evidence gate: a manual client duration alone
 cannot attribute the Account → Back delay to bot code, Telegram, network,
 device, or VPS. Collect a precisely timestamped client click plus matching
 anonymous server event only if the Owner explicitly reopens that diagnostic.
+
+## A7 closure — 16/10/2026
+
+The Owner performed the final `Tài khoản → Quay lại` retest and accepted the
+screen appearing in `<1 giây`; the other previously tested menu-only routes were
+also reported below one second. The immediate read-only runtime query had no
+matching event (`TOTAL_EVENTS=0`, `JOURNALCTL_EXIT=0`, stderr `0`), so the old
+delay cannot be assigned to any infrastructure layer. The user-visible issue is
+closed by Owner acceptance. Do not create another latency or route task without
+a new reproducible slow or wrong-destination result.
