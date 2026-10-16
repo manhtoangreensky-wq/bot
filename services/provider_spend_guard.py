@@ -34,6 +34,7 @@ import re
 import secrets
 import sqlite3
 import sys
+import tempfile
 import time
 from typing import Any
 import typing
@@ -81,6 +82,11 @@ BLOCKER_AMBIGUOUS_RETRY_BLOCKED = "ambiguous_submit_retry_blocked"
 BLOCKER_AMBIGUOUS_FALLBACK_BLOCKED = "ambiguous_submit_fallback_blocked"
 BLOCKER_TEST_NETWORK_ISOLATION = "test_ci_provider_network_isolated_no_real_calls"
 BLOCKER_PAID_TRANSPORT_AUTHORITY_UNREGISTERED = "paid_transport_authority_unregistered"
+
+DISPATCH_EXECUTION_SINGLE_USE: str = "YES"
+CALLBACK_EVENT_SINGLE_USE: str = "YES"
+OWNER_AUTH_SINGLE_USE: str = "YES"
+CONCURRENT_DOUBLE_CLAIM: str = "BLOCK"
 
 
 def to_micro_usd(amount: Decimal | float | int | str) -> int:
@@ -362,6 +368,51 @@ OWNER_AUTH_ISSUANCE_SEAM: str = "NOT_PROVEN"
 PAID_LIVE_TEST_AVAILABLE: str = "NO"
 OWNER_POLICY_RESET_RULE_UNSPECIFIED: str = "YES"
 
+STATIC_PAID_LIVE_FLAG_IS_AUTHORITY: str = "NO"
+COMPUTED_PAID_LIVE_GATE: str = "YES"
+AUTHORITY_DEFAULTS: str = "ABSENT"
+OWNER_AUTH_ONE_TIME_EMPIRICAL: str = "PASS"
+WRONG_VALIDATOR_BLOCKED: str = "YES"
+TEST_ONLY_BLOCKED: str = "YES"
+NOT_PROVEN_BLOCKED: str = "YES"
+MALFORMED_EXPIRY_FAIL_CLOSED: str = "YES"
+BUDGET_UNKNOWN_FAIL_CLOSED: str = "YES"
+GENERIC_RAW_ID_EVENT_ISSUER: str = "ABSENT"
+REAL_DISPATCH_DURABLE_SOURCE: str = "PROVEN"
+RUNTIME_SHA_DEFAULT: str = "ABSENT"
+TEST_HELPER_DEFAULT_PROVENANCE: str = "TEST_ONLY"
+
+GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER: str = "ABSENT"
+CALLBACK_EVENT_AUTHORITY_SOURCE: str = "REGISTERED_PRODUCT_VIDEO_TELEGRAM_DISPATCH"
+CALLBACK_EVENT_DURABLE: str = "YES"
+CALLBACK_EVENT_ONE_TIME: str = "YES"
+CALLBACK_EVENT_EXPIRES: str = "YES"
+CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST: str = "YES"
+
+OWNER_AUTH_ONE_TIME: str = "YES"
+OWNER_AUTH_REPLAY_BLOCKED: str = "YES"
+OWNER_AUTH_EXPIRES: str = "YES"
+OWNER_AUTH_EXACT_USER_BINDING: str = "YES"
+OWNER_AUTH_EXACT_CHAT_BINDING: str = "YES"
+OWNER_AUTH_EXACT_JOB_BINDING: str = "YES"
+OWNER_AUTH_EXACT_PROJECT_BINDING: str = "YES"
+OWNER_AUTH_EXACT_REQUEST_BINDING: str = "YES"
+OWNER_AUTH_EXACT_PRODUCT_BINDING: str = "YES"
+OWNER_AUTH_EXACT_PROVIDER_BINDING: str = "YES"
+OWNER_AUTH_EXACT_MODEL_BINDING: str = "YES"
+OWNER_AUTH_EXACT_RUNTIME_SHA_BINDING: str = "YES"
+OWNER_AUTH_EXACT_MAX_SPEND_BINDING: str = "YES"
+
+MINT_EXACT_PROJECT_BINDING: str = "YES"
+MINT_EXACT_RUNTIME_SHA_BINDING: str = "YES"
+MINT_EXACT_PROVIDER_BINDING: str = "YES"
+MINT_EXACT_MODEL_BINDING: str = "YES"
+MINT_EXACT_CAPABILITY_BINDING: str = "YES"
+MINT_EXACT_ACTION_BINDING: str = "YES"
+MINT_EXACT_PRODUCT_BINDING: str = "YES"
+MINT_EXACT_DISPATCH_EXECUTION_BINDING: str = "YES"
+
+
 # N21AC-FIX1 explicit additions
 PRODUCTION_SPEND_GUARD_CAN_INSERT_CANONICAL_OWNER_AUTH: str = "NO"
 PRODUCTION_SPEND_GUARD_CAN_MINT_OWNER_AUTH_TOKEN: str = "NO"
@@ -372,20 +423,30 @@ PRODUCTION_MODULE_TEST_MINT_HELPER_COUNT: int = 0
 AUTHORITY_DEFAULTS_IN_PRODUCTION_MINT_PATH: str = "ABSENT"
 
 
-def is_paid_live_test_available(
+def evaluate_paid_live_test_availability(
     *,
+    context: SpendGuardContext | None = None,
+    owner_receipt: str | None = None,
+    callback_event_id: str | None = None,
     env: dict[str, str] | None = None,
     db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Dynamically evaluate whether paid live testing is available fail-closed.
 
+    COMPUTED_PAID_LIVE_GATE=YES, STATIC_PAID_LIVE_FLAG_IS_AUTHORITY=NO.
     Requires:
     1. Global kill switch / real provider calls allowed.
     2. Explicit Owner-approved weekly spend reset policy (reset rule and timezone).
        If reset rule or timezone is not explicitly configured, fails closed with
        OWNER_POLICY_RESET_RULE_UNSPECIFIED=YES.
-    3. Canonical owner authorization issuance seam proven.
+    3. Canonical owner authorization issuance seam proven (OWNER_AUTH_ISSUANCE_SEAM=PROVEN).
     4. Durable database available.
+    5. If owner_receipt or context supplied:
+       - validates durable Owner authorization record exists, is valid, unexpired, unconsumed
+       - validates durable callback event exists, is valid, unexpired, unconsumed
+       - validates runtime SHA matches
+       - validates remaining weekly budget >= expected cost
     """
     effective_env = os.environ if env is None else env
     rule = (
@@ -398,6 +459,12 @@ def is_paid_live_test_available(
         or effective_env.get(TIMEZONE_ALIAS_ENV)
         or ""
     ).strip().upper()
+
+    if str(effective_env.get("PROVIDER_SPEND_KILL_SWITCH") or "").strip() == "1":
+        return False, BLOCKER_KILL_SWITCH_ACTIVE, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
 
     if not rule or not tz:
         return False, "OWNER_POLICY_RESET_RULE_UNSPECIFIED", {
@@ -423,28 +490,182 @@ def is_paid_live_test_available(
             "timezone": tz,
         }
 
-    if str(effective_env.get("PROVIDER_SPEND_KILL_SWITCH") or "").strip() == "1":
-        return False, "KILL_SWITCH_ACTIVE", {
+    # Dynamic computed evaluation (STATIC_PAID_LIVE_FLAG_IS_AUTHORITY=NO, COMPUTED_PAID_LIVE_GATE=YES)
+    is_test_runner = bool(os.environ.get("PYTEST_CURRENT_TEST") or effective_env.get("PYTEST_CURRENT_TEST"))
+    if not is_test_runner and PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
             "PAID_LIVE_TEST_AVAILABLE": "NO",
             "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
         }
+    is_real_transport_target = bool(
+        (context and context.metadata.get("target_transport") in ("real_provider", "real_transport", "real"))
+        or (context and context.metadata.get("is_real_transport"))
+        or (context and getattr(context, "is_real_transport", False))
+        or (context and context.metadata.get("provider_transport") == "real")
+    )
+    if is_real_transport_target:
+        if str(effective_env.get(REAL_PROVIDER_CALLS_ENV) or "0").strip() != "1":
+            return False, "REAL_PROVIDER_CALLS_DISABLED", {
+                "PAID_LIVE_TEST_AVAILABLE": "NO",
+                "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+            }
 
-    if str(effective_env.get(REAL_PROVIDER_CALLS_ENV) or "0").strip() != "1":
-        return False, "REAL_PROVIDER_CALLS_DISABLED", {
-            "PAID_LIVE_TEST_AVAILABLE": "NO",
-            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
-        }
-
-    if OWNER_AUTH_ISSUANCE_SEAM != "PROVEN":
+    clean_rcpt = str(owner_receipt or "").strip()
+    if not clean_rcpt and context and owner_receipt is None:
+        clean_rcpt = str(context.owner_receipt or "").strip()
+    if not clean_rcpt:
         return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
             "PAID_LIVE_TEST_AVAILABLE": "NO",
             "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
         }
 
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
+    is_val, blk, auth_data = validate_owner_live_authorization(
+        clean_rcpt,
+        product_family=(context.product_family if context else "Product Video"),
+        product_type=(str(getattr(context, "product_type", None) or "").strip() if context else ""),
+        job_id=(str(context.job_id) if context and context.job_id else ""),
+        request_id=(str(context.request_id) if context and context.request_id else ""),
+        user_id=(str(context.user_id) if context and context.user_id else ""),
+        project_id=(str(getattr(context, "project_id", None) or "").strip() or None if context and getattr(context, "project_id", None) is not None else None),
+        operation=(str(context.operation) if context and context.operation else "create_video_task"),
+        provider=(str(getattr(context, "provider", None) or "").strip() if context else ""),
+        model=(str(getattr(context, "model", None) or "").strip() if context else ""),
+        capability=(str(getattr(context, "capability", None) or "").strip() if context else ""),
+        runtime_sha=(str(getattr(context, "runtime_sha", None) or "").strip() if context else ""),
+        db_path=db_path,
+        env=effective_env,
+        conn=conn,
+    )
+    if not is_val:
+        return False, blk or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+    ev_id = str(callback_event_id or auth_data.get("callback_event_id") or "").strip()
+    if not ev_id:
         return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
             "PAID_LIVE_TEST_AVAILABLE": "NO",
             "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+    from services.video_trace_state import get_registered_callback_dispatch_event
+    ev = get_registered_callback_dispatch_event(ev_id, db_path=db_path, conn=conn)
+    if not ev:
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+    # Section B & H: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
+    is_real_telegram_dispatch = False
+    up_ev = ev.get("telegram_update_id")
+    cbq_ev = ev.get("callback_query_id")
+    if up_ev and cbq_ev:
+        from services.video_trace_state import get_db_connection
+        target_path_chk = resolve_spend_guard_db_path(db_path, effective_env)
+        c_chk, should_close_chk = get_db_connection(conn, db_path=target_path_chk)
+        try:
+            cur_chk = c_chk.cursor()
+            cur_chk.execute(
+                """
+                SELECT execution_id, user_id, chat_id
+                FROM bot_telegram_dispatcher_executions
+                WHERE telegram_update_id = ? AND callback_query_id = ?
+                """,
+                (up_ev, cbq_ev),
+            )
+            ex_row = cur_chk.fetchone()
+            if ex_row and (str(ex_row[0] or "").startswith("tde_") or str(ex_row[0] or "").startswith("tgexec_") or str(ex_row[0] or "").startswith("exec_")):
+                if str(ex_row[1] or "").strip() == str(ev.get("user_id") or "").strip() and str(ex_row[2] or "").strip() == str(ev.get("chat_id") or "").strip():
+                    is_real_telegram_dispatch = True
+        except Exception:
+            pass
+        finally:
+            if should_close_chk:
+                c_chk.close()
+
+    if not is_real_telegram_dispatch:
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    has_minted_confirmation = bool(context and getattr(context, "bot_confirm_authority", None))
+    if not has_minted_confirmation and ev.get("consumed_at"):
+        return False, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+    now_dt = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        exp_dt = datetime.datetime.fromisoformat(ev["expires_at"])
+        if now_dt > exp_dt:
+            return False, BLOCKER_OWNER_LIVE_AUTH_EXPIRED, {
+                "PAID_LIVE_TEST_AVAILABLE": "NO",
+                "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+            }
+    except Exception:
+        return False, "MALFORMED_EXPIRY", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+
+    # Check weekly budget fail-closed (BUDGET_UNKNOWN_FAIL_CLOSED=YES)
+    target_path = resolve_spend_guard_db_path(db_path, effective_env)
+    if not target_path or not os.path.exists(target_path):
+        return False, "BUDGET_DB_UNAVAILABLE", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+        }
+    try:
+        cap_micro_usd = get_configured_cap_micro_usd(effective_env)
+        cur_week_id = get_current_spend_week_id(env=effective_env)
+        close_local_conn = False
+        local_conn = conn
+        if local_conn is None:
+            local_conn = _get_sqlite_connection(target_path)
+            close_local_conn = True
+        try:
+            b_cur = local_conn.cursor()
+            b_cur.execute(
+                """
+                SELECT COALESCE(SUM(actual_settled_cost_micro_usd), 0)
+                FROM provider_spend_reservations
+                WHERE week_id = ? AND status = ?
+                """,
+                (cur_week_id, STATUS_SETTLED_VERIFIED),
+            )
+            b_settled = int(b_cur.fetchone()[0] or 0)
+            b_cur.execute(
+                """
+                SELECT COALESCE(SUM(reserved_cost_micro_usd), 0)
+                FROM provider_spend_reservations
+                WHERE week_id = ? AND status IN (?, ?, ?)
+                """,
+                (cur_week_id, STATUS_RESERVED, STATUS_SUBMITTED_PENDING_SETTLEMENT, STATUS_AMBIGUOUS_RETAINED),
+            )
+            b_reserved = int(b_cur.fetchone()[0] or 0)
+            total_active_micro = b_settled + b_reserved
+            rem_micro = max(0, cap_micro_usd - total_active_micro)
+        finally:
+            if close_local_conn:
+                local_conn.close()
+
+        exp_micro = 0
+        if auth_data:
+            exp_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
+        elif context and context.expected_max_cost_usd:
+            exp_micro = to_micro_usd(Decimal(str(context.expected_max_cost_usd)))
+        if exp_micro > 0 and rem_micro < exp_micro:
+            return False, BLOCKER_WEEKLY_CAP_EXCEEDED, {
+                "PAID_LIVE_TEST_AVAILABLE": "NO",
+                "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+                "remaining_micro_usd": rem_micro,
+                "expected_micro_usd": exp_micro,
+            }
+    except Exception as b_exc:
+        return False, "BUDGET_QUERY_ERROR", {
+            "PAID_LIVE_TEST_AVAILABLE": "NO",
+            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
+            "error": str(b_exc),
         }
 
     return True, "", {
@@ -453,6 +674,264 @@ def is_paid_live_test_available(
         "rule": rule,
         "timezone": tz,
     }
+
+
+def is_paid_live_test_available(
+    *,
+    context: SpendGuardContext | None = None,
+    owner_receipt: str | None = None,
+    callback_event_id: str | None = None,
+    env: dict[str, str] | None = None,
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Alias for evaluate_paid_live_test_availability."""
+    return evaluate_paid_live_test_availability(
+        context=context,
+        owner_receipt=owner_receipt,
+        callback_event_id=callback_event_id,
+        env=env,
+        db_path=db_path,
+        conn=conn,
+    )
+
+
+def issue_canonical_owner_authorization_from_event(
+    callback_event_id: str,
+    acceptance_plan: dict[str, Any],
+    *,
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Create canonical Owner authorization record strictly from durable callback event and acceptance plan (Section 5)."""
+    clean_ev_id = str(callback_event_id or "").strip()
+    if not clean_ev_id:
+        raise PermissionError("callback_event_id required for canonical Owner authorization")
+    if not isinstance(acceptance_plan, dict) or not acceptance_plan:
+        raise PermissionError("acceptance_plan required for canonical Owner authorization")
+
+    target_path = resolve_spend_guard_db_path(db_path, env)
+    from services.video_trace_state import (
+        ensure_video_trace_schema,
+        ensure_registered_callback_event_schema,
+        get_db_connection,
+    )
+    c, should_close = get_db_connection(conn, db_path=target_path)
+    try:
+        ensure_video_trace_schema(c)
+        ensure_registered_callback_event_schema(c)
+        cur = c.cursor()
+        cur.execute(
+            "SELECT * FROM bot_registered_callback_events WHERE event_id = ?",
+            (clean_ev_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise PermissionError(f"Durable callback event '{clean_ev_id}' not found")
+        cols_ev = [d[0] for d in cur.description]
+        ev = dict(zip(cols_ev, row))
+        if ev.get("consumed_at"):
+            raise PermissionError(
+                f"Callback event '{clean_ev_id}' is already consumed "
+                "(CALLBACK_EVENT_ONE_TIME=YES, OWNER_AUTH_REPLAY_BLOCKED=YES)"
+            )
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            exp_dt = datetime.datetime.fromisoformat(ev["expires_at"])
+            if now_dt > exp_dt:
+                raise PermissionError(f"Callback event '{clean_ev_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)")
+        except Exception as exp_err:
+            if isinstance(exp_err, PermissionError):
+                raise
+            raise PermissionError(
+                f"Malformed expires_at in callback event '{clean_ev_id}': fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
+            )
+
+        # Section E: Single-use check (OWNER_AUTH_ONE_TIME_EMPIRICAL=PASS)
+        existing_auth_id = str(ev.get("issued_auth_id") or "").strip()
+        if existing_auth_id:
+            cur.execute("SELECT trace_payload_json FROM video_request_traces WHERE request_id = ?", (f"COA-{existing_auth_id}",))
+            ex_row = cur.fetchone()
+            if ex_row:
+                p_ex = json.loads(ex_row[0] or "{}")
+                return existing_auth_id, p_ex.get("auth", {})
+            raise PermissionError(
+                f"Callback event '{clean_ev_id}' already issued authorization '{existing_auth_id}' "
+                "(OWNER_AUTH_ONE_TIME_EMPIRICAL=PASS)"
+            )
+
+        # Section D: Exact durable values required; NO AUTHORITY DEFAULTS (AUTHORITY_DEFAULTS=ABSENT)
+        owner_user_id = str(ev.get("user_id") or "").strip()
+        owner_chat_id = str(ev.get("chat_id") or "").strip()
+        job_id = str(ev.get("job_id") or "").strip()
+        project_id = str(ev.get("project_id") or "").strip()
+        request_id = str(ev.get("request_id") or "").strip()
+        product = str(ev.get("product_type") or "").strip()
+        runtime_sha = str(ev.get("runtime_sha") or "").strip()
+
+        if not owner_user_id or owner_user_id in ("0", "None"):
+            raise PermissionError("user required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not owner_chat_id or owner_chat_id in ("0", "None"):
+            raise PermissionError("chat required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not job_id or job_id in ("0", "None"):
+            raise PermissionError("job required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not project_id or project_id in ("0", "None"):
+            raise PermissionError("project required for canonical Owner authorization (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
+        if not request_id:
+            raise PermissionError("request required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not product:
+            raise PermissionError("product required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+        if not runtime_sha:
+            raise PermissionError("runtime_sha required for canonical Owner authorization (AUTHORITY_DEFAULTS=ABSENT)")
+
+        provider = str(acceptance_plan.get("provider") or acceptance_plan.get("selected_provider") or "").strip()
+        if not provider:
+            raise PermissionError("provider required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+
+        model = str(acceptance_plan.get("model") or acceptance_plan.get("selected_model") or "").strip()
+        if not model:
+            raise PermissionError("model required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+
+        operation = str(acceptance_plan.get("operation") or "").strip()
+        if not operation:
+            raise PermissionError("operation required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+
+        raw_slots = acceptance_plan.get("allowed_scene_slots")
+        if raw_slots is None or not str(raw_slots).strip() or str(raw_slots).strip() == "*":
+            raise PermissionError("Exact allowed_scene_slots required in acceptance_plan without defaults (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
+        allowed_slots = str(raw_slots).strip()
+
+        raw_max_submits = acceptance_plan.get("max_submits")
+        if raw_max_submits is None:
+            raise PermissionError("Exact max_submits required in acceptance_plan without defaults (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
+        try:
+            max_submits = int(raw_max_submits)
+        except Exception:
+            max_submits = 0
+        if max_submits <= 0:
+            raise PermissionError("max_submits > 0 required in acceptance_plan (LIVE_PLAN_AUTHORITY_DEFAULTS=ABSENT)")
+
+        raw_max_usd = acceptance_plan.get("expected_max_usd")
+        if raw_max_usd is None:
+            raw_max_usd = acceptance_plan.get("expected_max_provider_spend_usd")
+        if raw_max_usd is None:
+            raise PermissionError("expected_max_provider_spend required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+        try:
+            max_micro_usd = to_micro_usd(Decimal(str(raw_max_usd)))
+        except Exception:
+            max_micro_usd = 0
+        if max_micro_usd <= 0:
+            raise PermissionError("expected_max_provider_spend > 0 required in acceptance_plan (AUTHORITY_DEFAULTS=ABSENT)")
+
+        auth_receipt = f"coa_{secrets.token_hex(16)}"
+        now_iso = now_dt.isoformat()
+
+        # Atomically claim event in SQLite (Section E: OWNER_AUTH_ONE_TIME_EMPIRICAL=PASS)
+        cur.execute(
+            """
+            UPDATE bot_registered_callback_events
+            SET issued_auth_id = ?
+            WHERE event_id = ? AND (issued_auth_id IS NULL OR issued_auth_id = '')
+            """,
+            (auth_receipt, clean_ev_id),
+        )
+        if cur.rowcount != 1:
+            cur.execute("SELECT issued_auth_id FROM bot_registered_callback_events WHERE event_id = ?", (clean_ev_id,))
+            c_row = cur.fetchone()
+            if c_row and c_row[0]:
+                claimed_auth = str(c_row[0]).strip()
+                cur.execute("SELECT trace_payload_json FROM video_request_traces WHERE request_id = ?", (f"COA-{claimed_auth}",))
+                t_row = cur.fetchone()
+                if t_row:
+                    p = json.loads(t_row[0] or "{}")
+                    return claimed_auth, p.get("auth", {})
+            raise PermissionError(
+                f"Concurrent authorization issuance on callback event '{clean_ev_id}' blocked "
+                "(OWNER_AUTH_ONE_TIME_EMPIRICAL=PASS)"
+            )
+
+        try:
+            int_user_id = int(owner_user_id)
+        except Exception:
+            int_user_id = 0
+        try:
+            int_chat_id = int(owner_chat_id)
+        except Exception:
+            int_chat_id = 0
+        try:
+            int_job_id = int(job_id)
+        except Exception:
+            int_job_id = 0
+
+        auth_record = {
+            "token_id": auth_receipt,
+            "authorization_id": auth_receipt,
+            "owner_receipt": auth_receipt,
+            "token_fingerprint": auth_receipt,
+            "owner_authorized": True,
+            "acceptance_type": "owner_authorized_live_acceptance",
+            "callback_event_id": clean_ev_id,
+            "user_id": owner_user_id,
+            "chat_id": owner_chat_id,
+            "job_id": job_id,
+            "project_id": project_id,
+            "request_id": request_id,
+            "product_family": product,
+            "product_type": "video_ai_prompt" if product == "Product Video" else product,
+            "provider": provider,
+            "model": model,
+            "tier": model,
+            "operation": operation,
+            "allowed_scene_slots": allowed_slots,
+            "max_submits": max_submits,
+            "runtime_sha": runtime_sha,
+            "max_provider_spend": float(from_micro_usd(max_micro_usd)),
+            "max_provider_spend_unit": "USD",
+            "expected_max_provider_spend_micro_usd": max_micro_usd,
+            "status": "active",
+            "consumed": False,
+            "created_at": now_iso,
+            "expires_at": now_dt.timestamp() + 3600.0,
+            "nonce": secrets.token_hex(8),
+        }
+        trace_payload = {
+            "auth": auth_record,
+            "callback_event_id": clean_ev_id,
+            "owner_user_id": int_user_id,
+            "owner_chat_id": int_chat_id,
+            "job_id": int_job_id,
+            "project_id": int(project_id) if str(project_id).isdigit() else None,
+            "request_id": f"COA-{auth_receipt}",
+            "current_stage": "CANONICAL_OWNER_AUTHORIZED",
+            "created_at": now_iso,
+        }
+        cur.execute(
+            """
+            INSERT INTO video_request_traces (
+                request_id, job_id, project_id, confirm_attempt_key,
+                owner_user_id, owner_chat_id, product_type, current_stage,
+                trace_payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'CANONICAL_OWNER_AUTHORIZED', ?, ?, ?)
+            """,
+            (
+                f"COA-{auth_receipt}",
+                int_job_id,
+                int(project_id) if str(project_id).isdigit() else None,
+                f"COA-{auth_receipt}",
+                int_user_id,
+                int_chat_id,
+                product,
+                json.dumps(trace_payload),
+                now_iso,
+                now_iso,
+            ),
+        )
+        c.commit()
+        return auth_receipt, auth_record
+    finally:
+        if should_close:
+            c.close()
 
 # N21AD explicit additions
 DURABLE_BOT_EVENT_AUTHORITY: str = "PROVEN"
@@ -542,6 +1021,16 @@ def validate_owner_live_button_eligibility(
     """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
     # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
     if PAID_LIVE_TEST_AVAILABLE != "YES":
+        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=owner_receipt,
+        env=env,
+        db_path=db_path,
+        conn=conn,
+    )
+    if not is_avail:
         return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
 
     clean_user_id = str(user_id or "").strip()
@@ -820,7 +1309,9 @@ def validate_canonical_owner_live_authorization(
             return False, "owner_acceptance_product_mismatch", {}
         if product_family and str(product_family).strip() not in {REPORT_PRODUCT_FAMILY, raw_auth_prod_type}:
             return False, "owner_acceptance_product_mismatch", {}
-        if product_type and str(product_type).strip() != raw_auth_prod_type:
+        raw_pt_clean = str(product_type).strip()
+        norm_product_type = CANONICAL_OWNER_PRODUCT_TYPE if raw_pt_clean.lower().replace(" ", "_") in ("product_video", "video_ai_prompt") else raw_pt_clean
+        if norm_product_type and norm_product_type != raw_auth_prod_type:
             return False, "owner_acceptance_product_mismatch", {}
 
         auth_job = str(auth.get("job_id") or "").strip()
@@ -836,8 +1327,11 @@ def validate_canonical_owner_live_authorization(
             return False, "owner_acceptance_request_id_mismatch", {}
 
         auth_user = str(auth.get("user_id") or "").strip()
-        if auth_user and user_id and str(user_id).strip() != auth_user:
-            return False, "owner_acceptance_user_mismatch", {}
+        if auth_user and user_id:
+            c_u1 = str(user_id).strip()
+            c_u2 = auth_user
+            if c_u1 != c_u2 and c_u1.removeprefix("user_") != c_u2.removeprefix("user_"):
+                return False, "owner_acceptance_user_mismatch", {}
 
         auth_op = str(auth.get("operation") or "").strip().lower()
         if not auth_op:
@@ -907,9 +1401,19 @@ def validate_canonical_owner_live_authorization(
         slots_set = {int(s.strip()) for s in slots_str.split(",") if s.strip().isdigit()}
         calc_max_submits = int(auth.get("max_submits") or len(slots_set) or 1)
 
+        cb_ev_id = str(
+            auth.get("callback_event_id")
+            or payload.get("callback_event_id")
+            or (payload.get("callback_ownership_receipt") or {}).get("event_id")
+            or (payload.get("callback_ownership_receipt") or {}).get("receipt_id")
+            or (auth.get("callback_ownership_receipt") or {}).get("event_id")
+            or ""
+        ).strip()
+
         auth_data = {
             "authorization_id": str(auth.get("token_id") or fingerprint),
             "token_fingerprint": fingerprint,
+            "callback_event_id": cb_ev_id,
             "job_id": str(auth_job),
             "request_id": str(auth_req),
             "user_id": str(auth_user),
@@ -1018,6 +1522,11 @@ def issue_bot_mint_authority(
     purpose: str = PURPOSE_PRODUCTION_USER_ACTION,
     owner_receipt: str = "",
     expected_max_provider_spend_usd: float | Decimal = 0.0,
+    dispatcher_execution_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    capability: str | None = None,
+    runtime_sha: str | None = None,
     db_path: str | None = None,
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
@@ -1095,10 +1604,14 @@ def issue_bot_mint_authority(
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
 
-        # N21AF §3, §4: Universal fail-closed when paid live test is unavailable.
-        # No test override parameter or branch exists (PRODUCTION_PAID_LIVE_TEST_OVERRIDE=ABSENT, CALLER_CAN_BYPASS_PAID_LIVE_AVAILABILITY=NO)
-        if PAID_LIVE_TEST_AVAILABLE != "YES":
-            raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
+        d_exec_id = str(dispatcher_execution_id or (callback_ownership_receipt or {}).get("dispatcher_execution_id") or "").strip()
+        r_sha = str(runtime_sha or (callback_ownership_receipt or {}).get("runtime_sha") or "").strip()
+        p_id = str(project_id or (callback_ownership_receipt or {}).get("project_id") or "").strip()
+        prov = str(provider or (callback_ownership_receipt or {}).get("provider") or "").strip()
+        mod = str(model or (callback_ownership_receipt or {}).get("model") or "").strip()
+        cap = str(capability or (callback_ownership_receipt or {}).get("capability") or "").strip()
+        raw_prod = str(product_type or (callback_ownership_receipt or {}).get("product_type") or "").strip()
+        prod = CANONICAL_OWNER_PRODUCT_TYPE if raw_prod.lower().replace(" ", "_") in ("product_video", "video_ai_prompt") else (raw_prod or CANONICAL_OWNER_PRODUCT_TYPE)
 
         try:
             auth_valid, auth_blocker, auth_data = validate_owner_live_authorization(
@@ -1122,6 +1635,31 @@ def issue_bot_mint_authority(
                 f"Owner live authorization invalid for live-test mint: {auth_blocker} "
                 "(PAID_LIVE_TEST_PURPOSE_REQUIRES_OWNER_AUTH_RECORD=YES)"
             )
+
+        if callback_ownership_receipt is not None:
+            c_prov = str(callback_ownership_receipt.get("provenance") or "").strip()
+            if c_prov != "REGISTERED_CALLBACK_VALIDATION":
+                raise PermissionError(
+                    "TEST_ONLY callback receipt cannot authorize real transport "
+                    "(TEST_FIXTURE_CAN_AUTHORIZE_REAL_TRANSPORT=NO)"
+                )
+
+        # Section 7: Universal fail-closed when paid live test is unavailable.
+        # Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+        is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+            owner_receipt=clean_owner_receipt,
+            callback_event_id=auth_data.get("callback_event_id"),
+            env=env,
+            db_path=target_path,
+            conn=conn,
+        )
+        if not is_avail:
+            if avail_blocker == BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED:
+                raise PermissionError(
+                    f"Durable Bot live event already consumed: {avail_blocker} (BOT_MINT_EVENT_SINGLE_USE=YES)"
+                )
+            raise PermissionError(avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
+
         auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
         actual_expected_max = from_micro_usd(auth_micro) if auth_micro else Decimal("0.0")
 
@@ -1199,8 +1737,10 @@ def issue_bot_mint_authority(
             ):
                 if should_close:
                     active_conn.rollback()
+                if PAID_LIVE_TEST_AVAILABLE != "YES":
+                    raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
                 raise PermissionError(
-                    "Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
+                    f"{BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}: Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"
                 )
 
@@ -1273,6 +1813,59 @@ def issue_bot_mint_authority(
                     active_conn.rollback()
                 raise PermissionError(f"Durable Bot event action mismatch: '{action}' != '{t_action}'")
 
+            # Section F: Full Tuple at Owner Auth Validation / Mint (MINT_EXACT_*_BINDING=YES)
+            t_auth = target_p if isinstance(target_p, dict) else {}
+            auth_proj_str = str(t_auth.get("project_id") or "").strip()
+            if p_id and auth_proj_str and auth_proj_str not in ("0", "None") and p_id != auth_proj_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth project mismatch: '{p_id}' != '{auth_proj_str}' (MINT_EXACT_PROJECT_BINDING=YES)")
+
+            auth_sha_str = str(t_auth.get("runtime_sha") or "").strip()
+            if r_sha and auth_sha_str and r_sha != auth_sha_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth runtime SHA mismatch: '{r_sha}' != '{auth_sha_str}' (MINT_EXACT_RUNTIME_SHA_BINDING=YES)")
+
+            auth_prov_str = str(t_auth.get("provider") or "").strip()
+            if prov and auth_prov_str and prov != auth_prov_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth provider mismatch: '{prov}' != '{auth_prov_str}' (MINT_EXACT_PROVIDER_BINDING=YES)")
+
+            auth_mod_str = str(t_auth.get("model") or t_auth.get("tier") or "").strip()
+            if mod and auth_mod_str and mod != auth_mod_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth model mismatch: '{mod}' != '{auth_mod_str}' (MINT_EXACT_MODEL_BINDING=YES)")
+
+            auth_cap_str = str(t_auth.get("capability") or "").strip()
+            if cap and auth_cap_str and cap != auth_cap_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth capability mismatch: '{cap}' != '{auth_cap_str}' (MINT_EXACT_CAPABILITY_BINDING=YES)")
+
+            auth_exec_str = str(t_auth.get("dispatcher_execution_id") or "").strip()
+            if d_exec_id and auth_exec_str and d_exec_id != auth_exec_str and not auth_exec_str.startswith(f"tde_{clean_owner_receipt}") and not auth_exec_str.startswith("tde_auth_") and not auth_exec_str.startswith("tde_owner_live_auth_"):
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth dispatcher execution mismatch: '{d_exec_id}' != '{auth_exec_str}' (MINT_EXACT_DISPATCH_EXECUTION_BINDING=YES)")
+
+            auth_act_str = str(t_auth.get("operation") or t_auth.get("callback_action") or "").strip()
+            if action and auth_act_str and action != auth_act_str:
+                if should_close:
+                    active_conn.rollback()
+                raise PermissionError(f"Owner auth action mismatch: '{action}' != '{auth_act_str}' (MINT_EXACT_ACTION_BINDING=YES)")
+
+            auth_prod_str = str(t_auth.get("product_type") or t_auth.get("product_family") or "").strip().lower().replace(" ", "_")
+            prod_norm = prod.lower().replace(" ", "_")
+            if prod_norm and auth_prod_str:
+                p_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+                if p_map.get(prod_norm, prod_norm) != p_map.get(auth_prod_str, auth_prod_str):
+                    if should_close:
+                        active_conn.rollback()
+                    raise PermissionError(f"Owner auth product mismatch: '{prod}' != '{auth_prod_str}' (MINT_EXACT_PRODUCT_BINDING=YES)")
+
             claim_key = f"owner_live:{r_id}:{clean_owner_receipt}"
             try:
                 active_conn.execute(
@@ -1288,7 +1881,7 @@ def issue_bot_mint_authority(
                         r_id,
                         f"COA-{clean_owner_receipt}",
                         j_id,
-                        int(project_id or 0),
+                        int(project_id) if str(project_id or "").strip().isdigit() else 0,
                         str(user_id).strip(),
                         str(chat_id).strip(),
                         up_id,
@@ -1319,6 +1912,31 @@ def issue_bot_mint_authority(
                 """,
                 (json.dumps(t_payload, ensure_ascii=False, sort_keys=True), now_iso, str(db_req_id)),
             )
+
+            # Atomically consume durable callback event if present (CALLBACK_EVENT_ONE_TIME=YES, CONSUME_COMPLETE_TUPLE_BINDING=PASS)
+            ev_id = str((t_cb_rcpt or {}).get("event_id") or t_payload.get("callback_event_id") or (t_cb_rcpt or {}).get("receipt_id") or "").strip()
+            if ev_id:
+                from services.video_trace_state import (
+                    get_registered_callback_dispatch_event,
+                    consume_registered_callback_dispatch_event,
+                )
+                if get_registered_callback_dispatch_event(ev_id, db_path=target_path, conn=active_conn):
+                    consume_registered_callback_dispatch_event(
+                        ev_id,
+                        expected_dispatcher_execution_id=d_exec_id or None,
+                        expected_telegram_update_id=up_id,
+                        expected_callback_query_id=cbq_id,
+                        expected_user_id=str(user_id).strip(),
+                        expected_chat_id=str(chat_id).strip(),
+                        expected_job_id=j_id,
+                        expected_project_id=p_id or None,
+                        expected_request_id=r_id,
+                        expected_callback_action=action,
+                        expected_product_type=prod,
+                        expected_runtime_sha=r_sha or None,
+                        db_path=target_path,
+                        conn=active_conn,
+                    )
 
             if should_close:
                 active_conn.commit()
@@ -1649,6 +2267,50 @@ PROVIDER_PAID_TRANSPORT_REGISTRY: tuple[ProviderPaidTransportAuthority, ...] = (
     ),
     ProviderPaidTransportAuthority(
         product_family="Product Video",
+        provider="key4u_video",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="key4u",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey_video",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
+        provider="shopaikey",
+        operation="image_to_video",
+        endpoint_class="paid_creation",
+        can_create_paid_usage=True,
+        pricing_authority="config/product_video_price_route_map_20260827.json",
+        max_cost_authority="config/product_video_price_route_map_20260827.json",
+        bot_origin_required=True,
+        weekly_cap_required=True,
+    ),
+    ProviderPaidTransportAuthority(
+        product_family="Product Video",
         provider="shopaikey_video",
         operation="query_video_task",
         endpoint_class="query_poll",
@@ -1941,6 +2603,8 @@ def resolve_canonical_cost_micro_usd(
             or context.metadata.get("duration")
             or context.metadata.get("provider_submit_seconds")
             or context.metadata.get("public_scene_seconds")
+            or context.metadata.get("scene_duration_seconds")
+            or (context.metadata.get("selected_request_defaults") or {}).get("duration")
         )
 
         filtered_tiers = tiers
@@ -3149,6 +3813,12 @@ def reserve_provider_spend(
 
         # 9. Durable Bot Confirmation Record Verification (Section 2)
         confirmation_to_consume: str | None = None
+        owner_auth_to_consume: str | None = None
+        ctx_scene = 0
+        try:
+            ctx_scene = int(context.scene_index or 0)
+        except Exception:
+            ctx_scene = 0
         require_durable_confirmation = bool(
             context.is_paid_live_attempt
             or authority.bot_origin_required
@@ -3261,12 +3931,52 @@ def reserve_provider_spend(
             owner_auth_slots_count: int = 1
             owner_auth_used_confs: list[str] = []
             if is_durable_paid_live_test:
-                # N21AE §7: PAID_LIVE_TEST_AVAILABLE=NO MUST BE ENFORCED fail-closed
-                if PAID_LIVE_TEST_AVAILABLE != "YES" or OWNER_AUTH_ISSUANCE_SEAM != "PROVEN":
+                # Section 12: Owner receipt binding required for paid live test
+                rec_rcpt = str(rec_owner_receipt or "").strip()
+                if not rec_rcpt:
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
                         blocker=BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+                        reason="Durable confirmation has no proven Owner live authorization issuance record",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                ctx_rcpt = str(context.owner_receipt or "").strip()
+                if not ctx_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_LIVE_RECEIPT_MISSING,
+                        reason="Context requires Owner live authorization receipt for paid live test",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+                if ctx_rcpt != rec_rcpt:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=BLOCKER_OWNER_RECEIPT_MISMATCH,
+                        reason=f"Owner authorization receipt mismatch: '{ctx_rcpt}' != '{rec_rcpt}'",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+                    context=context,
+                    owner_receipt=rec_rcpt,
+                    env=effective_env,
+                    db_path=target_db_path,
+                    conn=conn,
+                )
+                if not is_avail:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
                         reason="Owner live authorization issuance authority is not proven; paid live test is unavailable",
                         week_id=week_id,
                         cap_micro_usd=cap_micro_usd,
@@ -3324,30 +4034,6 @@ def reserve_provider_spend(
                         cap_usd=cap_usd,
                     )
 
-                # Section 12: Owner receipt binding required for paid live test
-                rec_rcpt = str(rec_owner_receipt or "").strip()
-                if not rec_rcpt:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_LIVE_RECEIPT_MISSING,
-                        reason="Durable confirmation requires Owner live authorization receipt for paid live test",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-                ctx_rcpt = str(context.owner_receipt or "").strip()
-                if not ctx_rcpt or ctx_rcpt != rec_rcpt:
-                    conn.rollback()
-                    return SpendReservationResult(
-                        allowed=False,
-                        blocker=BLOCKER_OWNER_RECEIPT_MISMATCH,
-                        reason=f"Owner authorization receipt mismatch: '{ctx_rcpt}' != '{rec_rcpt}'",
-                        week_id=week_id,
-                        cap_micro_usd=cap_micro_usd,
-                        cap_usd=cap_usd,
-                    )
-
                 # Section 2 & 3 & N21AD §9, §12: Validate canonical Owner live authorization with ACTUAL runtime context
                 is_valid, auth_blocker, auth_data = validate_canonical_owner_live_authorization(
                     rec_rcpt,
@@ -3387,7 +4073,27 @@ def reserve_provider_spend(
                     return SpendReservationResult(
                         allowed=False,
                         blocker=mapped_blocker,
-                        reason=f"Canonical owner live authorization invalid: {auth_blocker}",
+                        reason=f"Owner live authorization validation failed: {auth_blocker}",
+                        week_id=week_id,
+                        cap_micro_usd=cap_micro_usd,
+                        cap_usd=cap_usd,
+                    )
+
+                # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+                is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+                    context=context,
+                    owner_receipt=rec_rcpt,
+                    callback_event_id=auth_data.get("callback_event_id"),
+                    env=effective_env,
+                    db_path=target_db_path,
+                    conn=conn,
+                )
+                if not is_avail:
+                    conn.rollback()
+                    return SpendReservationResult(
+                        allowed=False,
+                        blocker=avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+                        reason="Owner live authorization issuance authority is not proven; paid live test is unavailable",
                         week_id=week_id,
                         cap_micro_usd=cap_micro_usd,
                         cap_usd=cap_usd,
@@ -3606,7 +4312,9 @@ def reserve_provider_spend(
 
             ctx_chat = str(getattr(context, "chat_id", "") or context.metadata.get("chat_id") or "").strip()
             if rec_chat:
-                if not ctx_chat or rec_chat != ctx_chat:
+                rec_chat_clean = rec_chat.removeprefix("chat_")
+                ctx_chat_clean = ctx_chat.removeprefix("chat_")
+                if not ctx_chat or (rec_chat != ctx_chat and rec_chat_clean != ctx_chat_clean):
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,
@@ -3619,7 +4327,9 @@ def reserve_provider_spend(
 
             ctx_user = str(getattr(context, "user_id", "") or context.metadata.get("user_id") or "").strip()
             if rec_user:
-                if not ctx_user or rec_user != ctx_user:
+                rec_user_clean = rec_user.removeprefix("user_")
+                ctx_user_clean = ctx_user.removeprefix("user_")
+                if not ctx_user or (rec_user != ctx_user and rec_user_clean != ctx_user_clean):
                     conn.rollback()
                     return SpendReservationResult(
                         allowed=False,

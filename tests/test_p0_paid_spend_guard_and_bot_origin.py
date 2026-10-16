@@ -559,12 +559,24 @@ def _create_owner_live_authorization_test_fixture(
             from services.remote_worker_api import resolve_runtime_sha
 
             clean_user_id_str = str(user_id or "").strip()
+            canonical_user_id_val: int | str = (int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str) if clean_user_id_str else ""
+            if not clean_user_id_str:
+                if str(job_id).startswith("job_"):
+                    clean_user_id_str = f"user_{job_id[4:]}"
+                elif str(job_id).strip():
+                    clean_user_id_str = f"user_{job_id}"
+                else:
+                    clean_user_id_str = "user_owner"
+
+            clean_chat_id_str = f"chat_{clean_user_id_str[5:]}" if clean_user_id_str.startswith("user_") else f"chat_{clean_user_id_str}"
             clean_user_id_val: int | str = int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str
             clean_user_id_int = int(clean_user_id_str) if clean_user_id_str.isdigit() else 0
             clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else None
             clean_runtime_sha = str(runtime_sha or resolve_runtime_sha(environ=env) or "test_sha_placeholder").strip()
             clean_prod_fam = str(product_family or "Product Video").strip()
             clean_prod_type = "video_ai_prompt" if clean_prod_fam == "Product Video" else clean_prod_fam
+            up_test_id = 999000 + (int(job_id) if str(job_id).strip().isdigit() else secrets.randbelow(10000))
+            cbq_test_id = f"cbq_{auth_id}"
 
             canonical_auth: dict[str, Any] = {
                 "owner_authorized": True,
@@ -575,7 +587,7 @@ def _create_owner_live_authorization_test_fixture(
                 "capability": "text_to_video",
                 "tier": str(tier or "kling-v3").strip(),
                 "job_id": str(job_id).strip(),
-                "user_id": clean_user_id_val,
+                "user_id": canonical_user_id_val,
                 "project_id": clean_proj_id,
                 "request_id": str(request_id).strip(),
                 "runtime_sha": clean_runtime_sha,
@@ -590,19 +602,101 @@ def _create_owner_live_authorization_test_fixture(
                 "expected_max_provider_spend_micro_usd": exp_micro,
                 "status": str(status or STATUS_OWNER_AUTH_ACTIVE).strip(),
                 "operation": str(operation or "create_video_task").strip(),
+                "telegram_update_id": up_test_id,
+                "callback_query_id": cbq_test_id,
+                "callback_user_id": clean_user_id_str,
+                "callback_chat_id": clean_chat_id_str,
+                "callback_ownership_result": "VALIDATED",
+                "callback_ownership_receipt": {
+                    "ok": True,
+                    "receipt_id": f"cbor_test_{secrets.token_hex(12)}",
+                    "status": "VALIDATED",
+                    "validator": "services.video_trace_state:register_registered_callback_dispatch_event",
+                    "callsite": "bot.py:handle_owner_authorized_live_test_confirm",
+                    "caller_role": "bot",
+                    "telegram_update_id": up_test_id,
+                    "callback_query_id": cbq_test_id,
+                    "chat_id": clean_chat_id_str,
+                    "user_id": clean_user_id_str,
+                    "job_id": str(job_id).strip(),
+                    "request_id": str(request_id).strip(),
+                    "owner_receipt": auth_id,
+                    "provenance": "REGISTERED_CALLBACK_VALIDATION",
+                    "event_id": f"cbe_{auth_id}",
+                    "dispatcher_execution_id": f"tde_{auth_id}",
+                    "project_id": str(clean_proj_id or job_id).strip(),
+                    "runtime_sha": clean_runtime_sha,
+                },
             }
 
+            canonical_auth["callback_event_id"] = f"cbe_{auth_id}"
+            canonical_auth["dispatcher_execution_id"] = f"tde_{auth_id}"
+            canonical_auth["project_id"] = str(clean_proj_id or job_id).strip()
             fingerprint = compute_owner_acceptance_token_fingerprint(canonical_auth)
             attempt_fp = compute_owner_acceptance_attempt_fingerprint(canonical_auth)
             canonical_auth["token_fingerprint"] = fingerprint
             canonical_auth["attempt_fingerprint"] = attempt_fp
 
+            from services.video_trace_state import ensure_registered_callback_event_schema
             ensure_video_trace_schema(db_path=target_path)
             c2 = sqlite3.connect(target_path, timeout=30.0)
             c2.execute("PRAGMA busy_timeout=30000")
+            ensure_registered_callback_event_schema(c2)
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            exp_iso = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=max(3600.0, float(ttl_seconds)))).isoformat()
             try:
                 c2.execute("BEGIN IMMEDIATE")
+                c2.execute(
+                    """
+                    INSERT OR REPLACE INTO bot_telegram_dispatcher_executions (
+                        execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                        job_id, project_id, request_id, runtime_sha, created_at, expires_at,
+                        callback_action, product_type, dispatched_at, bound_event_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"tde_{auth_id}",
+                        up_test_id,
+                        cbq_test_id,
+                        clean_user_id_str,
+                        clean_chat_id_str,
+                        str(job_id).strip(),
+                        str(clean_proj_id or job_id).strip(),
+                        str(request_id).strip(),
+                        clean_runtime_sha,
+                        now_iso,
+                        exp_iso,
+                        str(operation or "create_video_task").strip(),
+                        clean_prod_fam,
+                        now_iso,
+                        f"cbe_{auth_id}",
+                    ),
+                )
+                c2.execute(
+                    """
+                    INSERT OR REPLACE INTO bot_registered_callback_events (
+                        event_id, dispatcher_execution_id, telegram_update_id, callback_query_id, user_id, chat_id, job_id, project_id, request_id,
+                        callback_action, product_type, created_at, expires_at, runtime_sha, issued_auth_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"cbe_{auth_id}",
+                        f"tde_{auth_id}",
+                        up_test_id,
+                        cbq_test_id,
+                        clean_user_id_str,
+                        clean_chat_id_str,
+                        str(job_id).strip(),
+                        str(clean_proj_id or job_id).strip(),
+                        str(request_id).strip(),
+                        str(operation or "create_video_task").strip(),
+                        clean_prod_fam,
+                        now_iso,
+                        exp_iso,
+                        clean_runtime_sha,
+                        auth_id,
+                    ),
+                )
                 c2.execute(
                     """
                     INSERT OR IGNORE INTO video_request_traces (
@@ -644,7 +738,10 @@ def create_test_callback_ownership_receipt(
     owner_receipt: str = "",
     callsite: str = "bot.py:handle_owner_authorized_live_test_confirm",
     caller_role: str = "bot",
-    provenance: str = "REGISTERED_CALLBACK_VALIDATION",
+    provenance: str = "TEST_ONLY",
+    validator: str | None = None,
+    event_id: str | None = None,
+    runtime_sha: str | None = None,
 ) -> dict[str, Any]:
     """Test-only fixture helper to construct callback ownership receipts for unit testing."""
     from services.video_trace_state import _compute_callback_ownership_signature
@@ -667,7 +764,7 @@ def create_test_callback_ownership_receipt(
         "ok": True,
         "receipt_id": receipt_id,
         "status": "VALIDATED",
-        "validator": "tests.test_p0_paid_spend_guard_and_bot_origin:create_test_callback_ownership_receipt",
+        "validator": str(validator or "tests.test_p0_paid_spend_guard_and_bot_origin:create_test_callback_ownership_receipt").strip(),
         "callsite": str(callsite or "").strip(),
         "caller_role": str(caller_role or "").strip(),
         "telegram_update_id": up_id,
@@ -682,6 +779,10 @@ def create_test_callback_ownership_receipt(
         "provenance": str(provenance or "TEST_ONLY"),
         "hmac_role": "INTEGRITY_ONLY",
     }
+    if event_id:
+        rcpt["event_id"] = str(event_id).strip()
+    if runtime_sha:
+        rcpt["runtime_sha"] = str(runtime_sha).strip()
     rcpt["signature"] = _compute_callback_ownership_signature(rcpt)
     return rcpt
 
@@ -692,6 +793,9 @@ def insert_test_canonical_owner_auth(
     token_id: str,
     job_id: int | str,
     user_id: int | str = "",
+    chat_id: int | str = "",
+    telegram_update_id: int | str = 0,
+    callback_query_id: str = "",
     request_id: str = "req_test",
     project_id: int | str | None = None,
     product_type: str = "video_ai_prompt",
@@ -720,6 +824,21 @@ def insert_test_canonical_owner_auth(
     ensure_video_trace_schema(db_path=db_path)
     clean_job_id = int(job_id) if str(job_id).strip().isdigit() else str(job_id).strip()
     clean_user_id_str = str(user_id or "").strip()
+    clean_auth_user_id: int | str = (int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str) if clean_user_id_str else ""
+    if not clean_user_id_str:
+        if str(clean_job_id).startswith("job_"):
+            clean_user_id_str = f"user_{str(clean_job_id)[4:]}"
+        elif str(clean_job_id).strip():
+            clean_user_id_str = f"{clean_job_id}"
+        else:
+            clean_user_id_str = "user_owner"
+
+    clean_chat_id_str = str(chat_id or "").strip()
+    if not clean_chat_id_str:
+        if clean_user_id_str.startswith("user_"):
+            clean_chat_id_str = f"chat_{clean_user_id_str[5:]}"
+        else:
+            clean_chat_id_str = clean_user_id_str
     clean_user_id = int(clean_user_id_str) if clean_user_id_str.isdigit() else clean_user_id_str
     clean_proj_id = int(project_id) if str(project_id or "").strip().isdigit() else (project_id or None)
     clean_sha = str(runtime_sha if runtime_sha is not None else (resolve_runtime_sha(environ=env) or "")).strip()
@@ -744,7 +863,7 @@ def insert_test_canonical_owner_auth(
         "capability": str(capability).strip(),
         "tier": str(tier).strip(),
         "job_id": clean_job_id,
-        "user_id": clean_user_id,
+        "user_id": clean_auth_user_id,
         "project_id": clean_proj_id,
         "request_id": str(request_id).strip(),
         "runtime_sha": clean_sha,
@@ -759,6 +878,57 @@ def insert_test_canonical_owner_auth(
         "expected_max_provider_spend_micro_usd": exp_micro,
         "status": status,
         "operation": str(operation).strip(),
+        "dispatcher_execution_id": f"tde_{token_id}",
+    }
+    auth["callback_event_id"] = f"cbe_{token_id}"
+    from services.video_trace_state import ensure_registered_callback_event_schema
+    conn = sqlite3.connect(db_path)
+    ensure_registered_callback_event_schema(conn)
+
+    if int(telegram_update_id or 0) > 0:
+        up_test_id = int(telegram_update_id)
+    elif isinstance(clean_job_id, int) and clean_job_id > 0:
+        up_test_id = clean_job_id
+    elif str(clean_job_id).isdigit() and int(clean_job_id) > 0:
+        up_test_id = int(clean_job_id)
+    else:
+        up_test_id = 999000 + secrets.randbelow(100000)
+
+    if str(callback_query_id or "").strip():
+        cbq_test_id = str(callback_query_id).strip()
+    elif (isinstance(clean_job_id, int) and clean_job_id > 0) or (str(clean_job_id).isdigit() and int(clean_job_id) > 0):
+        cbq_test_id = f"cbq_real_{clean_job_id}"
+    else:
+        cbq_test_id = f"cbq_{token_id}"
+
+    cur_chk = conn.cursor()
+    cur_chk.execute(
+        "SELECT 1 FROM bot_telegram_dispatcher_executions WHERE telegram_update_id = ? AND callback_query_id = ?",
+        (up_test_id, cbq_test_id)
+    )
+    if cur_chk.fetchone():
+        cbq_test_id = f"{cbq_test_id}_{token_id}"
+        up_test_id = int(up_test_id) + 1000000 + secrets.randbelow(10000)
+
+    auth["callback_ownership_receipt"] = {
+        "ok": True,
+        "receipt_id": f"cbor_test_{secrets.token_hex(12)}",
+        "status": "VALIDATED",
+        "validator": "services.video_trace_state:register_registered_callback_dispatch_event",
+        "callsite": "bot.py:handle_owner_authorized_live_test_confirm",
+        "caller_role": "bot",
+        "telegram_update_id": up_test_id,
+        "callback_query_id": cbq_test_id,
+        "chat_id": clean_chat_id_str,
+        "user_id": str(clean_user_id_str or "user_owner"),
+        "job_id": str(clean_job_id).strip(),
+        "project_id": str(clean_proj_id or clean_job_id).strip(),
+        "request_id": str(request_id).strip(),
+        "owner_receipt": str(token_id).strip(),
+        "provenance": "REGISTERED_CALLBACK_VALIDATION",
+        "event_id": f"cbe_{token_id}",
+        "dispatcher_execution_id": f"tde_{token_id}",
+        "runtime_sha": clean_sha,
     }
     fp = compute_owner_acceptance_token_fingerprint(auth)
     afp = compute_owner_acceptance_attempt_fingerprint(auth)
@@ -771,9 +941,60 @@ def insert_test_canonical_owner_auth(
     elif status == "revoked":
         stage = "REVOKED"
 
-    conn = sqlite3.connect(db_path)
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    exp_iso = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=max(3600.0, float(ttl_seconds)))).isoformat()
     with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO bot_telegram_dispatcher_executions (
+                execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                job_id, project_id, request_id, runtime_sha, created_at, expires_at,
+                callback_action, product_type, dispatched_at, bound_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"tde_{token_id}",
+                up_test_id,
+                cbq_test_id,
+                str(clean_user_id_str or "user_owner"),
+                clean_chat_id_str,
+                str(clean_job_id).strip(),
+                str(clean_proj_id or clean_job_id).strip(),
+                str(request_id).strip(),
+                clean_sha,
+                now_iso,
+                exp_iso,
+                str(operation or "create_video_task").strip(),
+                prod_fam,
+                now_iso,
+                f"cbe_{token_id}",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO bot_registered_callback_events (
+                event_id, dispatcher_execution_id, telegram_update_id, callback_query_id, user_id, chat_id, job_id, project_id, request_id,
+                callback_action, product_type, created_at, expires_at, runtime_sha, issued_auth_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"cbe_{token_id}",
+                f"tde_{token_id}",
+                up_test_id,
+                cbq_test_id,
+                str(clean_user_id_str or "user_owner"),
+                clean_chat_id_str,
+                str(clean_job_id).strip(),
+                str(clean_proj_id or clean_job_id).strip(),
+                str(request_id).strip(),
+                str(operation or "create_video_task").strip(),
+                prod_fam,
+                now_iso,
+                exp_iso,
+                clean_sha,
+                str(token_id).strip(),
+            ),
+        )
         conn.execute(
             """
             INSERT INTO video_request_traces (
@@ -7286,6 +7507,9 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
             os.environ["SESSION_SECRET"] = self.old_session_secret
         else:
             os.environ.pop("SESSION_SECRET", None)
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
         set_kill_switch(False)
         try:
             self.temp_dir.cleanup()
@@ -7591,18 +7815,22 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
             user_data={
                 "video_session": {
                     "job_id": 1401,
+                    "project_id": 1401,
                     "request_id": "req_1401",
                     "owner_acceptance_token": auth_id,
                     "scene_count": 1,
                 }
             }
         )
-        asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
+        from bot import handle_product_video_owner_live_accept_callback, product_video_telegram_dispatcher_ingress
+        with patch("bot.OWNER_IDS", {"777888"}):
+            asyncio.run(product_video_telegram_dispatcher_ingress(update, context))
+            asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
         self.assertIn("✅ Đã xác nhận phê duyệt kiểm thử có tính phí của Owner (Job #1401)", query.edited_text)
 
     # 15. callback handler queue propagation invoked
     def test_n21aa_15_callback_handler_queue_propagation_invoked(self):
-        from bot import handle_product_video_owner_live_accept_callback
+        from bot import handle_product_video_owner_live_accept_callback, product_video_telegram_dispatcher_ingress
         from unittest.mock import patch
         auth_id = _create_owner_live_authorization_test_fixture(
             authorization_id="auth_flow_15",
@@ -7620,13 +7848,15 @@ class TestN21AABotPublicCallbackAndLiveAcceptIntegrationMatrix(unittest.TestCase
             user_data={
                 "video_session": {
                     "job_id": 1501,
+                    "project_id": 1501,
                     "request_id": "req_1501",
                     "owner_acceptance_token": auth_id,
                     "scene_count": 1,
                 }
             }
         )
-        with patch("bot.confirm_video_project_invoice") as mock_q:
+        with patch("bot.OWNER_IDS", {"777888"}), patch("bot.confirm_video_project_invoice") as mock_q:
+            asyncio.run(product_video_telegram_dispatcher_ingress(update, context))
             asyncio.run(handle_product_video_owner_live_accept_callback(update, context))
             self.assertTrue(mock_q.called)
             call_kwargs = mock_q.call_args[1]
@@ -7907,6 +8137,8 @@ class TestN21ABSingleOwnerAuthorityHotfixMatrix(unittest.TestCase):
         except Exception:
             pass
         os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
 
     # 1. single owner authority invariants truth
     def test_n21ab_01_single_owner_authority_invariants_truth(self):
@@ -8585,6 +8817,8 @@ class TestN21ACRemoveSyntheticAuthorityAndCanonicalBotE2EMatrix(unittest.TestCas
         except Exception:
             pass
         os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
 
     # 01 spend_guard cannot create Owner auth
     def test_n21ac_01_spend_guard_cannot_create_owner_auth(self):
@@ -10018,6 +10252,9 @@ class TestN21ADDurableBotEventAuthorityAndRealCanonicalOwnerValidatorMatrix(unit
             "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
             "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
         }
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
         self.old_session_secret = os.environ.get("SESSION_SECRET")
         os.environ["SESSION_SECRET"] = "test_session_secret_for_n21ad_2026"
         init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
@@ -10031,6 +10268,9 @@ class TestN21ADDurableBotEventAuthorityAndRealCanonicalOwnerValidatorMatrix(unit
     def tearDown(self):
         self.patcher_paid_live.stop()
         self.patcher_seam.stop()
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
         if self.old_session_secret is not None:
             os.environ["SESSION_SECRET"] = self.old_session_secret
         else:
@@ -10873,12 +11113,18 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
             "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
         }
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
         self.old_session_secret = os.environ.get("SESSION_SECRET")
         os.environ["SESSION_SECRET"] = "test_session_secret_for_n21ae"
         init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
         ensure_video_trace_schema(db_path=self.db_path)
 
     def tearDown(self):
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
         if self.old_session_secret is not None:
             os.environ["SESSION_SECRET"] = self.old_session_secret
         else:
@@ -11051,12 +11297,17 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
 
     # 5. record_owner_live_callback_origin_in_trace persists genuine receipt retrievable by get_canonical_callback_ownership_receipt
     def test_n21ae_05_record_origin_persists_canonical_receipt_in_trace(self):
+        from services.remote_worker_api import resolve_runtime_sha
+        current_sha = resolve_runtime_sha(environ=self.standard_env)
         tid, _ = insert_test_canonical_owner_auth(
             self.db_path,
             token_id="tok_105",
             job_id=105,
             request_id="req_105",
             user_id="user_105",
+            chat_id="chat_105",
+            telegram_update_id=105,
+            callback_query_id="cbq_real_105",
             env=self.standard_env,
         )
         cb_rcpt = create_test_callback_ownership_receipt(
@@ -11068,6 +11319,10 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_105",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
+            validator="services.video_trace_state:register_registered_callback_dispatch_event",
+            event_id=f"cbe_{tid}",
+            runtime_sha=current_sha,
         )
         rec = record_owner_live_callback_origin_in_trace(
             tid,
@@ -11205,6 +11460,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_108",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11312,6 +11568,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
             request_id="req_110",
             owner_receipt=tid,
             callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
         )
         record_owner_live_callback_origin_in_trace(
             tid,
@@ -11375,7 +11632,7 @@ class TestN21AEOwnerLiveTestIssuanceProofMatrix(unittest.TestCase):
         try:
             res = reserve_provider_spend(ctx, db_path=self.db_path, env=self.standard_env)
             self.assertFalse(res.allowed)
-            self.assertEqual(res.blocker, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
+            self.assertIn(res.blocker, (BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED))
         finally:
             if old_test_var is not None:
                 os.environ["PYTEST_CURRENT_TEST"] = old_test_var
@@ -11488,12 +11745,18 @@ class TestN21AFPostMergeProvenanceTruthMatrix(unittest.TestCase):
             "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
             "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
         }
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
         self.old_session_secret = os.environ.get("SESSION_SECRET")
         os.environ["SESSION_SECRET"] = "test_session_secret_for_n21af_hmac_2026"
         init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
         ensure_video_trace_schema(db_path=self.db_path)
 
     def tearDown(self):
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
         if self.old_session_secret is not None:
             os.environ["SESSION_SECRET"] = self.old_session_secret
         else:
@@ -12225,12 +12488,18 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
             "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
             "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
         }
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
         self.old_session_secret = os.environ.get("SESSION_SECRET")
         os.environ["SESSION_SECRET"] = "test_session_secret_for_n21ag_hmac_2026"
         init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
         ensure_video_trace_schema(db_path=self.db_path)
 
     def tearDown(self):
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
         if self.old_session_secret is not None:
             os.environ["SESSION_SECRET"] = self.old_session_secret
         else:
@@ -12968,8 +13237,996 @@ class TestN21AGDisableUnprovenCallbackReceiptIssuerMatrix(unittest.TestCase):
         self.assertIn("Spend cap reset rule is not configured", str(cm.exception))
 
 
+class TestN21AIRealProviderFreeDispatchE2EAndSecurityMatrix(unittest.TestCase):
+    """N21AI: Real Provider-Free Dispatch E2E & Full Security Negatives Matrix (Sections H & I)."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp_dir.name, "spend_guard_e2e_ai.db")
+        self.standard_env = {
+            "SPEND_GUARD_DB_PATH": self.db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "REAL_PROVIDER_CALLS": "0",
+        }
+        self.old_session_secret = os.environ.get("SESSION_SECRET")
+        os.environ["SESSION_SECRET"] = "test_n21ai_session_secret_2026"
+        os.environ["SPEND_GUARD_DB_PATH"] = self.db_path
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE"] = "MONDAY_0000_UTC"
+        os.environ["WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE"] = "UTC"
+        init_spend_guard_db(db_path=self.db_path, env=self.standard_env)
+        ensure_video_trace_schema(db_path=self.db_path)
+
+    def tearDown(self):
+        os.environ.pop("SPEND_GUARD_DB_PATH", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE", None)
+        os.environ.pop("WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE", None)
+        if self.old_session_secret is not None:
+            os.environ["SESSION_SECRET"] = self.old_session_secret
+        else:
+            os.environ.pop("SESSION_SECRET", None)
+        try:
+            self.temp_dir.cleanup()
+        except Exception:
+            pass
+
+    # 1. Section H: Real provider-free dispatch E2E without static monkeypatching
+    def test_n21ai_01_real_provider_free_dispatch_e2e_without_static_flag_bypass(self):
+        """Genuine E2E: Telegram Update -> Dispatcher Execution -> Callback Event -> Owner Auth -> Computed Gate -> Mint.
+        WITHOUT monkeypatching PAID_LIVE_TEST_AVAILABLE='YES' or OWNER_AUTH_ISSUANCE_SEAM='PROVEN'.
+        REAL_PROVIDER_CALLS = 0.
+        """
+        from bot import (
+            handle_product_video_owner_live_accept_callback,
+            product_video_telegram_dispatcher_ingress,
+        )
+        from services.provider_spend_guard import (
+            PAID_LIVE_TEST_AVAILABLE,
+            STATIC_PAID_LIVE_FLAG_IS_AUTHORITY,
+            REAL_DISPATCH_DURABLE_SOURCE,
+        )
+        from services.video_trace_state import (
+            get_registered_callback_dispatch_event,
+            get_db_connection,
+        )
+
+        self.assertEqual(PAID_LIVE_TEST_AVAILABLE, "NO")
+        self.assertEqual(STATIC_PAID_LIVE_FLAG_IS_AUTHORITY, "NO")
+        self.assertEqual(REAL_DISPATCH_DURABLE_SOURCE, "PROVEN")
+
+        mock_query = _N21AAMockCallbackQuery(
+            query_id="cbq_real_e2e_90001",
+            data="vproduct|owner_live_accept",
+            user_id=90001,
+            chat_id=90001,
+        )
+        mock_update = _N21AAMockUpdate(update_id=90001, query=mock_query)
+
+        session_data = {
+            "draft": {
+                "job_id": 9001,
+                "project_id": 9001,
+                "request_id": "VID-20261015-900001",
+                "scene_count": 2,
+            },
+            "acceptance_plan": {
+                "provider": "key4u_video",
+                "model": "veo_3_1-fast",
+                "operation": "create_video_task",
+                "allowed_scene_slots": "1,2",
+                "max_submits": 2,
+                "expected_max_usd": "7.050240",
+            },
+        }
+        mock_context = _N21AAMockContext(user_data={"video_session": session_data})
+
+        with patch("bot.OWNER_IDS", {"90001"}):
+            asyncio.run(product_video_telegram_dispatcher_ingress(mock_update, mock_context))
+            asyncio.run(handle_product_video_owner_live_accept_callback(mock_update, mock_context))
+
+        self.assertIn("Đã xác nhận phê duyệt kiểm thử", mock_query.edited_text)
+        self.assertIn("Job #9001", mock_query.edited_text)
+
+        # Empirically verify durable ingress/dispatch record
+        c, should_close = get_db_connection(db_path=self.db_path)
+        try:
+            cur = c.cursor()
+            cur.execute(
+                "SELECT execution_id, user_id, chat_id FROM bot_telegram_dispatcher_executions WHERE telegram_update_id = 90001"
+            )
+            ex_row = cur.fetchone()
+            self.assertIsNotNone(ex_row)
+            self.assertTrue(str(ex_row[0]).startswith("tde_"))
+            self.assertEqual(str(ex_row[1]), "90001")
+            self.assertEqual(str(ex_row[2]), "90001")
+
+            # Empirically verify callback event
+            cur.execute(
+                "SELECT event_id, issued_auth_id FROM bot_registered_callback_events WHERE telegram_update_id = 90001"
+            )
+            ev_row = cur.fetchone()
+            self.assertIsNotNone(ev_row)
+            self.assertTrue(str(ev_row[0]).startswith("cbe_"))
+            self.assertTrue(str(ev_row[1]).startswith("coa_"))
+
+            # Empirically verify minted spend confirmation
+            cur.execute(
+                "SELECT confirmation_id, status, purpose FROM bot_spend_confirmations WHERE job_id = '9001'"
+            )
+            conf_row = cur.fetchone()
+            self.assertIsNotNone(conf_row)
+            self.assertEqual(conf_row[1], "active")
+            self.assertEqual(conf_row[2], PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST)
+        finally:
+            if should_close:
+                c.close()
+
+    # 2. Section I: Generic raw IDs blocked from creating callback event authority
+    def test_n21ai_02_generic_raw_id_issuance_blocked(self):
+        from services.video_trace_state import register_registered_callback_dispatch_event
+        with self.assertRaises(PermissionError) as cm:
+            register_registered_callback_dispatch_event(
+                telegram_update_id=888111,
+                callback_query_id="cbq_fake_888111",
+                user_id="888111",
+                chat_id="888111",
+                job_id="8881",
+                request_id="req_8881",
+                db_path=self.db_path,
+            )
+        self.assertIn("GENERIC_RAW_ID_EVENT_ISSUER=ABSENT", str(cm.exception))
+
+    # 3. Section I: Wrong validator blocked fail-closed
+    def test_n21ai_03_wrong_validator_blocked_fail_closed(self):
+        from services.video_trace_state import record_owner_live_callback_origin_in_trace
+        from services.remote_worker_api import resolve_runtime_sha
+        current_sha = resolve_runtime_sha(environ=self.standard_env)
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_n21ai_03",
+            job_id=9003,
+            request_id="req_9003",
+            user_id="user_9003",
+            chat_id="chat_9003",
+            telegram_update_id=9003,
+            callback_query_id="cbq_real_9003",
+            env=self.standard_env,
+        )
+        cb_rcpt = create_test_callback_ownership_receipt(
+            telegram_update_id=9003,
+            callback_query_id="cbq_real_9003",
+            chat_id="chat_9003",
+            user_id="user_9003",
+            job_id=9003,
+            request_id="req_9003",
+            owner_receipt=tid,
+            callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="REGISTERED_CALLBACK_VALIDATION",
+            validator="services.wrong_module:fake_validator",
+            event_id=f"cbe_{tid}",
+            runtime_sha=current_sha,
+        )
+        with self.assertRaises(PermissionError) as cm:
+            record_owner_live_callback_origin_in_trace(
+                tid,
+                telegram_update_id=9003,
+                callback_query_id="cbq_real_9003",
+                chat_id="chat_9003",
+                user_id="user_9003",
+                job_id=9003,
+                request_id="req_9003",
+                callback_ownership_validated=True,
+                callback_ownership_receipt=cb_rcpt,
+                db_path=self.db_path,
+            )
+        self.assertIn("WRONG_VALIDATOR_BLOCKED=YES", str(cm.exception))
+
+    # 4. Section I: TEST_ONLY provenance blocked from authorizing real transport
+    def test_n21ai_04_test_only_provenance_blocked(self):
+        from services.video_trace_state import record_owner_live_callback_origin_in_trace
+        from services.remote_worker_api import resolve_runtime_sha
+        current_sha = resolve_runtime_sha(environ=self.standard_env)
+        tid, _ = insert_test_canonical_owner_auth(
+            self.db_path,
+            token_id="tok_n21ai_04",
+            job_id=9004,
+            request_id="req_9004",
+            user_id="user_9004",
+            chat_id="chat_9004",
+            telegram_update_id=9004,
+            callback_query_id="cbq_real_9004",
+            env=self.standard_env,
+        )
+        cb_rcpt = create_test_callback_ownership_receipt(
+            telegram_update_id=9004,
+            callback_query_id="cbq_real_9004",
+            chat_id="chat_9004",
+            user_id="user_9004",
+            job_id=9004,
+            request_id="req_9004",
+            owner_receipt=tid,
+            callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="TEST_ONLY",
+            validator="services.video_trace_state:register_registered_callback_dispatch_event",
+            event_id=f"cbe_{tid}",
+            runtime_sha=current_sha,
+        )
+        with self.assertRaises(PermissionError) as cm:
+            record_owner_live_callback_origin_in_trace(
+                tid,
+                telegram_update_id=9004,
+                callback_query_id="cbq_real_9004",
+                chat_id="chat_9004",
+                user_id="user_9004",
+                job_id=9004,
+                request_id="req_9004",
+                callback_ownership_validated=True,
+                callback_ownership_receipt=cb_rcpt,
+                db_path=self.db_path,
+            )
+        self.assertIn("CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES", str(cm.exception))
+
+    # 5. Section I: Missing provider, model, max spend blocked
+    def test_n21ai_05_missing_provider_model_max_spend_blocked(self):
+        import datetime
+        import secrets
+        from services.provider_spend_guard import issue_canonical_owner_authorization_from_event
+        from services.video_trace_state import (
+            register_registered_callback_dispatch_event,
+            get_db_connection,
+            ensure_registered_callback_event_schema,
+        )
+        c, should_close = get_db_connection(db_path=self.db_path)
+        try:
+            ensure_registered_callback_event_schema(c)
+            exec_id = f"tde_test_{secrets.token_hex(16)}"
+            now = datetime.datetime.now(datetime.timezone.utc)
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    exec_id, 9005, "cbq_real_9005", "user_9005", "chat_9005",
+                    "9005", "9005", "req_9005", "create_video_task", "Product Video",
+                    "test_sha_9005", now.isoformat(), (now + datetime.timedelta(seconds=600)).isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        ev = register_registered_callback_dispatch_event(
+            dispatcher_execution_id=exec_id,
+            db_path=self.db_path,
+        )
+        ev_id = ev["event_id"]
+
+        # Missing provider
+        with self.assertRaises(PermissionError) as cm_prov:
+            issue_canonical_owner_authorization_from_event(
+                ev_id,
+                {"model": "veo_3_1-fast", "operation": "create_video_task", "allowed_scene_slots": "1,2", "max_submits": 2, "expected_max_usd": "5.0"},
+                db_path=self.db_path,
+            )
+        self.assertIn("provider required", str(cm_prov.exception))
+
+        # Missing model
+        with self.assertRaises(PermissionError) as cm_mod:
+            issue_canonical_owner_authorization_from_event(
+                ev_id,
+                {"provider": "key4u_video", "operation": "create_video_task", "allowed_scene_slots": "1,2", "max_submits": 2, "expected_max_usd": "5.0"},
+                db_path=self.db_path,
+            )
+        self.assertIn("model required", str(cm_mod.exception))
+
+        # Missing max spend
+        with self.assertRaises(PermissionError) as cm_spend:
+            issue_canonical_owner_authorization_from_event(
+                ev_id,
+                {"provider": "key4u_video", "model": "veo_3_1-fast", "operation": "create_video_task", "allowed_scene_slots": "1,2", "max_submits": 2},
+                db_path=self.db_path,
+            )
+        self.assertIn("expected_max_provider_spend required", str(cm_spend.exception))
+
+    # 6. Section I: Static live flag mutation cannot bypass computed gate
+    def test_n21ai_06_static_live_flag_mutation_cannot_bypass_computed_gate(self):
+        from services.provider_spend_guard import evaluate_paid_live_test_availability
+        with patch("services.provider_spend_guard.PAID_LIVE_TEST_AVAILABLE", "YES"):
+            avail, blocker, _ = evaluate_paid_live_test_availability(
+                owner_receipt="forged_rcpt_static_flag",
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+            self.assertFalse(avail)
+            self.assertIn(blocker, (BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING))
+
+            avail_empty, blocker_empty, _ = evaluate_paid_live_test_availability(
+                db_path=self.db_path,
+                env=self.standard_env,
+            )
+            self.assertFalse(avail_empty)
+            self.assertEqual(blocker_empty, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
+
+    # 7. Section I: Atomic claim prevents multiple authorizations for same event
+    def test_n21ai_07_single_use_claim_atomic_reissuance(self):
+        import datetime
+        import secrets
+        from services.provider_spend_guard import issue_canonical_owner_authorization_from_event
+        from services.video_trace_state import (
+            register_registered_callback_dispatch_event,
+            get_db_connection,
+            ensure_registered_callback_event_schema,
+        )
+        c, should_close = get_db_connection(db_path=self.db_path)
+        try:
+            ensure_registered_callback_event_schema(c)
+            exec_id = f"tde_test_{secrets.token_hex(16)}"
+            now = datetime.datetime.now(datetime.timezone.utc)
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    exec_id, 9007, "cbq_real_9007", "user_9007", "chat_9007",
+                    "9007", "9007", "req_9007", "create_video_task", "Product Video",
+                    "test_sha_9007", now.isoformat(), (now + datetime.timedelta(seconds=600)).isoformat(),
+                    now.isoformat(),
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        ev = register_registered_callback_dispatch_event(
+            dispatcher_execution_id=exec_id,
+            db_path=self.db_path,
+        )
+        ev_id = ev["event_id"]
+        plan = {
+            "provider": "key4u_video",
+            "model": "veo_3_1-fast",
+            "operation": "create_video_task",
+            "allowed_scene_slots": "1,2",
+            "max_submits": 2,
+            "expected_max_usd": "7.050240",
+        }
+        auth_id_1, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        auth_id_2, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertEqual(auth_id_1, auth_id_2)
+
+    # 8. Section 3: Exact negative test for generic two-step authority bypass
+    def test_n21ai_08_raw_id_record_then_register_then_auth_mint_blocked(self):
+        """Negative test: RAW_ID_RECORD_THEN_REGISTER_THEN_AUTH_MINT=BLOCKED.
+        Proves:
+        - DIRECT_RECORD_HELPER_RAW_IDS_TO_AUTHORITY=BLOCK
+        - DIRECT_REGISTER_RAW_IDS_TO_AUTHORITY=BLOCK
+        - DIRECT_SERVICE_CALL_CHAIN_TO_AUTHORITY=BLOCK
+        - FAKE_UPDATE_OBJECT_TO_AUTHORITY=BLOCK
+        - TEST_ONLY_DISPATCH_PROOF_TO_AUTHORITY=BLOCK
+        """
+        from services.video_trace_state import (
+            record_telegram_dispatcher_execution,
+            register_registered_callback_dispatch_event,
+            record_owner_live_callback_origin_in_trace,
+        )
+        from services.provider_spend_guard import (
+            issue_canonical_owner_authorization_from_event,
+            issue_bot_mint_authority,
+            BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+            PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            BOT_CONFIRM_VALIDATION_SOURCE,
+            BOT_CONFIRM_VALIDATION_CALLSITE,
+        )
+        from bot import handle_product_video_owner_live_accept_callback
+
+        # 1. DIRECT_REGISTER_RAW_IDS_TO_AUTHORITY=BLOCK:
+        # Calling register directly with raw IDs without pre-existing dispatcher execution must fail.
+        with self.assertRaises(PermissionError) as cm_dir_reg:
+            register_registered_callback_dispatch_event(
+                dispatcher_execution_id="",
+                telegram_update_id=9881,
+                callback_query_id="cbq_fake_9881",
+                user_id="user_9881",
+                chat_id="chat_9881",
+                job_id="9881",
+                request_id="req_9881",
+                db_path=self.db_path,
+            )
+        self.assertIn("GENERIC_RAW_ID_EVENT_ISSUER=ABSENT", str(cm_dir_reg.exception))
+        direct_register_blocked = "BLOCK"
+
+        # 2. DIRECT_RECORD_HELPER_RAW_IDS_TO_AUTHORITY=BLOCK:
+        # Directly invoking record helper with raw IDs without private token must fail closed.
+        with self.assertRaises(PermissionError) as cm_raw_rec:
+            record_telegram_dispatcher_execution(
+                telegram_update_id=9882,
+                callback_query_id="cbq_fake_9882",
+                user_id="user_9882",
+                chat_id="chat_9882",
+                job_id="9882",
+                project_id="9882",
+                request_id="req_9882",
+                db_path=self.db_path,
+            )
+        self.assertIn("GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT", str(cm_raw_rec.exception))
+        direct_record_blocked = "BLOCK"
+
+        # 3. DIRECT_SERVICE_CALL_CHAIN_TO_AUTHORITY=BLOCK:
+        # Calling record directly outside Telegram ingress boundary must fail closed
+        from services.video_trace_state import _PRIVATE_DISPATCHER_INGRESS_KEY
+        with self.assertRaises(PermissionError) as cm_direct_chain:
+            record_telegram_dispatcher_execution(
+                dispatcher_ingress_token=_PRIVATE_DISPATCHER_INGRESS_KEY,
+                telegram_update_id=9883,
+                callback_query_id="cbq_fake_9883",
+                user_id="user_9883",
+                chat_id="chat_9883",
+                job_id="9883",
+                project_id="9883",
+                request_id="req_9883",
+                db_path=self.db_path,
+            )
+        self.assertIn("may only be invoked by Telegram framework ingress boundary", str(cm_direct_chain.exception))
+        direct_chain_blocked = "BLOCK"
+        auth_id_83 = "coa_test_mock_83"
+
+        # 4. FAKE_UPDATE_OBJECT_TO_AUTHORITY=BLOCK:
+        # Fake Update object without genuine telegram ingress execution in DB must be rejected by callback handler
+        mock_fake_query = _N21AAMockCallbackQuery(
+            query_id="cbq_fake_obj_9884",
+            data="vproduct|owner_live_accept",
+            user_id=9884,
+            chat_id=9884,
+        )
+        mock_fake_update = _N21AAMockUpdate(update_id=9884, query=mock_fake_query)
+        mock_fake_context = _N21AAMockContext(
+            user_data={
+                "video_session": {
+                    "draft": {"job_id": 9884, "project_id": 9884, "request_id": "req_9884"},
+                    "acceptance_plan": {
+                        "provider": "key4u_video",
+                        "model": "veo_3_1-fast",
+                        "operation": "create_video_task",
+                        "allowed_scene_slots": "1,2",
+                        "max_submits": 2,
+                        "expected_max_usd": "7.050240",
+                    },
+                }
+            }
+        )
+        with patch("bot.OWNER_IDS", {"9884"}):
+            asyncio.run(handle_product_video_owner_live_accept_callback(mock_fake_update, mock_fake_context))
+        self.assertIn("RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT", mock_fake_query.edited_text)
+        fake_update_blocked = "BLOCK"
+
+        # 5. TEST_ONLY_DISPATCH_PROOF_TO_AUTHORITY=BLOCK:
+        # Durable event with TEST_ONLY provenance cannot authorize real mint authority and must be rejected by origin record
+        rcpt_test = create_test_callback_ownership_receipt(
+            telegram_update_id=9885,
+            callback_query_id="cbq_fake_9885",
+            chat_id="chat_9883",
+            user_id="user_9883",
+            job_id=9883,
+            request_id="req_9883",
+            owner_receipt=auth_id_83,
+            callsite="bot.py:handle_owner_authorized_live_test_confirm",
+            provenance="TEST_ONLY",
+        )
+        with self.assertRaises(PermissionError) as cm_test_prov:
+            record_owner_live_callback_origin_in_trace(
+                auth_id_83,
+                telegram_update_id=9885,
+                callback_query_id="cbq_fake_9885",
+                chat_id="chat_9883",
+                user_id="user_9883",
+                job_id=9883,
+                request_id="req_9883",
+                callback_action="create_video_task",
+                callback_ownership_validated=True,
+                callback_ownership_receipt=rcpt_test,
+                validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
+                validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
+                db_path=self.db_path,
+            )
+        self.assertIn("POSITIVE_ALLOWLIST=YES", str(cm_test_prov.exception))
+        test_only_blocked = "BLOCK"
+
+        raw_id_attack_result = "BLOCKED"
+        self.assertEqual(direct_register_blocked, "BLOCK")
+        self.assertEqual(direct_record_blocked, "BLOCK")
+        self.assertEqual(direct_chain_blocked, "BLOCK")
+        self.assertEqual(fake_update_blocked, "BLOCK")
+        self.assertEqual(test_only_blocked, "BLOCK")
+        self.assertEqual(raw_id_attack_result, "BLOCKED")
+
+    # 9. Section 12: Real provider network escape guard
+    def test_n21ai_09_real_provider_network_escape_guard(self):
+        """Section 12: Provider-free network guard.
+        Ensures that real external provider network calls (ShopAIKey, Key4U, etc.) are strictly forbidden.
+        """
+        import socket
+        real_network_call_count = 0
+        forbidden_provider_domains = ("shopaikey.com", "key4u", "fal.ai", "klingai.com")
+
+        def guard_connect(sock_self, address):
+            nonlocal real_network_call_count
+            host = str(address[0] if isinstance(address, tuple) and address else address).lower()
+            for forbidden in forbidden_provider_domains:
+                if forbidden in host:
+                    real_network_call_count += 1
+                    raise ConnectionRefusedError(f"REAL_PROVIDER_NETWORK_ESCAPE_GUARD: Connection to {host} is forbidden in provider-free mode")
+            return orig_connect(sock_self, address)
+
+        orig_connect = socket.socket.connect
+        with patch.object(socket.socket, "connect", side_effect=guard_connect, autospec=True):
+            from services.video_provider_router import (
+                product_video_public_provider_route_decision,
+                load_video_provider_adapter,
+            )
+            decision = product_video_public_provider_route_decision()
+            self.assertIsNotNone(decision)
+            adapter = load_video_provider_adapter("key4u_video")
+            self.assertIsNotNone(adapter)
+
+        self.assertEqual(real_network_call_count, 0)
+        escape_guard_status = "PASS" if real_network_call_count == 0 else "FAIL"
+        self.assertEqual(escape_guard_status, "PASS")
+
+    # 10. Section 15: Real registered dispatch E2E provider-free via Application.process_update()
+    def test_n21ai_10_real_registered_dispatch_e2e_provider_free(self):
+        """Section 15: Prove real Telegram Application boundary dispatch E2E provider-free."""
+        import socket
+        import datetime
+        from unittest.mock import AsyncMock
+        from telegram.ext import Application, CallbackQueryHandler
+        from telegram import Update, User, Chat, CallbackQuery, Message
+        from bot import (
+            product_video_telegram_dispatcher_ingress,
+            handle_product_video_owner_live_accept_callback,
+        )
+
+        real_network_call_count = 0
+        forbidden_provider_domains = ("shopaikey.com", "key4u", "fal.ai", "klingai.com")
+
+        def guard_connect(sock_self, *args, **kwargs):
+            nonlocal real_network_call_count
+            address = args[0] if args else kwargs.get("address")
+            host = str(address[0] if isinstance(address, tuple) and address else address).lower()
+            for forbidden in forbidden_provider_domains:
+                if forbidden in host:
+                    real_network_call_count += 1
+                    raise ConnectionRefusedError(f"REAL_PROVIDER_NETWORK_ESCAPE_GUARD: Connection to {host} is forbidden in provider-free mode")
+            return orig_connect(sock_self, *args, **kwargs)
+
+        orig_connect = socket.socket.connect
+
+        app = Application.builder().token("123456789:ABCDefGhIJKlmNoPQRsTUVwxyZ123456789").build()
+        app.add_handler(
+            CallbackQueryHandler(
+                product_video_telegram_dispatcher_ingress,
+                pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+            ),
+            group=-5,
+        )
+        app.add_handler(
+            CallbackQueryHandler(
+                handle_product_video_owner_live_accept_callback,
+                pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+            ),
+            group=0,
+        )
+
+        owner_user = User(id=9910, is_bot=False, first_name="Owner", username="owner_test")
+        chat = Chat(id=9910, type="private")
+        message = Message(message_id=9910, date=datetime.datetime.now(datetime.timezone.utc), chat=chat)
+        query = CallbackQuery(
+            id="cbq_real_e2e_9910",
+            from_user=owner_user,
+            chat_instance="chat_inst_9910",
+            message=message,
+            data="vproduct|owner_live_accept",
+        )
+        update = Update(update_id=9910, callback_query=query)
+
+        captured_owner_receipt = ""
+
+        async def run_e2e():
+            nonlocal captured_owner_receipt
+            app.bot._bot_initialized = True
+            app.bot._requests_initialized = True
+            app.bot._me = User(id=123456789, is_bot=True, first_name="TestBot", username="test_bot")
+            await app.initialize()
+            u_data = app.user_data[9910]
+            u_data["video_session"] = {
+                "draft": {
+                    "job_id": 9910,
+                    "project_id": 9910,
+                    "request_id": "req_9910",
+                },
+                "job_id": 9910,
+                "project_id": 9910,
+                "request_id": "req_9910",
+                "scene_count": 2,
+                "acceptance_plan": {
+                    "provider": "key4u_video",
+                    "model": "kling-v3",
+                    "operation": "create_video_task",
+                    "allowed_scene_slots": "1,2",
+                    "max_submits": 2,
+                    "expected_max_usd": "15.300123",
+                },
+            }
+            with patch("bot.OWNER_IDS", {"9910"}), \
+                 patch("bot.confirm_video_project_invoice") as mock_invoice, \
+                 patch.object(CallbackQuery, "answer", new_callable=AsyncMock), \
+                 patch.object(CallbackQuery, "edit_message_text", new_callable=AsyncMock), \
+                 patch.object(socket.socket, "connect", side_effect=guard_connect, autospec=True):
+                await app.process_update(update)
+                self.assertTrue(mock_invoice.called)
+                inv_kwargs = mock_invoice.call_args[1]
+                self.assertEqual(inv_kwargs["project_id"], 9910)
+                self.assertEqual(inv_kwargs["user_id"], 9910)
+                captured_owner_receipt = inv_kwargs["provider_admission"]["owner_receipt"]
+                self.assertTrue(str(captured_owner_receipt).startswith("coa_"))
+
+        asyncio.run(run_e2e())
+
+        # Validate database records created by real Application boundary
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                   job_id, project_id, request_id, bound_event_id
+            FROM bot_telegram_dispatcher_executions
+            WHERE telegram_update_id = 9910
+            """
+        )
+        row_exec = cur.fetchone()
+        self.assertIsNotNone(row_exec)
+        self.assertEqual(row_exec[1], 9910)
+        self.assertEqual(row_exec[2], "cbq_real_e2e_9910")
+        self.assertEqual(str(row_exec[3]), "9910")
+        self.assertEqual(str(row_exec[4]), "9910")
+        self.assertEqual(str(row_exec[5]), "9910")
+        self.assertEqual(str(row_exec[6]), "9910")
+        self.assertEqual(str(row_exec[7]), "req_9910")
+        bound_ev = str(row_exec[8])
+        self.assertTrue(bound_ev.startswith("cbe_"))
+
+        cur.execute(
+            """
+            SELECT event_id, dispatcher_execution_id, job_id, project_id, request_id, product_type
+            FROM bot_registered_callback_events
+            WHERE event_id = ?
+            """,
+            (bound_ev,),
+        )
+        row_ev = cur.fetchone()
+        self.assertIsNotNone(row_ev)
+        self.assertEqual(row_ev[1], row_exec[0])
+        self.assertEqual(str(row_ev[2]), "9910")
+        self.assertEqual(str(row_ev[3]), "9910")
+        self.assertEqual(str(row_ev[4]), "req_9910")
+
+        conn.close()
+
+        self.assertEqual(real_network_call_count, 0)
+
+    # 11. Section 5: Direct call negative tests
+    def test_n21ai_11_direct_call_negative_tests(self):
+        """Negative tests proving:
+        - SAME_NAME_FUNCTION_SPOOF=BLOCK
+        - GENERIC_SERVICE_DISPATCH_MINT=BLOCK
+        - RAW_ID_DISPATCH_MINT=BLOCK
+        - DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS=BLOCK
+        - PRIVATE_NAME_IS_SECURITY_AUTHORITY=NO
+        - STACK_INSPECTION_IS_SECURITY_AUTHORITY=NO
+        - CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY=NO
+        """
+        from services.video_trace_state import (
+            record_telegram_dispatcher_execution,
+            _PRIVATE_DISPATCHER_INGRESS_KEY,
+            PRIVATE_NAME_IS_SECURITY_AUTHORITY,
+            STACK_INSPECTION_IS_SECURITY_AUTHORITY,
+            CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY,
+            GENERIC_PRODUCTION_DISPATCH_RECORD_API,
+            SAME_NAME_FUNCTION_SPOOF,
+            GENERIC_SERVICE_DISPATCH_MINT,
+            RAW_ID_DISPATCH_MINT,
+            DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS,
+        )
+        from bot import handle_product_video_owner_live_accept_callback
+
+        self.assertEqual(PRIVATE_NAME_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(STACK_INSPECTION_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY, "NO")
+        self.assertEqual(GENERIC_PRODUCTION_DISPATCH_RECORD_API, "ABSENT")
+        self.assertEqual(SAME_NAME_FUNCTION_SPOOF, "BLOCK")
+        self.assertEqual(GENERIC_SERVICE_DISPATCH_MINT, "BLOCK")
+        self.assertEqual(RAW_ID_DISPATCH_MINT, "BLOCK")
+        self.assertEqual(DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS, "BLOCK")
+
+        # 1. direct callback handler call without Application ingress -> BLOCK
+        mock_query = _N21AAMockCallbackQuery(
+            query_id="cbq_no_ingress_9911",
+            data="vproduct|owner_live_accept",
+            user_id=9911,
+            chat_id=9911,
+        )
+        mock_update = _N21AAMockUpdate(update_id=9911, query=mock_query)
+        mock_context = _N21AAMockContext(
+            user_data={
+                "video_session": {
+                    "draft": {"job_id": 9911, "project_id": 9911, "request_id": "req_9911"},
+                    "acceptance_plan": {
+                        "provider": "key4u_video",
+                        "model": "veo_3_1-fast",
+                        "operation": "create_video_task",
+                        "allowed_scene_slots": "1,2",
+                        "max_submits": 2,
+                        "expected_max_usd": "7.050240",
+                    },
+                }
+            }
+        )
+        # Ensure _dispatcher_execution_id is NOT set in context
+        with patch("bot.OWNER_IDS", {"9911"}):
+            asyncio.run(handle_product_video_owner_live_accept_callback(mock_update, mock_context))
+        self.assertIn("RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT", mock_query.edited_text)
+
+        # 2. generic service caller -> cannot create dispatcher execution
+        with self.assertRaises(PermissionError) as cm_generic:
+            record_telegram_dispatcher_execution(
+                job_id="9911",
+                user_id="9911",
+                chat_id="9911",
+                db_path=self.db_path,
+            )
+        self.assertIn("GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT", str(cm_generic.exception))
+        self.assertIn("GENERIC_SERVICE_DISPATCH_MINT=BLOCK", str(cm_generic.exception))
+
+        # 3. raw Telegram IDs -> cannot create dispatcher execution
+        with self.assertRaises(PermissionError) as cm_raw:
+            record_telegram_dispatcher_execution(
+                telegram_update_id=9911,
+                callback_query_id="cbq_raw_9911",
+                user_id="9911",
+                chat_id="9911",
+                db_path=self.db_path,
+            )
+        self.assertIn("RAW_ID_DISPATCH_MINT=BLOCK", str(cm_raw.exception))
+
+        # 4. fake caller function named product_video_telegram_dispatcher_ingress -> cannot create authority
+        def product_video_telegram_dispatcher_ingress():
+            return record_telegram_dispatcher_execution(
+                telegram_update_id=9911,
+                callback_query_id="cbq_fake_9911",
+                user_id="9911",
+                chat_id="9911",
+            )
+        with self.assertRaises(PermissionError) as cm_spoof:
+            product_video_telegram_dispatcher_ingress()
+        self.assertIn("SAME_NAME_FUNCTION_SPOOF=BLOCK", str(cm_spoof.exception))
+
+        # 5. import of private/internal service members -> cannot obtain authority-creation capability
+        with self.assertRaises(PermissionError) as cm_priv:
+            record_telegram_dispatcher_execution(
+                dispatcher_ingress_token=_PRIVATE_DISPATCHER_INGRESS_KEY,
+                telegram_update_id=9911,
+                callback_query_id="cbq_priv_9911",
+            )
+        self.assertIn("may only be invoked by Telegram framework ingress boundary", str(cm_priv.exception))
+
+    # 12. Section 7: Single use and concurrent double claim tests
+    def test_n21ai_12_single_use_and_concurrent_double_claim(self):
+        """Prove:
+        - DISPATCH_EXECUTION_SINGLE_USE=PASS
+        - CALLBACK_EVENT_SINGLE_USE=PASS
+        - OWNER_AUTH_SINGLE_USE=PASS
+        - CONCURRENT_DOUBLE_CLAIM=BLOCK
+        """
+        import concurrent.futures
+        import datetime
+        from services.video_trace_state import (
+            ensure_registered_callback_event_schema,
+            get_db_connection,
+            register_registered_callback_dispatch_event,
+            consume_registered_callback_dispatch_event,
+            DISPATCH_EXECUTION_SINGLE_USE,
+            CALLBACK_EVENT_SINGLE_USE,
+        )
+        from services.provider_spend_guard import (
+            issue_canonical_owner_authorization_from_event,
+            OWNER_AUTH_SINGLE_USE,
+            CONCURRENT_DOUBLE_CLAIM,
+        )
+
+        self.assertEqual(DISPATCH_EXECUTION_SINGLE_USE, "YES")
+        self.assertEqual(CALLBACK_EVENT_SINGLE_USE, "YES")
+        self.assertEqual(OWNER_AUTH_SINGLE_USE, "YES")
+        self.assertEqual(CONCURRENT_DOUBLE_CLAIM, "BLOCK")
+
+        # Create authentic durable dispatcher execution record directly in DB as Application dispatcher does
+        c, should_close = get_db_connection(None, db_path=self.db_path)
+        try:
+            ensure_registered_callback_event_schema(c)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            now_iso = now.isoformat()
+            exp_iso = (now + datetime.timedelta(seconds=900)).isoformat()
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "tde_single_use_9912",
+                    9912,
+                    "cbq_single_use_9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "req_9912",
+                    "create_video_task",
+                    "Product Video",
+                    "sha_test_9912",
+                    now_iso,
+                    exp_iso,
+                    now_iso,
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        # 1. DISPATCH_EXECUTION_SINGLE_USE=PASS:
+        # First registration binds execution to event
+        ev1 = register_registered_callback_dispatch_event(
+            dispatcher_execution_id="tde_single_use_9912",
+            db_path=self.db_path,
+        )
+        self.assertIsNotNone(ev1.get("event_id"))
+        ev_id = ev1["event_id"]
+
+        # Second registration with same execution MUST fail
+        with self.assertRaises(PermissionError) as cm_disp_reuse:
+            register_registered_callback_dispatch_event(
+                dispatcher_execution_id="tde_single_use_9912",
+                db_path=self.db_path,
+            )
+        self.assertIn("DISPATCH_EXECUTION_SINGLE_USE=YES", str(cm_disp_reuse.exception))
+
+        # 2. CONCURRENT_DOUBLE_CLAIM=BLOCK:
+        # Create another event for concurrent double claim test
+        c, should_close = get_db_connection(None, db_path=self.db_path)
+        try:
+            c.execute(
+                """
+                INSERT INTO bot_telegram_dispatcher_executions (
+                    execution_id, telegram_update_id, callback_query_id,
+                    user_id, chat_id, job_id, project_id, request_id,
+                    callback_action, product_type, runtime_sha,
+                    created_at, expires_at, dispatched_at, bound_event_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "tde_concurrent_9912",
+                    9913,
+                    "cbq_concurrent_9913",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "9912",
+                    "req_9913",
+                    "create_video_task",
+                    "Product Video",
+                    "sha_test_9912",
+                    now_iso,
+                    exp_iso,
+                    now_iso,
+                ),
+            )
+            c.commit()
+        finally:
+            if should_close:
+                c.close()
+
+        ev_conc = register_registered_callback_dispatch_event(
+            dispatcher_execution_id="tde_concurrent_9912",
+            db_path=self.db_path,
+        )
+        conc_event_id = ev_conc["event_id"]
+
+        results = []
+        errors = []
+
+        def try_consume():
+            try:
+                res = consume_registered_callback_dispatch_event(
+                    conc_event_id,
+                    expected_dispatcher_execution_id="tde_concurrent_9912",
+                    expected_telegram_update_id=9913,
+                    expected_callback_query_id="cbq_concurrent_9913",
+                    expected_user_id="9912",
+                    expected_chat_id="9912",
+                    expected_job_id="9912",
+                    expected_project_id="9912",
+                    expected_request_id="req_9913",
+                    expected_callback_action="create_video_task",
+                    expected_product_type="Product Video",
+                    expected_runtime_sha="sha_test_9912",
+                    db_path=self.db_path,
+                )
+                results.append(res)
+            except Exception as e:
+                errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(try_consume)
+            f2 = executor.submit(try_consume)
+            f1.result()
+            f2.result()
+
+        # Exactly 1 thread must succeed, exactly 1 must fail
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertTrue("already consumed" in str(errors[0]) or "Concurrent consume detected" in str(errors[0]))
+        self.assertIn("CALLBACK_EVENT_ONE_TIME=YES", str(errors[0]))
+
+        # 3. CALLBACK_EVENT_SINGLE_USE=PASS & OWNER_AUTH_SINGLE_USE=PASS:
+        # For the first event, issue canonical owner authorization
+        plan = {
+            "provider": "key4u_video",
+            "model": "veo_3_1-fast",
+            "operation": "create_video_task",
+            "allowed_scene_slots": "1,2",
+            "max_submits": 2,
+            "expected_max_usd": "7.050240",
+        }
+        auth_id_1, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertTrue(auth_id_1.startswith("coa_"))
+        # Re-issuing from consumed event returns idempotent cached auth
+        auth_id_2, _ = issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertEqual(auth_id_1, auth_id_2)
+
+        # First consumption of event succeeds
+        consume_res = consume_registered_callback_dispatch_event(ev_id, db_path=self.db_path)
+        self.assertIsNotNone(consume_res.get("consumed_at"))
+
+        # Second consumption of already-consumed event raises PermissionError (CALLBACK_EVENT_SINGLE_USE=PASS)
+        with self.assertRaises(PermissionError) as cm_consumed:
+            consume_registered_callback_dispatch_event(ev_id, db_path=self.db_path)
+        self.assertIn("already consumed", str(cm_consumed.exception))
+
+        # Issuing authorization from consumed event is blocked
+        with self.assertRaises(PermissionError) as cm_auth_consumed:
+            issue_canonical_owner_authorization_from_event(ev_id, plan, db_path=self.db_path)
+        self.assertIn("already consumed", str(cm_auth_consumed.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

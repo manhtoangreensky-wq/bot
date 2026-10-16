@@ -1,6 +1,6 @@
 {
   "version": "p0.video.r19",
-  "default_provider_chain": ["shopaikey_video", "key4u_video", "fal_video", "toanaas_video", "veo", "kling", "generic_http"],
+  "default_provider_chain": ["shopaikey_video", "key4u_video", "toanaas_video", "veo", "kling", "generic_http"],
   "tier_aliases": {
     "200": "low",
     "trial": "low",

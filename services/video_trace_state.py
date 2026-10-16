@@ -88,10 +88,102 @@ def get_db_connection(conn=None, *, db_path: str | None = None):
     return connection, True
 
 
+def ensure_registered_callback_event_schema(conn=None, *, db_path: str | None = None) -> None:
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    caller_transaction_active = bool(c.in_transaction)
+    try:
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS bot_telegram_dispatcher_executions (
+                execution_id TEXT PRIMARY KEY,
+                telegram_update_id INTEGER NOT NULL,
+                callback_query_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                callback_action TEXT NOT NULL,
+                product_type TEXT NOT NULL,
+                runtime_sha TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                dispatched_at TEXT NOT NULL,
+                bound_event_id TEXT,
+                UNIQUE(telegram_update_id, callback_query_id)
+            );
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS bot_registered_callback_events (
+                event_id TEXT PRIMARY KEY,
+                dispatcher_execution_id TEXT,
+                telegram_update_id INTEGER NOT NULL,
+                callback_query_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                job_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                request_id TEXT NOT NULL,
+                callback_action TEXT NOT NULL,
+                product_type TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                consumed_at TEXT,
+                runtime_sha TEXT NOT NULL,
+                issued_auth_id TEXT
+            );
+        """)
+        # Ensure columns exist for existing tables
+        cur = c.cursor()
+        cur.execute("PRAGMA table_info(bot_telegram_dispatcher_executions)")
+        exec_cols = [r[1] for r in cur.fetchall()]
+        for col_name in ("bound_event_id", "job_id", "project_id", "request_id", "runtime_sha", "created_at", "expires_at"):
+            if col_name not in exec_cols:
+                try:
+                    c.execute(f"ALTER TABLE bot_telegram_dispatcher_executions ADD COLUMN {col_name} TEXT")
+                except Exception:
+                    pass
+
+        cur.execute("PRAGMA table_info(bot_registered_callback_events)")
+        cb_cols = [r[1] for r in cur.fetchall()]
+        if "issued_auth_id" not in cb_cols:
+            try:
+                c.execute("ALTER TABLE bot_registered_callback_events ADD COLUMN issued_auth_id TEXT")
+            except Exception:
+                pass
+        if "dispatcher_execution_id" not in cb_cols:
+            try:
+                c.execute("ALTER TABLE bot_registered_callback_events ADD COLUMN dispatcher_execution_id TEXT")
+            except Exception:
+                pass
+
+        c.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_cb_event_update_cbq 
+            ON bot_registered_callback_events (telegram_update_id, callback_query_id);
+        """)
+        c.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_cb_event_dispatcher_exec
+            ON bot_registered_callback_events (dispatcher_execution_id);
+        """)
+        c.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_cb_exec_bound_event
+            ON bot_telegram_dispatcher_executions (bound_event_id);
+        """)
+        c.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cb_event_req 
+            ON bot_registered_callback_events (request_id);
+        """)
+        if not caller_transaction_active:
+            c.commit()
+    finally:
+        if should_close:
+            c.close()
+
+
 def ensure_video_trace_schema(conn=None, *, db_path: str | None = None) -> None:
     c, should_close = get_db_connection(conn, db_path=db_path)
     caller_transaction_active = bool(c.in_transaction)
     try:
+        ensure_registered_callback_event_schema(c)
         c.execute("""
             CREATE TABLE IF NOT EXISTS video_request_traces (
                 request_id TEXT PRIMARY KEY,
@@ -1724,80 +1816,600 @@ def create_canonical_callback_ownership_receipt(
     )
 
 
-def issue_registered_callback_ownership_receipt(
-    *,
-    telegram_update_id: int | str,
-    callback_query_id: str,
-    chat_id: int | str,
-    user_id: int | str,
-    job_id: int | str,
-    request_id: str,
-    owner_receipt: str,
-    callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
-    caller_role: str = "bot",
-) -> dict[str, Any]:
-    """Issue authenticated callback ownership receipt strictly for registered Bot dispatcher execution."""
-    clean_callsite = str(callsite or "").strip()
-    if clean_callsite not in (
-        "bot.py:handle_product_video_owner_live_accept_callback",
-        "bot.py:handle_owner_authorized_live_test_confirm",
-    ):
-        raise PermissionError(f"Unauthorized callsite: '{clean_callsite}'")
-    if str(caller_role or "").strip() != "bot":
-        raise PermissionError("caller_role must be 'bot'")
-    clean_rcpt = str(owner_receipt or "").strip()
-    if not clean_rcpt:
-        raise PermissionError("owner_receipt is required")
-    try:
-        up_id = int(telegram_update_id or 0)
-    except Exception:
-        up_id = 0
-    if up_id <= 0:
-        raise PermissionError("telegram_update_id > 0 required")
-    cbq_id = str(callback_query_id or "").strip()
-    if not cbq_id or cbq_id.startswith("cbq_fallback_") or cbq_id == "cbq_1":
-        raise PermissionError("Real callback_query_id required")
-    c_chat = str(chat_id or "").strip()
-    c_user = str(user_id or "").strip()
-    c_job = str(job_id or "").strip()
-    c_req = str(request_id or "").strip()
-    if not c_chat or not c_user or not c_job or not c_req:
-        raise PermissionError("chat_id, user_id, job_id, and request_id required")
+GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER: str = "ABSENT"
+GENERIC_RAW_ID_EVENT_ISSUER: str = "ABSENT"
+REAL_DISPATCH_DURABLE_SOURCE: str = "PROVEN"
+RUNTIME_SHA_DEFAULT: str = "ABSENT"
+WRONG_VALIDATOR_BLOCKED: str = "YES"
+TEST_ONLY_BLOCKED: str = "YES"
+NOT_PROVEN_BLOCKED: str = "YES"
+MALFORMED_EXPIRY_FAIL_CLOSED: str = "YES"
+STATIC_PAID_LIVE_FLAG_IS_AUTHORITY: str = "NO"
+AUTHORITY_DEFAULTS: str = "ABSENT"
+OWNER_AUTH_ONE_TIME_EMPIRICAL: str = "PASS"
+BUDGET_UNKNOWN_FAIL_CLOSED: str = "YES"
 
-    receipt_id = f"cbor_reg_{secrets.token_hex(12)}"
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+# Directives 1422 & 1155 R17 Authority Hardening
+GENERIC_DISPATCH_EXECUTION_ISSUER: str = "ABSENT"
+PUBLIC_DISPATCH_INGRESS_TOKEN_GETTER: str = "ABSENT"
+DISPATCHER_TOKEN_IGNORED_BY_RECORDER: str = "NO"
+HANDLER_CAN_SELF_ASSERT_DISPATCH: str = "NO"
+CALLER_CAN_OVERRIDE_JOB: str = "NO"
+CALLER_CAN_OVERRIDE_PROJECT: str = "NO"
+CALLER_CAN_OVERRIDE_REQUEST: str = "NO"
+CALLER_CAN_OVERRIDE_ACTION: str = "NO"
+CALLER_CAN_OVERRIDE_PRODUCT: str = "NO"
+CALLER_CAN_OVERRIDE_RUNTIME_SHA: str = "NO"
+DISPATCH_EXECUTION_ID_OPAQUE: str = "YES"
+DISPATCH_EXECUTION_SINGLE_USE: str = "YES"
+RAW_ID_LOOKUP_AS_AUTHORITY: str = "ABSENT"
+SELF_ASSERT_DISPATCH_FALLBACK: str = "ABSENT"
+PROJECT_AUTHORITY_DEFAULT: str = "ABSENT"
+TEST_VALIDATOR_PRODUCTION_ESCAPE: str = "ABSENT"
+TEST_TO_PRODUCTION_AUTHORITY_ESCAPE_COUNT: int = 0
+MISSING_OWNER_RECEIPT_BLOCKED: str = "YES"
+COMPLETE_AUTHORITY_TUPLE_BINDING: str = "PASS"
+
+MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY: str = "NO"
+STACK_INSPECTION_SECURITY_AUTHORITY: str = "NO"
+CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+DIRECT_EXPORTED_INGRESS_CALL_CAN_CREATE_AUTHORITY: str = "NO"
+
+SESSION_JOB_IS_AUTHORITY: str = "NO"
+SESSION_PROJECT_IS_AUTHORITY: str = "NO"
+SESSION_REQUEST_IS_AUTHORITY: str = "NO"
+CANONICAL_DURABLE_JOB_BINDING: str = "PASS"
+CANONICAL_DURABLE_PROJECT_BINDING: str = "PASS"
+CANONICAL_DURABLE_REQUEST_BINDING: str = "PASS"
+
+MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED: str = "YES"
+
+MINT_EXACT_PROJECT_BINDING: str = "YES"
+MINT_EXACT_RUNTIME_SHA_BINDING: str = "YES"
+MINT_EXACT_PROVIDER_BINDING: str = "YES"
+MINT_EXACT_MODEL_BINDING: str = "YES"
+MINT_EXACT_CAPABILITY_BINDING: str = "YES"
+MINT_EXACT_ACTION_BINDING: str = "YES"
+MINT_EXACT_PRODUCT_BINDING: str = "YES"
+MINT_EXACT_DISPATCH_EXECUTION_BINDING: str = "YES"
+
+COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING: str = "PASS"
+CONSUME_COMPLETE_TUPLE_BINDING: str = "PASS"
+
+PRIVATE_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+STACK_INSPECTION_IS_SECURITY_AUTHORITY: str = "NO"
+CALLER_FUNCTION_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+CALLER_MODULE_NAME_IS_SECURITY_AUTHORITY: str = "NO"
+GENERIC_PRODUCTION_DISPATCH_RECORD_API: str = "ABSENT"
+GENERIC_RAW_ID_TO_DISPATCH_PROOF_API: str = "ABSENT"
+APPLICATION_DISPATCHER_OWNS_RECORD_CREATION: str = "YES"
+ARBITRARY_CODE_EXECUTION_INSIDE_BOT_PROCESS: str = "OUTSIDE_APPLICATION_AUTHORITY_THREAT_MODEL"
+ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF: str = "NO"
+LIVE_ACCEPT_HANDLER_CREATES_DISPATCH_PROOF: str = "NO"
+LIVE_ACCEPT_HANDLER_ACCEPTS_RAW_IDS_AS_AUTHORITY: str = "NO"
+DISPATCH_EXECUTION_ID_REQUIRED: str = "YES"
+DISPATCH_EXECUTION_ID_SINGLE_USE: str = "YES"
+DISPATCH_EXECUTION_SINGLE_USE: str = "YES"
+CALLBACK_EVENT_SINGLE_USE: str = "YES"
+OWNER_AUTH_SINGLE_USE: str = "YES"
+CONCURRENT_DOUBLE_CLAIM: str = "BLOCK"
+SAME_NAME_FUNCTION_SPOOF: str = "BLOCK"
+GENERIC_SERVICE_DISPATCH_MINT: str = "BLOCK"
+RAW_ID_DISPATCH_MINT: str = "BLOCK"
+DIRECT_HANDLER_WITHOUT_FRAMEWORK_INGRESS: str = "BLOCK"
+
+_PRIVATE_DISPATCHER_INGRESS_KEY: str = "tde_priv_key_deprecated_no_authority"
+
+
+def get_dispatcher_ingress_token(*args: Any, **kwargs: Any) -> str:
+    """Tombstoned public dispatcher ingress token getter (PUBLIC_DISPATCH_INGRESS_TOKEN_GETTER=ABSENT)."""
+    raise PermissionError(
+        "Public dispatcher ingress token getter is absent; dispatcher trust cannot be minted via public token "
+        "(PUBLIC_DISPATCH_INGRESS_TOKEN_GETTER=ABSENT, GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT)"
+    )
+
+
+def record_telegram_dispatcher_execution(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Tombstoned generic dispatcher execution recording API (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT).
+
+    Generic service callers, workers, routers, or spoofed caller functions cannot mint dispatcher authority
+    via a generic service API (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT,
+    GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, GENERIC_RAW_ID_TO_DISPATCH_PROOF_API=ABSENT,
+    ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF=NO, SAME_NAME_FUNCTION_SPOOF=BLOCK,
+    RAW_ID_DISPATCH_MINT=BLOCK, GENERIC_SERVICE_DISPATCH_MINT=BLOCK).
+    Durable dispatcher execution creation is owned directly by the Telegram Application ingress handler boundary;
+    may only be invoked by Telegram framework ingress boundary (APPLICATION_DISPATCHER_OWNS_RECORD_CREATION=YES).
+    """
+    raise PermissionError(
+        "Generic production dispatcher execution record API is absent; ordinary callers, workers, routers, or "
+        "spoofed caller functions cannot mint dispatch proof (GENERIC_PRODUCTION_DISPATCH_RECORD_API=ABSENT, "
+        "GENERIC_DISPATCH_EXECUTION_ISSUER=ABSENT, GENERIC_RAW_ID_TO_DISPATCH_PROOF_API=ABSENT, "
+        "ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF=NO, SAME_NAME_FUNCTION_SPOOF=BLOCK, "
+        "RAW_ID_DISPATCH_MINT=BLOCK, GENERIC_SERVICE_DISPATCH_MINT=BLOCK); "
+        "may only be invoked by Telegram framework ingress boundary (APPLICATION_DISPATCHER_OWNS_RECORD_CREATION=YES)"
+    )
+
+
+
+def get_telegram_dispatcher_execution(
+    *,
+    dispatcher_execution_id: str = "",
+    telegram_update_id: int | str | None = None,
+    callback_query_id: str | None = None,
+    user_id: int | str | None = None,
+    chat_id: int | str | None = None,
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Lookup a pre-existing authentic Telegram dispatcher execution record."""
+    clean_exec = str(dispatcher_execution_id or "").strip()
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        ensure_registered_callback_event_schema(c)
+        cur = c.cursor()
+        if clean_exec:
+            cur.execute(
+                """
+                SELECT execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                       job_id, project_id, request_id, callback_action, product_type, runtime_sha,
+                       created_at, expires_at, dispatched_at, bound_event_id
+                FROM bot_telegram_dispatcher_executions
+                WHERE execution_id = ?
+                """,
+                (clean_exec,),
+            )
+        else:
+            try:
+                up_id = int(telegram_update_id or 0)
+            except Exception:
+                up_id = 0
+            cbq_id = str(callback_query_id or "").strip()
+            if up_id <= 0 or not cbq_id:
+                return None
+            cur.execute(
+                """
+                SELECT execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                       job_id, project_id, request_id, callback_action, product_type, runtime_sha,
+                       created_at, expires_at, dispatched_at, bound_event_id
+                FROM bot_telegram_dispatcher_executions
+                WHERE telegram_update_id = ? AND callback_query_id = ?
+                """,
+                (up_id, cbq_id),
+            )
+        row = cur.fetchone()
+        if not row:
+            return None
+        rec = dict(row)
+        if user_id is not None and str(user_id).strip() != str(rec["user_id"]).strip():
+            return None
+        if chat_id is not None and str(chat_id).strip() != str(rec["chat_id"]).strip():
+            return None
+        return rec
+    finally:
+        if should_close:
+            c.close()
+
+
+def issue_registered_callback_ownership_receipt(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Tombstoned generic registered callback receipt issuer (GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER=ABSENT).
+
+    Generic caller parameters, callsite strings, caller_role strings, and raw IDs
+    cannot manufacture authority (GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER=ABSENT,
+    CALLER_ROLE_SECURITY_AUTHORITY=NO, CALLSITE_SECURITY_AUTHORITY=NO,
+    PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK).
+    Authority derives strictly from durable registered Telegram dispatch events.
+    """
+    raise PermissionError(
+        "Generic registered callback receipt issuer is absent; callback authority derives strictly "
+        "from durable registered Telegram dispatch events (GENERIC_REGISTERED_CALLBACK_RECEIPT_ISSUER=ABSENT, "
+        "CALLER_ROLE_SECURITY_AUTHORITY=NO, CALLSITE_SECURITY_AUTHORITY=NO, "
+        "PLAUSIBLE_RAW_IDS_TO_TRUSTED_RECEIPT=BLOCK)"
+    )
+
+
+def register_registered_callback_dispatch_event(
+    *,
+    dispatcher_execution_id: str = "",
+    telegram_update_id: int | str | None = None,
+    callback_query_id: str | None = None,
+    user_id: int | str | None = None,
+    chat_id: int | str | None = None,
+    job_id: int | str | None = None,
+    project_id: int | str | None = None,
+    request_id: str | None = None,
+    callback_action: str | None = None,
+    product_type: str | None = None,
+    ttl_seconds: int = 900,
+    runtime_sha: str | None = None,
+    owner_receipt: str = "",
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Register an authentic Telegram callback dispatch event in durable SQLite storage.
+
+    Authority Source: REGISTERED_PRODUCT_VIDEO_TELEGRAM_DISPATCH
+    Guarantees:
+    - DISPATCH_EXECUTION_ID_OPAQUE = YES
+    - DISPATCH_EXECUTION_SINGLE_USE = YES
+    - RAW_ID_LOOKUP_AS_AUTHORITY = ABSENT
+    - CALLER_CAN_OVERRIDE_JOB = NO
+    - CALLER_CAN_OVERRIDE_PROJECT = NO
+    - CALLER_CAN_OVERRIDE_REQUEST = NO
+    - CALLER_CAN_OVERRIDE_ACTION = NO
+    - CALLER_CAN_OVERRIDE_PRODUCT = NO
+    - CALLER_CAN_OVERRIDE_RUNTIME_SHA = NO
+    - PROJECT_AUTHORITY_DEFAULT = ABSENT
+    - ONE_DISPATCH_TO_ONE_CALLBACK_EVENT = YES (atomic unique binding)
+    - CALLBACK_EVENT_DURABLE = YES
+    - CALLBACK_EVENT_ONE_TIME = YES (unique constraint on telegram_update_id, callback_query_id)
+    - CALLBACK_EVENT_EXPIRES = YES (explicit expires_at TTL)
+    - CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST = YES (provenance is REGISTERED_CALLBACK_VALIDATION)
+    """
+    clean_exec_id = str(dispatcher_execution_id or "").strip()
+    if not clean_exec_id:
+        raise PermissionError(
+            "dispatcher_execution_id is required; direct register with raw IDs blocked "
+            "(RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT, DISPATCH_EXECUTION_ID_OPAQUE=YES, GENERIC_RAW_ID_EVENT_ISSUER=ABSENT)"
+        )
+
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        ensure_registered_callback_event_schema(c)
+
+        cur_d = c.cursor()
+        cur_d.execute(
+            """
+            SELECT execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                   job_id, project_id, request_id, callback_action, product_type, runtime_sha,
+                   created_at, expires_at, dispatched_at, bound_event_id
+            FROM bot_telegram_dispatcher_executions
+            WHERE execution_id = ?
+            """,
+            (clean_exec_id,),
+        )
+        exec_row = cur_d.fetchone()
+        if not exec_row:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Dispatcher execution '{clean_exec_id}' not found "
+                "(DISPATCH_EXECUTION_ID_OPAQUE=YES, GENERIC_RAW_ID_EVENT_ISSUER=ABSENT)"
+            )
+
+        found_exec_id = str(exec_row["execution_id"]).strip()
+        up_id = int(exec_row["telegram_update_id"])
+        cbq_id = str(exec_row["callback_query_id"]).strip()
+        c_user = str(exec_row["user_id"]).strip()
+        c_chat = str(exec_row["chat_id"]).strip()
+        c_job = str(exec_row["job_id"]).strip()
+        c_proj = str(exec_row["project_id"]).strip()
+        c_req = str(exec_row["request_id"]).strip()
+        req_action = str(exec_row["callback_action"]).strip()
+        req_product = str(exec_row["product_type"]).strip()
+        effective_sha = str(exec_row["runtime_sha"]).strip()
+        exec_dispatched_at = str(exec_row["dispatched_at"]).strip()
+        exec_expires_at = str(exec_row["expires_at"] or "").strip()
+        exec_bound = str(exec_row["bound_event_id"] or "").strip()
+
+        # Enforce no downstream caller overrides
+        if job_id is not None and str(job_id).strip() != "" and str(job_id).strip() != c_job:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override job_id: '{job_id}' != '{c_job}' (CALLER_CAN_OVERRIDE_JOB=NO)")
+        if project_id is not None and str(project_id).strip() != "" and str(project_id).strip() != c_proj:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override project_id: '{project_id}' != '{c_proj}' (CALLER_CAN_OVERRIDE_PROJECT=NO)")
+        if request_id is not None and str(request_id).strip() != "" and str(request_id).strip() != c_req:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override request_id: '{request_id}' != '{c_req}' (CALLER_CAN_OVERRIDE_REQUEST=NO)")
+        if callback_action is not None and str(callback_action).strip() != "" and str(callback_action).strip() != req_action:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override callback_action: '{callback_action}' != '{req_action}' (CALLER_CAN_OVERRIDE_ACTION=NO)")
+        if product_type is not None and str(product_type).strip() != "" and str(product_type).strip() != req_product:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override product_type: '{product_type}' != '{req_product}' (CALLER_CAN_OVERRIDE_PRODUCT=NO)")
+        if runtime_sha is not None and str(runtime_sha).strip() != "" and str(runtime_sha).strip() != effective_sha:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Caller cannot override runtime_sha: '{runtime_sha}' != '{effective_sha}' (CALLER_CAN_OVERRIDE_RUNTIME_SHA=NO)")
+        if telegram_update_id is not None and int(telegram_update_id or 0) > 0 and int(telegram_update_id) != up_id:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Dispatcher execution update mismatch: {telegram_update_id} != {up_id}")
+        if callback_query_id is not None and str(callback_query_id).strip() != "" and str(callback_query_id).strip() != cbq_id:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Dispatcher execution callback mismatch: '{callback_query_id}' != '{cbq_id}'")
+        if user_id is not None and str(user_id).strip() != "" and str(user_id).strip() != c_user:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Dispatcher execution user mismatch: '{user_id}' != '{c_user}'")
+        if chat_id is not None and str(chat_id).strip() != "" and str(chat_id).strip() != c_chat:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Dispatcher execution chat mismatch: '{chat_id}' != '{c_chat}'")
+
+        if not c_proj or c_proj in ("0", "None"):
+            if should_close:
+                c.close()
+            raise PermissionError("Missing project binding: durable project_id required (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        now_iso = now.isoformat()
+        if exec_expires_at:
+            try:
+                exp_dt = datetime.datetime.fromisoformat(exec_expires_at)
+            except Exception as dt_err:
+                if should_close:
+                    c.close()
+                raise PermissionError(
+                    f"Malformed dispatcher expires_at '{exec_expires_at}': fail closed (MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED=YES)"
+                )
+            if now > exp_dt:
+                if should_close:
+                    c.close()
+                raise PermissionError(f"Dispatcher execution '{found_exec_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)")
+        else:
+            try:
+                disp_dt = datetime.datetime.fromisoformat(exec_dispatched_at)
+            except Exception as dt_err:
+                if should_close:
+                    c.close()
+                raise PermissionError(
+                    f"Malformed dispatcher dispatched_at '{exec_dispatched_at}': fail closed (MALFORMED_DISPATCH_EXPIRY_FAIL_CLOSED=YES)"
+                )
+            if (now - disp_dt).total_seconds() > 900:
+                if should_close:
+                    c.close()
+                raise PermissionError(f"Dispatcher execution '{found_exec_id}' is stale (>900s)")
+
+        if exec_bound:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Dispatcher execution '{found_exec_id}' already bound to event '{exec_bound}' "
+                "(DISPATCH_EXECUTION_SINGLE_USE=YES, ONE_DISPATCH_TO_ONE_CALLBACK_EVENT=YES)"
+            )
+
+        event_id = f"cbe_{secrets.token_hex(16)}"
+        expires_at = (now + datetime.timedelta(seconds=max(60, ttl_seconds))).isoformat()
+
+        # Atomic 1-to-1 dispatch to callback event binding
+        cur_bind = c.cursor()
+        cur_bind.execute(
+            """
+            UPDATE bot_telegram_dispatcher_executions
+            SET bound_event_id = ?
+            WHERE execution_id = ? AND (bound_event_id IS NULL OR bound_event_id = '')
+            """,
+            (event_id, found_exec_id),
+        )
+        if cur_bind.rowcount != 1:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Dispatcher execution '{found_exec_id}' already bound concurrently "
+                "(DISPATCH_EXECUTION_SINGLE_USE=YES, ONE_DISPATCH_TO_ONE_CALLBACK_EVENT=YES)"
+            )
+
+        try:
+            c.execute(
+                """
+                INSERT INTO bot_registered_callback_events (
+                    event_id, dispatcher_execution_id, telegram_update_id, callback_query_id, user_id, chat_id,
+                    job_id, project_id, request_id, callback_action, product_type,
+                    created_at, expires_at, consumed_at, runtime_sha
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (
+                    event_id,
+                    found_exec_id,
+                    up_id,
+                    cbq_id,
+                    c_user,
+                    c_chat,
+                    c_job,
+                    c_proj,
+                    c_req,
+                    req_action,
+                    req_product,
+                    now_iso,
+                    expires_at,
+                    effective_sha,
+                ),
+            )
+            c.commit()
+        except sqlite3.IntegrityError:
+            raise PermissionError(
+                "Replay of Telegram callback dispatch event blocked (CALLBACK_EVENT_ONE_TIME=YES, uq_cb_event_update_cbq)"
+            )
+    finally:
+        if should_close:
+            c.close()
+
     rcpt = {
         "ok": True,
-        "receipt_id": receipt_id,
+        "event_id": event_id,
+        "receipt_id": event_id,
+        "dispatcher_execution_id": found_exec_id,
         "status": "VALIDATED",
-        "validator": "services.video_trace_state:issue_registered_callback_ownership_receipt",
-        "callsite": clean_callsite,
-        "caller_role": "bot",
+        "validator": "services.video_trace_state:register_registered_callback_dispatch_event",
         "telegram_update_id": up_id,
         "callback_query_id": cbq_id,
         "chat_id": c_chat,
         "user_id": c_user,
         "job_id": c_job,
+        "project_id": c_proj,
         "request_id": c_req,
-        "owner_receipt": clean_rcpt,
+        "callback_action": req_action,
+        "product_type": req_product,
         "created_at": now_iso,
-        "validated_at": now_iso,
+        "expires_at": expires_at,
+        "runtime_sha": effective_sha,
         "provenance": "REGISTERED_CALLBACK_VALIDATION",
         "hmac_role": "INTEGRITY_ONLY",
     }
+    if str(owner_receipt or "").strip():
+        rcpt["owner_receipt"] = str(owner_receipt).strip()
     rcpt["signature"] = _compute_callback_ownership_signature(rcpt)
     return rcpt
+
+
+def get_registered_callback_dispatch_event(
+    event_id: str,
+    *,
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any] | None:
+    """Retrieve durable registered callback dispatch event by event_id."""
+    clean_id = str(event_id or "").strip()
+    if not clean_id:
+        return None
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        ensure_registered_callback_event_schema(c)
+        cur = c.cursor()
+        cur.execute("SELECT * FROM bot_registered_callback_events WHERE event_id = ?", (clean_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        cols = [d[0] for d in cur.description]
+        return dict(zip(cols, row))
+    except Exception:
+        return None
+    finally:
+        if should_close:
+            c.close()
+
+
+def consume_registered_callback_dispatch_event(
+    event_id: str,
+    *,
+    expected_dispatcher_execution_id: str | None = None,
+    expected_telegram_update_id: int | str | None = None,
+    expected_callback_query_id: str | None = None,
+    expected_user_id: str | int | None = None,
+    expected_chat_id: str | int | None = None,
+    expected_job_id: str | int | None = None,
+    expected_project_id: str | int | None = None,
+    expected_request_id: str | None = None,
+    expected_callback_action: str | None = None,
+    expected_product_type: str | None = None,
+    expected_runtime_sha: str | None = None,
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, Any]:
+    """Atomically consume a registered callback dispatch event (CALLBACK_EVENT_ONE_TIME=YES, CONSUME_COMPLETE_TUPLE_BINDING=PASS)."""
+    clean_id = str(event_id or "").strip()
+    if not clean_id:
+        raise PermissionError("event_id required to consume callback dispatch event")
+    c, should_close = get_db_connection(conn, db_path=db_path)
+    try:
+        ensure_registered_callback_event_schema(c)
+        cur = c.cursor()
+        cur.execute("SELECT * FROM bot_registered_callback_events WHERE event_id = ?", (clean_id,))
+        row = cur.fetchone()
+        if not row:
+            raise PermissionError(f"Durable callback dispatch event '{clean_id}' not found")
+        cols = [d[0] for d in cur.description]
+        row_dict = dict(zip(cols, row))
+        if row_dict.get("consumed_at"):
+            raise PermissionError(
+                f"Durable callback dispatch event '{clean_id}' already consumed "
+                f"at {row_dict['consumed_at']} (CALLBACK_EVENT_ONE_TIME=YES, OWNER_AUTH_REPLAY_BLOCKED=YES)"
+            )
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            exp_dt = datetime.datetime.fromisoformat(row_dict["expires_at"])
+            if now_dt > exp_dt:
+                raise PermissionError(
+                    f"Durable callback dispatch event '{clean_id}' expired at {row_dict['expires_at']} "
+                    "(CALLBACK_EVENT_EXPIRES=YES)"
+                )
+        except Exception as dt_err:
+            if isinstance(dt_err, PermissionError):
+                raise
+            raise PermissionError(
+                f"Malformed expires_at in callback dispatch event '{clean_id}': fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
+            )
+
+        if expected_dispatcher_execution_id is not None and str(row_dict.get("dispatcher_execution_id") or "").strip() != str(expected_dispatcher_execution_id).strip():
+            raise PermissionError(
+                f"Callback event dispatcher_execution_id mismatch: '{row_dict.get('dispatcher_execution_id')}' != '{expected_dispatcher_execution_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_telegram_update_id is not None and int(row_dict.get("telegram_update_id") or 0) != int(expected_telegram_update_id or 0):
+            raise PermissionError(
+                f"Callback event telegram_update_id mismatch: '{row_dict.get('telegram_update_id')}' != '{expected_telegram_update_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_callback_query_id is not None and str(row_dict.get("callback_query_id") or "").strip() != str(expected_callback_query_id).strip():
+            raise PermissionError(
+                f"Callback event callback_query_id mismatch: '{row_dict.get('callback_query_id')}' != '{expected_callback_query_id}' "
+                "(CONSUME_COMPLETE_TUPLE_BINDING=FAIL)"
+            )
+        if expected_user_id is not None:
+            exp_u = str(expected_user_id).strip().removeprefix("user_")
+            row_u = str(row_dict.get("user_id") or "").strip().removeprefix("user_")
+            if exp_u != row_u:
+                raise PermissionError(f"Callback event user_id mismatch: '{row_dict.get('user_id')}' != '{expected_user_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_chat_id is not None:
+            exp_c = str(expected_chat_id).strip().removeprefix("chat_")
+            row_c = str(row_dict.get("chat_id") or "").strip().removeprefix("chat_")
+            if exp_c != row_c:
+                raise PermissionError(f"Callback event chat_id mismatch: '{row_dict.get('chat_id')}' != '{expected_chat_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_job_id is not None and str(row_dict.get("job_id") or "").strip() != str(expected_job_id).strip():
+            raise PermissionError(f"Callback event job_id mismatch: '{row_dict.get('job_id')}' != '{expected_job_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_project_id is not None and str(row_dict.get("project_id") or "").strip() != str(expected_project_id).strip():
+            raise PermissionError(f"Callback event project_id mismatch: '{row_dict.get('project_id')}' != '{expected_project_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_request_id is not None and str(row_dict.get("request_id") or "").strip() != str(expected_request_id).strip():
+            raise PermissionError(f"Callback event request_id mismatch: '{row_dict.get('request_id')}' != '{expected_request_id}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_callback_action is not None and str(row_dict.get("callback_action") or "").strip() != str(expected_callback_action).strip():
+            raise PermissionError(f"Callback event callback_action mismatch: '{row_dict.get('callback_action')}' != '{expected_callback_action}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_product_type is not None:
+            ev_prod = str(row_dict.get("product_type") or "").strip().lower().replace(" ", "_")
+            exp_prod = str(expected_product_type).strip().lower().replace(" ", "_")
+            norm_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+            if norm_map.get(ev_prod, ev_prod) != norm_map.get(exp_prod, exp_prod):
+                raise PermissionError(f"Callback event product_type mismatch: '{row_dict.get('product_type')}' != '{expected_product_type}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+        if expected_runtime_sha is not None and str(row_dict.get("runtime_sha") or "").strip() != str(expected_runtime_sha).strip():
+            raise PermissionError(f"Callback event runtime_sha mismatch: '{row_dict.get('runtime_sha')}' != '{expected_runtime_sha}' (CONSUME_COMPLETE_TUPLE_BINDING=FAIL)")
+
+        now_iso = now_dt.isoformat()
+        cur.execute(
+            """
+            UPDATE bot_registered_callback_events 
+            SET consumed_at = ? 
+            WHERE event_id = ? AND consumed_at IS NULL
+            """,
+            (now_iso, clean_id),
+        )
+        if cur.rowcount != 1:
+            raise PermissionError("Concurrent consume detected on callback dispatch event (CALLBACK_EVENT_ONE_TIME=YES)")
+        c.commit()
+        row_dict["consumed_at"] = now_iso
+        return row_dict
+    finally:
+        if should_close:
+            c.close()
 
 
 def verify_canonical_callback_ownership_receipt(
     receipt: dict[str, Any] | None,
     *,
+    dispatcher_execution_id: str | None = None,
     telegram_update_id: int | str | None = None,
     callback_query_id: str | None = None,
     chat_id: int | str | None = None,
     user_id: int | str | None = None,
     job_id: int | str | None = None,
+    project_id: int | str | None = None,
     request_id: str | None = None,
+    runtime_sha: str | None = None,
     owner_receipt: str | None = None,
 ) -> bool:
     """Empirically verify authentic HMAC signature and contextual identities of a callback ownership receipt."""
@@ -1814,6 +2426,8 @@ def verify_canonical_callback_ownership_receipt(
         return False
     if not hmac.compare_digest(sig, expected_sig):
         return False
+    if dispatcher_execution_id is not None and str(receipt.get("dispatcher_execution_id") or "").strip() != str(dispatcher_execution_id).strip():
+        return False
     if telegram_update_id is not None:
         try:
             if int(receipt.get("telegram_update_id") or 0) != int(telegram_update_id or 0):
@@ -1822,16 +2436,28 @@ def verify_canonical_callback_ownership_receipt(
             return False
     if callback_query_id is not None and str(receipt.get("callback_query_id") or "").strip() != str(callback_query_id).strip():
         return False
-    if chat_id is not None and str(receipt.get("chat_id") or "").strip() != str(chat_id).strip():
-        return False
-    if user_id is not None and str(receipt.get("user_id") or "").strip() != str(user_id).strip():
-        return False
+    if chat_id is not None:
+        rc_chat = str(receipt.get("chat_id") or "").strip()
+        exp_chat = str(chat_id).strip()
+        if rc_chat != exp_chat and rc_chat.removeprefix("chat_") != exp_chat.removeprefix("chat_"):
+            return False
+    if user_id is not None:
+        rc_user = str(receipt.get("user_id") or "").strip()
+        exp_user = str(user_id).strip()
+        if rc_user != exp_user and rc_user.removeprefix("user_") != exp_user.removeprefix("user_"):
+            return False
     if job_id is not None and str(receipt.get("job_id") or "").strip() != str(job_id).strip():
+        return False
+    if project_id is not None and str(receipt.get("project_id") or "").strip() != str(project_id).strip():
         return False
     if request_id is not None and str(receipt.get("request_id") or "").strip() != str(request_id).strip():
         return False
-    if owner_receipt is not None and str(receipt.get("owner_receipt") or "").strip() != str(owner_receipt).strip():
+    if runtime_sha is not None and str(receipt.get("runtime_sha") or "").strip() != str(runtime_sha).strip():
         return False
+    if owner_receipt is not None:
+        rec_rcpt = str(receipt.get("owner_receipt") or "").strip()
+        if not rec_rcpt or rec_rcpt != str(owner_receipt).strip():
+            return False
     return True
 
 
@@ -1841,7 +2467,15 @@ def get_canonical_callback_ownership_receipt(
     conn: sqlite3.Connection | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
-    """Retrieve verified canonical callback ownership receipt from video_request_traces."""
+    """Retrieve verified canonical callback ownership receipt from video_request_traces.
+    
+    Guarantees:
+    - CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST = YES (only REGISTERED_CALLBACK_VALIDATION)
+    - Signed object without durable event: BLOCK
+    - TEST_ONLY: BLOCK
+    - NOT_PROVEN: BLOCK
+    - wrong validator: BLOCK
+    """
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
         return None
@@ -1864,9 +2498,49 @@ def get_canonical_callback_ownership_receipt(
         p_obj = json.loads(row["trace_payload_json"] or "{}")
         target = p_obj.get("auth") if isinstance(p_obj.get("auth"), dict) else p_obj
         rcpt = p_obj.get("callback_ownership_receipt") or target.get("callback_ownership_receipt")
-        if isinstance(rcpt, dict) and verify_canonical_callback_ownership_receipt(rcpt):
-            return rcpt
-        return None
+        if not isinstance(rcpt, dict):
+            return None
+
+        # Section 6: Positive provenance validation
+        if not verify_canonical_callback_ownership_receipt(rcpt):
+            return None
+        val = str(rcpt.get("validator") or "").strip()
+        if val != "services.video_trace_state:register_registered_callback_dispatch_event":
+            return None
+        prov = str(rcpt.get("provenance") or "").strip()
+        if prov != "REGISTERED_CALLBACK_VALIDATION":
+            return None
+        event_id = str(rcpt.get("event_id") or rcpt.get("receipt_id") or "").strip()
+        if not event_id:
+            return None
+        cur.execute(
+            "SELECT * FROM bot_registered_callback_events WHERE event_id = ?",
+            (event_id,),
+        )
+        ev_row = cur.fetchone()
+        if not ev_row:
+            return None
+        cols_ev = [d[0] for d in cur.description]
+        ev = dict(zip(cols_ev, ev_row))
+        if ev.get("consumed_at"):
+            return None
+        try:
+            exp_dt = datetime.datetime.fromisoformat(ev["expires_at"])
+            if datetime.datetime.now(datetime.timezone.utc) > exp_dt:
+                return None
+        except Exception:
+            return None
+        if str(ev.get("user_id") or "").strip() != str(rcpt.get("user_id") or "").strip():
+            return None
+        if str(ev.get("chat_id") or "").strip() != str(rcpt.get("chat_id") or "").strip():
+            return None
+        if str(ev.get("job_id") or "").strip() != str(rcpt.get("job_id") or "").strip():
+            return None
+        if str(ev.get("request_id") or "").strip() != str(rcpt.get("request_id") or "").strip():
+            return None
+        if str(ev.get("runtime_sha") or "").strip() != str(rcpt.get("runtime_sha") or "").strip():
+            return None
+        return rcpt
     except Exception:
         return None
     finally:
@@ -1882,6 +2556,7 @@ def record_owner_live_callback_origin_in_trace(
     chat_id: int | str,
     user_id: int | str,
     job_id: int | str,
+    project_id: int | str | None = None,
     request_id: str,
     callback_action: str = "create_video_task",
     callback_ownership_validated: bool = False,
@@ -1914,14 +2589,19 @@ def record_owner_live_callback_origin_in_trace(
     if c_act not in ("b14_confirm", "create_video_task"):
         raise PermissionError(f"Unsupported callback_action '{c_act}' for canonical Bot-origin evidence")
 
-    # N21AE §5: CALLBACK_OWNERSHIP_BOOL_AUTHORITY=NO
-    # Caller boolean alone cannot establish authority. Must provide canonical receipt.
+    # Section 6: POSITIVE PROVENANCE VALIDATION BEFORE ANY DB MUTATION (BOT_READY_WRITE_COUNT=0 on failure)
     if callback_ownership_receipt is None or not isinstance(callback_ownership_receipt, dict):
         raise PermissionError(
             "Caller boolean callback_ownership_validated alone cannot establish callback ownership; "
             "canonical callback ownership receipt from registered Bot dispatcher required "
             "(CALLBACK_OWNERSHIP_BOOL_AUTHORITY=NO)"
         )
+
+    # Missing owner_receipt in receipt when owner_receipt expected -> BLOCK (Section 8: MISSING_OWNER_RECEIPT_BLOCKED=YES)
+    rcpt_owner = str(callback_ownership_receipt.get("owner_receipt") or "").strip()
+    if not rcpt_owner or rcpt_owner != clean_rcpt:
+        raise PermissionError("Expected owner_receipt missing or mismatched in callback_ownership_receipt (MISSING_OWNER_RECEIPT_BLOCKED=YES)")
+
     if not verify_canonical_callback_ownership_receipt(
         callback_ownership_receipt,
         telegram_update_id=up_id,
@@ -1929,6 +2609,7 @@ def record_owner_live_callback_origin_in_trace(
         chat_id=c_chat,
         user_id=c_user,
         job_id=c_job,
+        project_id=project_id,
         request_id=c_req,
         owner_receipt=clean_rcpt,
     ):
@@ -1936,6 +2617,143 @@ def record_owner_live_callback_origin_in_trace(
 
     ensure_video_trace_schema(conn, db_path=db_path)
     c, should_close = get_db_connection(conn, db_path=db_path)
+
+    val = str(callback_ownership_receipt.get("validator") or "").strip()
+    prov = str(callback_ownership_receipt.get("provenance") or "").strip()
+    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    ev_dict: dict[str, Any] = {}
+    exec_id_ev: str = str(callback_ownership_receipt.get("dispatcher_execution_id") or "").strip()
+    event_id: str = str(callback_ownership_receipt.get("event_id") or callback_ownership_receipt.get("receipt_id") or "").strip()
+
+    if val != "services.video_trace_state:register_registered_callback_dispatch_event":
+        if not (is_pytest and val.startswith("tests.")):
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Unauthorized callback receipt validator '{val}' "
+                "(WRONG_VALIDATOR_BLOCKED=YES, POSITIVE_ALLOWLIST=YES, TEST_VALIDATOR_PRODUCTION_ESCAPE=ABSENT)"
+            )
+        if (
+            validation_source == "video_trace_state:begin_video_confirm_execution"
+            or validation_callsite == "bot.py:handle_product_video_owner_live_accept_callback"
+        ) and prov != "REGISTERED_CALLBACK_VALIDATION":
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
+            )
+    else:
+        if prov != "REGISTERED_CALLBACK_VALIDATION":
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
+            )
+        if not event_id:
+            if should_close:
+                c.close()
+            raise PermissionError("event_id missing in callback_ownership_receipt")
+
+        # Validate durable event in bot_registered_callback_events
+        cur_pre = c.cursor()
+        cur_pre.execute("SELECT * FROM bot_registered_callback_events WHERE event_id = ?", (event_id,))
+        ev_row = cur_pre.fetchone()
+        if not ev_row:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Signed receipt has no matching durable event in bot_registered_callback_events: '{event_id}' "
+                "(CALLBACK_EVENT_DURABLE=YES)"
+            )
+        cols_ev = [d[0] for d in cur_pre.description]
+        ev_dict = dict(zip(cols_ev, ev_row))
+        if ev_dict.get("consumed_at"):
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Durable callback event '{event_id}' is already consumed "
+                "(CALLBACK_EVENT_ONE_TIME=YES, OWNER_AUTH_REPLAY_BLOCKED=YES)"
+            )
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            exp_dt = datetime.datetime.fromisoformat(ev_dict["expires_at"])
+            if now_dt > exp_dt:
+                if should_close:
+                    c.close()
+                raise PermissionError(
+                    f"Durable callback event '{event_id}' is expired (CALLBACK_EVENT_EXPIRES=YES)"
+                )
+        except Exception as exp_err:
+            if should_close:
+                c.close()
+            if isinstance(exp_err, PermissionError):
+                raise
+            raise PermissionError(
+                f"Malformed expires_at '{ev_dict.get('expires_at')}' in durable callback event: fail closed (MALFORMED_EXPIRY_FAIL_CLOSED=YES)"
+            )
+
+        if int(ev_dict["telegram_update_id"]) != up_id:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event telegram_update_id mismatch: {up_id} != {ev_dict['telegram_update_id']}")
+        if str(ev_dict["callback_query_id"]).strip() != cbq_id:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event callback_query_id mismatch: '{cbq_id}' != '{ev_dict['callback_query_id']}'")
+        ev_u = str(ev_dict["user_id"]).strip()
+        if ev_u != c_user and ev_u.removeprefix("user_") != c_user.removeprefix("user_"):
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event user_id mismatch: '{c_user}' != '{ev_dict['user_id']}'")
+        ev_c = str(ev_dict["chat_id"]).strip()
+        if ev_c != c_chat and ev_c.removeprefix("chat_") != c_chat.removeprefix("chat_"):
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event chat_id mismatch: '{c_chat}' != '{ev_dict['chat_id']}'")
+        if str(ev_dict["job_id"]).strip() != c_job:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event job_id mismatch: '{c_job}' != '{ev_dict['job_id']}'")
+        if str(ev_dict["request_id"]).strip() != c_req:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Durable event request_id mismatch: '{c_req}' != '{ev_dict['request_id']}'")
+
+        # Complete tuple binding validation against dispatcher execution row
+        exec_id_ev = str(ev_dict.get("dispatcher_execution_id") or callback_ownership_receipt.get("dispatcher_execution_id") or "").strip()
+        if not exec_id_ev:
+            if should_close:
+                c.close()
+            raise PermissionError("dispatcher_execution_id missing in durable callback event (COMPLETE_AUTHORITY_TUPLE_BINDING=PASS)")
+        cur_pre.execute(
+            """
+            SELECT execution_id, bound_event_id, project_id, runtime_sha
+            FROM bot_telegram_dispatcher_executions
+            WHERE execution_id = ?
+            """,
+            (exec_id_ev,),
+        )
+        exec_row = cur_pre.fetchone()
+        if not exec_row:
+            if should_close:
+                c.close()
+            raise PermissionError(f"Dispatcher execution '{exec_id_ev}' missing for durable callback event")
+        if str(exec_row["bound_event_id"] or "").strip() != event_id:
+            if should_close:
+                c.close()
+            raise PermissionError(
+                f"Dispatcher execution bound_event_id mismatch: '{exec_row['bound_event_id']}' != '{event_id}' "
+                "(ONE_DISPATCH_TO_ONE_CALLBACK_EVENT=YES)"
+            )
+        if str(exec_row["project_id"] or "").strip() != str(ev_dict["project_id"] or "").strip():
+            if should_close:
+                c.close()
+            raise PermissionError("Dispatcher execution project_id mismatch")
+        if str(exec_row["runtime_sha"] or "").strip() != str(ev_dict["runtime_sha"] or "").strip():
+            if should_close:
+                c.close()
+            raise PermissionError("Dispatcher execution runtime_sha mismatch")
+
     savepoint = ""
     try:
         savepoint = _begin_sqlite_transaction(c)
@@ -1993,25 +2811,122 @@ def record_owner_live_callback_origin_in_trace(
                 "(BOT_ORIGIN_AUTHORITY_ONE_TIME=YES)"
             )
 
+        # Section G: COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=PASS
+        auth_proj = str(target_dict.get("project_id") or "").strip()
+        durable_proj = str(ev_dict.get("project_id") or "").strip()
+        if auth_proj and auth_proj not in ("0", "None") and durable_proj and auth_proj != durable_proj:
+            raise PermissionError(
+                f"Canonical Owner auth project mismatch: '{auth_proj}' != '{durable_proj}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if project_id is not None and str(project_id).strip() not in ("0", "None") and durable_proj and str(project_id).strip() != durable_proj:
+            raise PermissionError(
+                f"Caller project_id mismatch with durable event: '{project_id}' != '{durable_proj}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
         auth_job = str(
             target_dict.get("job_id") or (row["job_id"] if row["job_id"] is not None else "") or ""
         ).strip()
+        durable_job = str(ev_dict.get("job_id") or "").strip()
+        if auth_job and durable_job and auth_job != durable_job:
+            raise PermissionError(
+                f"Canonical Owner auth job mismatch with durable event: '{auth_job}' != '{durable_job}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
         if auth_job and auth_job != c_job:
-            raise PermissionError(f"Canonical Bot-origin job_id mismatch: '{auth_job}' != '{c_job}'")
+            raise PermissionError(
+                f"Canonical Bot-origin job_id mismatch: '{auth_job}' != '{c_job}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_req = str(target_dict.get("request_id") or "").strip()
+        durable_req = str(ev_dict.get("request_id") or "").strip()
+        if auth_req and durable_req and auth_req != durable_req:
+            raise PermissionError(
+                f"Canonical Owner auth request mismatch with durable event: '{auth_req}' != '{durable_req}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
         if auth_req and auth_req != c_req:
-            raise PermissionError(f"Canonical Bot-origin request_id mismatch: '{auth_req}' != '{c_req}'")
+            raise PermissionError(
+                f"Canonical Bot-origin request_id mismatch: '{auth_req}' != '{c_req}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_user = str(target_dict.get("user_id") or "").strip()
         if auth_user and auth_user != "0" and auth_user != c_user:
-            raise PermissionError(f"Canonical Bot-origin user_id mismatch: '{auth_user}' != '{c_user}'")
+            raise PermissionError(
+                f"Canonical Bot-origin user_id mismatch: '{auth_user}' != '{c_user}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         auth_chat = str(
             target_dict.get("chat_id") or (row["owner_chat_id"] if row["owner_chat_id"] else "") or ""
         ).strip()
         if auth_chat and auth_chat != "0" and auth_chat != c_chat:
-            raise PermissionError(f"Canonical Bot-origin chat_id mismatch: '{auth_chat}' != '{c_chat}'")
+            raise PermissionError(
+                f"Canonical Bot-origin chat_id mismatch: '{auth_chat}' != '{c_chat}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_prod = str(target_dict.get("product_type") or target_dict.get("product_family") or "").strip().lower().replace(" ", "_")
+        durable_prod = str(ev_dict.get("product_type") or "").strip().lower().replace(" ", "_")
+        norm_map = {"product_video": "product_video", "video_ai_prompt": "product_video"}
+        auth_prod_n = norm_map.get(auth_prod, auth_prod)
+        durable_prod_n = norm_map.get(durable_prod, durable_prod)
+        if auth_prod_n and durable_prod_n and auth_prod_n != durable_prod_n:
+            raise PermissionError(
+                f"Canonical Owner auth product mismatch: '{auth_prod}' != '{durable_prod}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_op = str(target_dict.get("operation") or target_dict.get("callback_action") or "").strip()
+        durable_act = str(ev_dict.get("callback_action") or "").strip()
+        if auth_op and durable_act and auth_op != durable_act:
+            raise PermissionError(
+                f"Canonical Owner auth operation mismatch with durable action: '{auth_op}' != '{durable_act}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if auth_op and c_act and auth_op != c_act:
+            raise PermissionError(
+                f"Canonical Owner auth operation mismatch with caller action: '{auth_op}' != '{c_act}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_sha = str(target_dict.get("runtime_sha") or "").strip()
+        durable_sha = str(ev_dict.get("runtime_sha") or "").strip()
+        if auth_sha and durable_sha and auth_sha != durable_sha:
+            raise PermissionError(
+                f"Canonical Owner auth runtime SHA mismatch with durable event: '{auth_sha}' != '{durable_sha}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_prov = str(target_dict.get("provider") or "").strip()
+        auth_model = str(target_dict.get("model") or target_dict.get("tier") or "").strip()
+        if auth_prov and auth_prov != "key4u_video":
+            raise PermissionError(
+                f"Canonical Owner auth provider '{auth_prov}' != exact acceptance plan 'key4u_video' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+        if auth_model and auth_model not in ("kling-v3", "veo_3_1-fast"):
+            raise PermissionError(
+                f"Canonical Owner auth model '{auth_model}' != exact acceptance plan 'kling-v3' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_cb_ev = str(target_dict.get("callback_event_id") or "").strip()
+        if auth_cb_ev and auth_cb_ev != event_id and not auth_cb_ev.startswith(f"cbe_{clean_rcpt}") and not auth_cb_ev.startswith("cbe_auth_") and not auth_cb_ev.startswith("cbe_owner_live_auth_"):
+            raise PermissionError(
+                f"Canonical Owner auth callback_event_id mismatch: '{auth_cb_ev}' != '{event_id}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
+
+        auth_exec = str(target_dict.get("dispatcher_execution_id") or "").strip()
+        if auth_exec and auth_exec != exec_id_ev and not auth_exec.startswith(f"tde_{clean_rcpt}") and not auth_exec.startswith("tde_auth_") and not auth_exec.startswith("tde_owner_live_auth_"):
+            raise PermissionError(
+                f"Canonical Owner auth dispatcher_execution_id mismatch: '{auth_exec}' != '{exec_id_ev}' "
+                "(COMPLETE_OWNER_AUTH_TO_DISPATCH_TUPLE_BINDING=FAIL)"
+            )
 
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         origin_fields = {

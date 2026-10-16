@@ -53,7 +53,7 @@ from services.video_trace_state import (
 )
 
 
-DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,fal_video,toanaas_video,veo,kling,generic_http"
+DEFAULT_VIDEO_PROVIDER_CHAIN = "shopaikey_video,key4u_video,toanaas_video,veo,kling,generic_http"
 VIDEO_STUB_PROVIDER_NAME = "stub_video"
 PUBLIC_NO_VIDEO_PROVIDER_COPY = (
     "Hiện hệ thống dựng video AI chưa sẵn sàng. Bot chưa trừ Xu."
@@ -3686,7 +3686,7 @@ def validate_owner_acceptance_authorization(
             return False, "owner_acceptance_provider_mismatch", {}
         allowed_acceptance_providers = {"key4u_video"}
     else:
-        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "key4u_video", "fal_video", "fal.ai", "fal-video"}
+        allowed_acceptance_providers = {CANONICAL_ACCEPTANCE_PROVIDER, "key4u_video"}
     if not is_r05a and pinned_provider not in allowed_acceptance_providers and not auth.get("allow_secondary_provider"):
         return False, "owner_acceptance_provider_mismatch", {}
     ctx_provider = str(ctx.get("provider") or ctx.get("selected_provider") or "").strip()

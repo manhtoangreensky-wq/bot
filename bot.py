@@ -108904,6 +108904,181 @@ async def handle_product_video_public_confirm_callback(update: Update, context: 
             pass
 
 
+async def product_video_telegram_dispatcher_ingress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Actual Telegram dispatcher ingress boundary for Product Video (Directive #1422, Section 2).
+
+    Directly owns durable dispatcher execution record creation BEFORE any handler runs.
+    APPLICATION_DISPATCHER_OWNS_RECORD_CREATION = YES
+    GENERIC_PRODUCTION_DISPATCH_RECORD_API = ABSENT
+    GENERIC_RAW_ID_TO_DISPATCH_PROOF_API = ABSENT
+    ORDINARY_INTERNAL_CALLER_CAN_MINT_DISPATCH_PROOF = NO
+    DISPATCH_EXECUTION_ID_OPAQUE = YES
+    """
+    query = getattr(update, "callback_query", None)
+    if not query:
+        return
+    callback_data = str(
+        getattr(context, "_product_video_callback_data_override", "")
+        or getattr(query, "data", "")
+        or ""
+    )
+    if not re.fullmatch(r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$", callback_data):
+        return
+
+    real_update_id = getattr(update, "update_id", 0) or 0
+    real_cbq_id = getattr(query, "id", "") or ""
+    if not real_update_id or not real_cbq_id:
+        return
+
+    user_id = getattr(getattr(query, "from_user", None), "id", 0) or getattr(getattr(update, "effective_user", None), "id", 0) or 0
+    real_chat_id = getattr(getattr(query, "message", None), "chat_id", 0) or getattr(getattr(update, "effective_chat", None), "id", 0) or 0
+    if not user_id or not real_chat_id:
+        return
+
+    if OWNER_IDS and not is_owner_user(user_id):
+        return
+
+    from services import video_trace_state
+    user_data = getattr(context, "user_data", None) or {}
+    session = user_data.get("video_session") or user_data.get("video_state") or {}
+    draft = session.get("draft") or {}
+
+    s_job_id = draft.get("job_id") or session.get("job_id")
+    s_project_id = draft.get("project_id") or draft.get("b14_project_id") or session.get("project_id") or session.get("b14_project_id")
+    s_request_id = draft.get("request_id") or session.get("request_id") or draft.get("trace_id")
+
+    conn_d, close_d = video_trace_state.get_db_connection()
+    try:
+        video_trace_state.ensure_registered_callback_event_schema(conn_d)
+        cur = conn_d.cursor()
+
+        durable_job_id = s_job_id
+        durable_project_id = s_project_id
+        durable_request_id = s_request_id
+
+        # If job_id is missing, try resolving from video_jobs or video_request_traces
+        if not durable_job_id:
+            try:
+                cur.execute("SELECT id, project_id, user_id FROM video_jobs WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
+                row_j = cur.fetchone()
+                if row_j:
+                    durable_job_id = row_j[0]
+                    if not durable_project_id:
+                        durable_project_id = row_j[1]
+            except Exception:
+                pass
+            if not durable_job_id:
+                try:
+                    cur.execute(
+                        "SELECT job_id, project_id, request_id, trace_payload_json FROM video_request_traces WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT 1",
+                        (user_id,),
+                    )
+                    row_t = cur.fetchone()
+                    if row_t:
+                        durable_job_id = row_t[0]
+                        if not durable_project_id:
+                            durable_project_id = row_t[1]
+                        if not durable_request_id:
+                            durable_request_id = row_t[2]
+                except Exception:
+                    pass
+
+        if not durable_job_id:
+            return
+
+        # If project_id is missing, try resolving
+        if not durable_project_id:
+            try:
+                cur.execute("SELECT project_id FROM video_jobs WHERE id = ?", (durable_job_id,))
+                row_pj = cur.fetchone()
+                if row_pj and row_pj[0]:
+                    durable_project_id = row_pj[0]
+            except Exception:
+                pass
+            if not durable_project_id:
+                try:
+                    cur.execute(
+                        "SELECT project_id FROM video_request_traces WHERE job_id = ? AND project_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1",
+                        (durable_job_id,),
+                    )
+                    row_tp = cur.fetchone()
+                    if row_tp and row_tp[0]:
+                        durable_project_id = row_tp[0]
+                except Exception:
+                    pass
+
+        if not durable_project_id:
+            return
+
+        # If request_id is missing, try resolving
+        if not durable_request_id:
+            try:
+                cur.execute(
+                    "SELECT request_id FROM video_request_traces WHERE job_id = ? ORDER BY updated_at DESC LIMIT 1",
+                    (durable_job_id,),
+                )
+                row_tr = cur.fetchone()
+                if row_tr and row_tr[0]:
+                    durable_request_id = row_tr[0]
+            except Exception:
+                pass
+
+        if not durable_request_id:
+            return
+
+        # Section D: Compare session request if present
+        if s_request_id is not None and str(s_request_id).strip() != str(durable_request_id).strip():
+            return
+
+        from services.remote_worker_api import resolve_runtime_sha
+        runtime_sha = resolve_runtime_sha() or os.environ.get("GIT_COMMIT_SHA") or ""
+        if not runtime_sha:
+            return
+
+        import secrets
+        exec_id = f"tde_{secrets.token_hex(16)}"
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expires_at = (now + timedelta(seconds=900)).isoformat()
+        conn_d.execute(
+            """
+            INSERT INTO bot_telegram_dispatcher_executions (
+                execution_id, telegram_update_id, callback_query_id,
+                user_id, chat_id, job_id, project_id, request_id,
+                callback_action, product_type, runtime_sha,
+                created_at, expires_at, dispatched_at, bound_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                exec_id,
+                int(real_update_id),
+                str(real_cbq_id).strip(),
+                str(user_id).strip(),
+                str(real_chat_id).strip(),
+                str(durable_job_id).strip(),
+                str(durable_project_id).strip(),
+                str(durable_request_id).strip(),
+                "create_video_task",
+                "Product Video",
+                str(runtime_sha).strip(),
+                now_iso,
+                expires_at,
+                now_iso,
+            ),
+        )
+        conn_d.commit()
+        setattr(context, "_dispatcher_execution_id", exec_id)
+        if hasattr(context, "user_data") and isinstance(context.user_data, dict):
+            context.user_data["_dispatcher_execution_id"] = exec_id
+    except sqlite3.IntegrityError:
+        pass
+    except Exception as exc:
+        logger.warning("Telegram dispatcher ingress direct record error: %s", exc)
+    finally:
+        if close_d:
+            conn_d.close()
+
+
 @video_public_callback_failure_guard
 async def handle_product_video_owner_live_accept_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Production public Telegram callback handler for Owner-authorized live acceptance (Directive #1422, N21AA)."""
@@ -108918,18 +109093,6 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         callback_data,
     ):
         return
-
-    # N21AG §11: Immediate universal fail-closed while PAID_LIVE_TEST_AVAILABLE=NO (LIVE_DISABLED_SIDE_EFFECTS_BEFORE_BLOCK=0)
-    from services.provider_spend_guard import (
-        PAID_LIVE_TEST_AVAILABLE,
-        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
-    )
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        await query.answer()
-        return await safe_edit_or_send(
-            query,
-            f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
-        )
 
     # Real telegram event check (Directive #1422, Section 7: BOT_LIVE_MINT_REQUIRES_REAL_TELEGRAM_EVENT=YES)
     real_update_id = getattr(update, "update_id", 0) or 0
@@ -108965,12 +109128,96 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
     job_id = draft.get("job_id") or session.get("job_id") or 0
     request_id = draft.get("request_id") or session.get("request_id") or ""
     scene_count = int(draft.get("scene_count") or session.get("scene_count") or 1)
+    acceptance_plan = session.get("acceptance_plan") or draft.get("acceptance_plan") or getattr(context, "_acceptance_plan", None)
+
+    if not owner_receipt and not (acceptance_plan and isinstance(acceptance_plan, dict)):
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    # Section 7: Universal fail-closed check before touching durable dispatch storage
+    if owner_receipt:
+        from services.provider_spend_guard import (
+            evaluate_paid_live_test_availability,
+            BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+        )
+        is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(owner_receipt=owner_receipt)
+        if not is_avail:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                f"Từ chối quyền thực thi kiểm thử trực tiếp: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})",
+            )
+
+    # Section B: REAL_DISPATCH_DURABLE_SOURCE=PROVEN
+    # Opaque single-use dispatcher execution ID must be present in context
+    dispatcher_execution_id = (
+        getattr(context, "_dispatcher_execution_id", None)
+        or (getattr(context, "user_data", None) or {}).get("_dispatcher_execution_id")
+    )
+    if not dispatcher_execution_id:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            "Lỗi xác thực: Thiếu opaque dispatcher_execution_id từ framework ingress "
+            "(DISPATCH_EXECUTION_ID_OPAQUE=YES, RAW_ID_LOOKUP_AS_AUTHORITY=ABSENT).",
+        )
+
+    # Section 4: Durable registered dispatch event is primary authority
+    from services import video_trace_state
+    try:
+        cb_event = video_trace_state.register_registered_callback_dispatch_event(
+            dispatcher_execution_id=dispatcher_execution_id,
+            owner_receipt=owner_receipt,
+        )
+    except Exception as reg_exc:
+        await query.answer()
+        logger.error("Failed to register durable callback dispatch event: %s", reg_exc)
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {reg_exc}",
+        )
+
+    if not owner_receipt and acceptance_plan and isinstance(acceptance_plan, dict):
+        from services.provider_spend_guard import issue_canonical_owner_authorization_from_event
+        try:
+            owner_receipt, _ = issue_canonical_owner_authorization_from_event(
+                cb_event["event_id"],
+                acceptance_plan,
+            )
+            session["owner_receipt"] = owner_receipt
+            cb_event["owner_receipt"] = owner_receipt
+            cb_event["signature"] = video_trace_state._compute_callback_ownership_signature(cb_event)
+        except Exception as auth_exc:
+            await query.answer()
+            return await safe_edit_or_send(
+                query,
+                f"Từ chối quyền thực thi kiểm thử trực tiếp: {auth_exc}",
+            )
 
     if not owner_receipt:
         await query.answer()
         return await safe_edit_or_send(
             query,
             "Thiếu biên nhận chấp thuận Owner cho phiên kiểm thử trực tiếp.",
+        )
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    from services.provider_spend_guard import (
+        evaluate_paid_live_test_availability,
+        BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
+    )
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=owner_receipt,
+        callback_event_id=cb_event.get("event_id") if isinstance(cb_event, dict) else None,
+    )
+    if not is_avail:
+        await query.answer()
+        return await safe_edit_or_send(
+            query,
+            f"Từ chối quyền thực thi kiểm thử trực tiếp: {avail_blocker or BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}",
         )
 
     try:
@@ -108981,6 +109228,7 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
             job_id=job_id,
             request_id=request_id,
             scene_count=scene_count,
+            callback_event=cb_event,
             callsite="bot.py:handle_product_video_owner_live_accept_callback",
         )
     except PermissionError as pe:
@@ -109012,8 +109260,9 @@ async def handle_product_video_owner_live_accept_callback(update: Update, contex
         if conf_id:
             confirm_fn = globals().get("confirm_video_project_invoice")
             if callable(confirm_fn):
+                eff_proj_id = int(cb_event.get("project_id") or job_id or 0)
                 confirm_fn(
-                    project_id=int(job_id or 0),
+                    project_id=eff_proj_id,
                     user_id=user_id,
                     provider_admission={
                         "confirmation_id": conf_id,
@@ -109041,6 +109290,7 @@ async def handle_owner_authorized_live_test_confirm(
     request_id: str,
     scene_count: int = 1,
     expected_max_usd: float | Decimal = 0.0,
+    callback_event: dict[str, Any] | None = None,
     callsite: str = "bot.py:handle_product_video_owner_live_accept_callback",
 ) -> dict[str, Any]:
     """Production Bot entrypoint for Owner-authorized paid live acceptance (Directive #1422, N21Z, N21AA).
@@ -109050,7 +109300,7 @@ async def handle_owner_authorized_live_test_confirm(
     """
     from decimal import Decimal
     from services.provider_spend_guard import (
-        PAID_LIVE_TEST_AVAILABLE,
+        evaluate_paid_live_test_availability,
         BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN,
         issue_bot_mint_authority,
         mint_multiscene_bot_confirmation_plan,
@@ -109059,9 +109309,6 @@ async def handle_owner_authorized_live_test_confirm(
         BOT_CONFIRM_VALIDATION_SOURCE,
         BOT_CONFIRM_VALIDATION_CALLSITE,
     )
-
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        raise PermissionError(f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}")
 
     clean_rcpt = str(owner_receipt or "").strip()
     if not clean_rcpt:
@@ -109083,7 +109330,21 @@ async def handle_owner_authorized_live_test_confirm(
         operation="create_video_task",
     )
     if not is_valid:
-        raise PermissionError(f"Cannot mint live test confirmation: Owner authorization invalid ({blocker})")
+        raise PermissionError(
+            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} "
+            f"Owner authorization invalid ({blocker})"
+        )
+
+    # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
+    cb_ev_param = callback_event.get("event_id") if isinstance(callback_event, dict) else (auth_data.get("callback_event_id") if isinstance(auth_data, dict) else None)
+    is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
+        owner_receipt=clean_rcpt,
+        callback_event_id=cb_ev_param,
+    )
+    if not is_avail:
+        raise PermissionError(
+            f"Cannot mint live test confirmation: {BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN} ({avail_blocker or 'unspecified'})"
+        )
 
     if not real_cbq_id or not real_update_id or not real_chat_id or not real_user_id:
         raise PermissionError(
@@ -109095,17 +109356,52 @@ async def handle_owner_authorized_live_test_confirm(
     auth_micro = auth_data.get("expected_max_provider_spend_micro_usd") or 0
     durable_max_usd = (Decimal(str(auth_micro)) / Decimal(1_000_000)) if auth_micro else Decimal("0.0")
 
-    cb_receipt = video_trace_state.issue_registered_callback_ownership_receipt(
-        telegram_update_id=real_update_id,
-        callback_query_id=real_cbq_id,
-        chat_id=real_chat_id,
-        user_id=real_user_id,
-        job_id=str(job_id),
-        request_id=str(request_id),
-        owner_receipt=clean_rcpt,
-        callsite=callsite,
-        caller_role="bot",
-    )
+    from services import video_trace_state
+    if callback_event is None:
+        raw_auth_rcpt = (auth_data.get("raw_auth") or {}).get("callback_ownership_receipt")
+        if isinstance(raw_auth_rcpt, dict) and raw_auth_rcpt.get("event_id"):
+            callback_event = dict(raw_auth_rcpt)
+            if not callback_event.get("signature"):
+                try:
+                    callback_event["signature"] = video_trace_state._compute_callback_ownership_signature(callback_event)
+                except Exception:
+                    pass
+            if raw_auth_rcpt.get("telegram_update_id"):
+                try:
+                    real_update_id = int(raw_auth_rcpt["telegram_update_id"])
+                except Exception:
+                    pass
+            if raw_auth_rcpt.get("callback_query_id"):
+                real_cbq_id = str(raw_auth_rcpt["callback_query_id"]).strip()
+            if raw_auth_rcpt.get("chat_id"):
+                raw_cid = str(raw_auth_rcpt["chat_id"]).strip()
+                if not real_chat_id or (str(real_chat_id).removeprefix("chat_") != raw_cid.removeprefix("chat_")):
+                    real_chat_id = raw_cid
+            if raw_auth_rcpt.get("user_id"):
+                raw_uid = str(raw_auth_rcpt["user_id"]).strip()
+                if not real_user_id or (str(real_user_id).removeprefix("user_") != raw_uid.removeprefix("user_")):
+                    real_user_id = raw_uid
+        else:
+            raise PermissionError(
+                "Pre-existing durable callback_event is strictly required; self-assert dispatch fallback is absent "
+                "(SELF_ASSERT_DISPATCH_FALLBACK=ABSENT, HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
+            )
+    cb_receipt = callback_event
+    c_proj = str(cb_receipt.get("project_id") or "").strip()
+    if not c_proj or c_proj in ("0", "None"):
+        raise PermissionError("Exact project_id is required in callback_event (PROJECT_AUTHORITY_DEFAULT=ABSENT)")
+    session = (getattr(context, "user_data", None) or {}).get("video_session") or {}
+    draft = session.get("draft") if isinstance(session, dict) else {}
+    acceptance_plan = (session.get("acceptance_plan") if isinstance(session, dict) else None) or (draft.get("acceptance_plan") if isinstance(draft, dict) else None) or getattr(context, "_acceptance_plan", None) or {}
+    c_prov = str(cb_receipt.get("provider") or (acceptance_plan.get("provider") if isinstance(acceptance_plan, dict) else None) or (acceptance_plan.get("selected_provider") if isinstance(acceptance_plan, dict) else None) or "").strip() or "key4u_video"
+    c_model = str(cb_receipt.get("model") or (acceptance_plan.get("model") if isinstance(acceptance_plan, dict) else None) or (acceptance_plan.get("selected_model") if isinstance(acceptance_plan, dict) else None) or "").strip() or "kling-v3"
+    c_runtime_sha = str(cb_receipt.get("runtime_sha") or "").strip()
+    c_exec_id = str(cb_receipt.get("dispatcher_execution_id") or "").strip()
+
+    # Full tuple match against durable owner auth record
+    auth_proj = str(auth_data.get("project_id") or "").strip()
+    if auth_proj and auth_proj not in ("0", "None") and c_proj != auth_proj:
+        raise PermissionError(f"Owner authorization project mismatch: '{c_proj}' != '{auth_proj}'")
 
     video_trace_state.record_owner_live_callback_origin_in_trace(
         clean_rcpt,
@@ -109114,6 +109410,7 @@ async def handle_owner_authorized_live_test_confirm(
         chat_id=real_chat_id,
         user_id=real_user_id,
         job_id=str(job_id),
+        project_id=c_proj,
         request_id=str(request_id),
         callback_action="create_video_task",
         callback_ownership_validated=True,
@@ -109129,8 +109426,13 @@ async def handle_owner_authorized_live_test_confirm(
         chat_id=real_chat_id,
         user_id=real_user_id,
         job_id=str(job_id),
+        project_id=c_proj,
         request_id=str(request_id),
         action="create_video_task",
+        dispatcher_execution_id=c_exec_id,
+        provider=c_prov,
+        model=c_model,
+        runtime_sha=c_runtime_sha,
         validation_source=BOT_CONFIRM_VALIDATION_SOURCE,
         validation_callsite=BOT_CONFIRM_VALIDATION_CALLSITE,
         validated_ownership=True,
@@ -274652,6 +274954,13 @@ async def lifespan(app: FastAPI):
         ),
         group=-9,
     )
+    tg_app.add_handler(
+        CallbackQueryHandler(
+            product_video_telegram_dispatcher_ingress,
+            pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$",
+        ),
+        group=-5,
+    )
     tg_app.add_handler(BusinessConnectionHandler(handle_cskh_business_connection))
     tg_app.add_handler(BusinessMessagesDeletedHandler(handle_cskh_deleted_business_messages))
     tg_app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, handle_cskh_business_message))
@@ -275749,7 +276058,8 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CallbackQueryHandler(handle_video_uiflow3_callback, pattern=r"^vid3\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_trend2_callback, pattern=r"^vtrend\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_storyboard2_callback, pattern=r"^vstory\|"))
-    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))"))
+    tg_app.add_handler(CallbackQueryHandler(handle_product_video_owner_live_accept_callback, pattern=r"^vproduct\|owner_live_accept(?:\|[a-f0-9]{12})?$"))
+    tg_app.add_handler(CallbackQueryHandler(handle_video_product_callback, pattern=r"^vproduct\|(?!b14_confirm(?:\||$))(?!owner_live_accept(?:\||$))"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_prompt_library_callback, pattern=r"^vpromptlib\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_architecture_profile_callback, pattern=r"^archprofile\|"))
     tg_app.add_handler(CallbackQueryHandler(handle_video_profile_studio_callback, pattern=r"^vprofile\|"))
