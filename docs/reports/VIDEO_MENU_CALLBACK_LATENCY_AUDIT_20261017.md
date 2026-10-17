@@ -27,9 +27,11 @@ AutoPost, wallet/Xu/PayOS, ENV/secrets, database/data và deployment behavior.
    work vào fast path.
 4. **S4 — protected scope:** DONE. Không sửa services/providers/worker hay
    engine semantics.
-5. **S5 — verification/delivery:** OPEN cho tới khi full syntax/test có output
-   terminal, rebase/push một PR duy nhất, CI xanh và (nếu được duyệt) exact-SHA
-   deploy/health được xác minh.
+5. **S5 — verification/delivery:** CI đã xanh ở run `39011278655`; source
+   compile guard báo `bot.py compile(source) PASS`, `bot.py ast.parse PASS` và
+   Python Compile Guard PASS. Regression runner độc lập của batch đạt 9/9.
+   S5 vẫn OPEN cho tới khi cập nhật PR/batch và exact-SHA deploy/health (nếu
+   được duyệt) được xác minh.
 
 ## Code changes (minimal, UI/callback only)
 
@@ -62,9 +64,19 @@ TEST_COMPILE_PASS
 DIFF_CHECK_PASS
 ```
 
-The final working tree must still produce a terminal result for full
-`py_compile bot.py` and the focused pytest invocation before delivery is
-claimed. Static/source evidence is not a claim that every button is live-smooth.
+CI run `39011278655` completed green (15m35s) and independently produced:
+
+```text
+bot.py compile(source) PASS
+bot.py ast.parse PASS
+Python Compile Guard PASS
+```
+
+The bundled local runtime has no `pytest`; the focused source regression was
+executed without pytest and passed 9/9. The CI workflow did not explicitly
+target `tests/test_video_callback_ack_order.py`, so focused pytest remains
+unclaimed. Static/source/CI evidence is not a claim that every button is
+live-smooth.
 
 ## Delivery truth
 
@@ -80,9 +92,9 @@ TASK=video-menu-callback-latency-20261017
 BASE_SHA=origin/main (to be rebased before delivery)
 HEAD_SHA=working tree
 FILES_CHANGED=bot.py; tests/test_video_callback_ack_order.py; .agents/state/video-menu-callback-latency-20261017.yaml; docs/reports/VIDEO_MENU_CALLBACK_LATENCY_AUDIT_20261017.md
-TESTS=focused 9/9; changed functions 13/13; test py_compile pass; diff check pass; full bot.py/pytest pending terminal output
+TESTS=focused runner 9/9; changed functions 13/13; test py_compile pass; diff check pass; CI 39011278655 green with bot.py compile(source)/ast.parse and Python Compile Guard; focused pytest not run locally (pytest unavailable)
 BASELINE_FAILURES=none newly established
-BRANCH_FAILURES=full compile/pytest not yet captured
+BRANCH_FAILURES=local full py_compile interrupted; focused pytest unavailable in bundled runtime
 NEW_FAILURES=none observed in focused checks
 PROTECTED_COMPARATORS=source scope review; no provider/worker/wallet/engine files changed
 PROVIDER_CALLS=false
