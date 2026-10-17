@@ -1,0 +1,67 @@
+task: video-menu-callback-latency-20261017
+phase: VERIFY
+objective: >-
+  Rà soát và xử lý độ trễ callback của các nút trong Menu Video, ưu tiên seam
+  đã tái hiện, giữ nguyên route/engine/provider/worker và luồng đã khóa.
+fsm: READ -> CONTRACT -> BUILD -> REVIEW -> VERIFY -> REPORT -> LEARN
+allowed_files:
+  - bot.py
+  - tests/test_video_callback_ack_order.py
+  - .agents/state/video-menu-callback-latency-20261017.yaml
+  - docs/reports/VIDEO_MENU_CALLBACK_LATENCY_AUDIT_20261017.md
+protected_scope:
+  - services/**
+  - providers/**
+  - local_worker.py
+  - wallet/payment/PayOS/ENV/secrets
+  - route/engine/provider/worker semantics
+  - AutoPost and SubDub/Music/Voice/Image engines
+specs:
+  - id: S1
+    name: navigation ACK seams
+    status: SOURCE_VERIFIED
+    acceptance: valid navigation callbacks are acknowledged before slow state/language/lock/render work
+    evidence: focused source-order regression 9/9; changed-function compile 13/13; test module compile pass
+  - id: S2
+    name: Video entry inventory
+    status: SOURCE_VERIFIED
+    acceptance: default Menu Video entries and optional planner entry have a registered handler and explicit early-ACK classification
+    evidence: source inventory: 12 default entries plus optional lvs27b planner entry; entry handlers reviewed
+  - id: S3
+    name: nested/back classification
+    status: SOURCE_VERIFIED_NOT_LIVE_COMPLETE
+    acceptance: only navigation ACK seams are changed; no provider/job/wallet operation is moved into the fast path
+    evidence: focused source checks and protected-scope review; live per-button timing is not fully observed
+  - id: S4
+    name: protected-scope review
+    status: SOURCE_VERIFIED
+    acceptance: diff is limited to callback ACK/UI seam, focused regression, and report/state
+    evidence: changed files are bot.py, focused test, state, report; git diff --check passed
+  - id: S5
+    name: verification and delivery
+    status: OPEN
+    acceptance: terminal evidence for full syntax/tests, then one PR/batch delivery and exact runtime verification
+    evidence: focused checks passed; full bot compile and pytest still require terminal results
+checklist:
+  - "[x] READ core skills, AGENTS.md, branch and existing diff"
+  - "[x] CONTRACT allowed/protected scope and ordered specs"
+  - "[x] BUILD navigation ACK-only seams across visible Video handlers"
+  - "[x] REVIEW source diff and protected-scope comparator"
+  - "[x] VERIFY focused source-order checks (9/9), changed-function compile (13/13), test py_compile, and diff check"
+  - "[ ] VERIFY full bot.py py_compile and pytest terminal results"
+  - "[ ] REPORT one batch on GitHub after rebase/push/CI"
+  - "[ ] LIVE exact-SHA deploy/health/manual evidence (only after delivery gate)"
+  - "[ ] LEARN record unresolved live/nested evidence without claiming all-button smoothness"
+tests:
+  focused: tests/test_video_callback_ack_order.py
+  focused_command: "python -B -c runpy tests/test_video_callback_ack_order.py"
+  syntax: "python -B -m py_compile bot.py tests/test_video_callback_ack_order.py"
+  safety: "git diff --check"
+provider_calls: false
+wallet_mutations: false
+deploy: not_authorized_in_this_patch
+runtime_claim: "PR #1409 is live in current runtime; this batch is not deployed"
+blockers:
+  - "Full bot.py py_compile has not returned a terminal result for the final working tree"
+  - "pytest terminal result is not yet captured"
+  - "Per-button live timing is not fully observed; static/source evidence is not a live smoothness claim"
