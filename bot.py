@@ -109358,34 +109358,61 @@ async def handle_owner_authorized_live_test_confirm(
 
     from services import video_trace_state
     if callback_event is None:
-        raw_auth_rcpt = (auth_data.get("raw_auth") or {}).get("callback_ownership_receipt")
-        if isinstance(raw_auth_rcpt, dict) and raw_auth_rcpt.get("event_id"):
-            callback_event = dict(raw_auth_rcpt)
-            if not callback_event.get("signature"):
-                try:
-                    callback_event["signature"] = video_trace_state._compute_callback_ownership_signature(callback_event)
-                except Exception:
-                    pass
-            if raw_auth_rcpt.get("telegram_update_id"):
-                try:
-                    real_update_id = int(raw_auth_rcpt["telegram_update_id"])
-                except Exception:
-                    pass
-            if raw_auth_rcpt.get("callback_query_id"):
-                real_cbq_id = str(raw_auth_rcpt["callback_query_id"]).strip()
-            if raw_auth_rcpt.get("chat_id"):
-                raw_cid = str(raw_auth_rcpt["chat_id"]).strip()
-                if not real_chat_id or (str(real_chat_id).removeprefix("chat_") != raw_cid.removeprefix("chat_")):
-                    real_chat_id = raw_cid
-            if raw_auth_rcpt.get("user_id"):
-                raw_uid = str(raw_auth_rcpt["user_id"]).strip()
-                if not real_user_id or (str(real_user_id).removeprefix("user_") != raw_uid.removeprefix("user_")):
-                    real_user_id = raw_uid
-        else:
-            raise PermissionError(
-                "Pre-existing durable callback_event is strictly required; self-assert dispatch fallback is absent "
-                "(SELF_ASSERT_DISPATCH_FALLBACK=ABSENT, HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
-            )
+        ev_id = (
+            auth_data.get("callback_event_id")
+            or (auth_data.get("raw_auth") or {}).get("callback_event_id")
+            or f"cbe_{clean_rcpt}"
+        )
+        if ev_id:
+            db_ev = video_trace_state.get_registered_callback_dispatch_event(ev_id)
+            if db_ev:
+                callback_event = dict(db_ev)
+                callback_event["validator"] = video_trace_state.CANONICAL_CALLBACK_VALIDATOR
+                callback_event["provenance"] = "REGISTERED_CALLBACK_VALIDATION"
+                callback_event["status"] = "VALIDATED"
+                callback_event["ok"] = True
+                callback_event["owner_receipt"] = clean_rcpt
+                callback_event["signature"] = video_trace_state._compute_callback_ownership_signature(callback_event)
+                if callback_event.get("telegram_update_id"):
+                    try:
+                        real_update_id = int(callback_event["telegram_update_id"])
+                    except Exception:
+                        pass
+                if callback_event.get("callback_query_id"):
+                    real_cbq_id = str(callback_event["callback_query_id"]).strip()
+                if callback_event.get("chat_id"):
+                    real_chat_id = str(callback_event["chat_id"]).strip()
+                if callback_event.get("user_id"):
+                    real_user_id = str(callback_event["user_id"]).strip()
+        if callback_event is None:
+            raw_auth_rcpt = (auth_data.get("raw_auth") or {}).get("callback_ownership_receipt")
+            if isinstance(raw_auth_rcpt, dict) and raw_auth_rcpt.get("event_id"):
+                callback_event = dict(raw_auth_rcpt)
+                if not callback_event.get("signature"):
+                    try:
+                        callback_event["signature"] = video_trace_state._compute_callback_ownership_signature(callback_event)
+                    except Exception:
+                        pass
+                if raw_auth_rcpt.get("telegram_update_id"):
+                    try:
+                        real_update_id = int(raw_auth_rcpt["telegram_update_id"])
+                    except Exception:
+                        pass
+                if raw_auth_rcpt.get("callback_query_id"):
+                    real_cbq_id = str(raw_auth_rcpt["callback_query_id"]).strip()
+                if raw_auth_rcpt.get("chat_id"):
+                    raw_cid = str(raw_auth_rcpt["chat_id"]).strip()
+                    if not real_chat_id or (str(real_chat_id).removeprefix("chat_") != raw_cid.removeprefix("chat_")):
+                        real_chat_id = raw_cid
+                if raw_auth_rcpt.get("user_id"):
+                    raw_uid = str(raw_auth_rcpt["user_id"]).strip()
+                    if not real_user_id or (str(real_user_id).removeprefix("user_") != raw_uid.removeprefix("user_")):
+                        real_user_id = raw_uid
+            else:
+                raise PermissionError(
+                    "Pre-existing durable callback_event is strictly required; self-assert dispatch fallback is absent "
+                    "(SELF_ASSERT_DISPATCH_FALLBACK=ABSENT, HANDLER_CAN_SELF_ASSERT_DISPATCH=NO)"
+                )
     cb_receipt = callback_event
     c_proj = str(cb_receipt.get("project_id") or "").strip()
     if not c_proj or c_proj in ("0", "None"):

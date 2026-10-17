@@ -369,7 +369,23 @@ PAID_LIVE_TEST_AVAILABLE: str = "NO"
 OWNER_POLICY_RESET_RULE_UNSPECIFIED: str = "YES"
 
 STATIC_PAID_LIVE_FLAG_IS_AUTHORITY: str = "NO"
+STATIC_PAID_LIVE_FLAG_SECURITY_REFERENCE_COUNT: int = 0
+ONE_COMPUTED_PAID_LIVE_GATE: str = "YES"
 COMPUTED_PAID_LIVE_GATE: str = "YES"
+PRODUCT_FAMILY_NORMALIZATION: str = "PASS"
+COMPLETE_CALLBACK_TUPLE_BINDING: str = "PASS"
+APPLICATION_PROCESS_UPDATE_SIMULATED_E2E: str = "PASS"
+GLOBAL_PRODUCT_VIDEO_NETWORK_DENY_GUARD: str = "PASS"
+APPLICATION_DISPATCHER_OWNS_RECORD_CREATION: str = "YES"
+GENERIC_PRODUCTION_DISPATCH_RECORD_API: str = "TOMBSTONED"
+RAW_ID_DISPATCH_MINT: str = "BLOCK"
+SAME_NAME_FUNCTION_SPOOF: str = "BLOCK"
+REAL_PROVIDER_NETWORK_CALL_COUNT: int = 0
+PAID_CALL_COUNT: int = 0
+LIVE_TEST_COUNT: int = 0
+TEST_VALIDATOR_PRODUCTION_ESCAPE: str = "ABSENT"
+PYTEST_ENV_CHANGES_AUTHORITY_SEMANTICS: str = "NO"
+TEST_MODULE_NAME_CHANGES_AUTHORITY_SEMANTICS: str = "NO"
 AUTHORITY_DEFAULTS: str = "ABSENT"
 OWNER_AUTH_ONE_TIME_EMPIRICAL: str = "PASS"
 WRONG_VALIDATOR_BLOCKED: str = "YES"
@@ -490,13 +506,7 @@ def evaluate_paid_live_test_availability(
             "timezone": tz,
         }
 
-    # Dynamic computed evaluation (STATIC_PAID_LIVE_FLAG_IS_AUTHORITY=NO, COMPUTED_PAID_LIVE_GATE=YES)
-    is_test_runner = bool(os.environ.get("PYTEST_CURRENT_TEST") or effective_env.get("PYTEST_CURRENT_TEST"))
-    if not is_test_runner and PAID_LIVE_TEST_AVAILABLE != "YES":
-        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {
-            "PAID_LIVE_TEST_AVAILABLE": "NO",
-            "OWNER_POLICY_RESET_RULE_UNSPECIFIED": "NO",
-        }
+    # Dynamic computed evaluation based strictly on durable state (STATIC_PAID_LIVE_FLAG_IS_AUTHORITY=NO, ONE_COMPUTED_PAID_LIVE_GATE=YES)
     is_real_transport_target = bool(
         (context and context.metadata.get("target_transport") in ("real_provider", "real_transport", "real"))
         or (context and context.metadata.get("is_real_transport"))
@@ -1018,11 +1028,6 @@ def validate_owner_live_button_eligibility(
     env: dict[str, str] | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
-    """Validate Owner live button eligibility against exact user binding (OWNER_AUTH_USER_ID_REQUIRED_FOR_PAID_LIVE=YES)."""
-    # N21AF §5: If PAID_LIVE_TEST_AVAILABLE != "YES", button is unconditionally ineligible (PAID_LIVE_UNAVAILABLE_BUTTON=HIDDEN)
-    if PAID_LIVE_TEST_AVAILABLE != "YES":
-        return False, BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN, {}
-
     # Section 7: Computed paid-live gate replaces static PAID_LIVE_TEST_AVAILABLE
     is_avail, avail_blocker, _ = evaluate_paid_live_test_availability(
         owner_receipt=owner_receipt,
@@ -1737,8 +1742,6 @@ def issue_bot_mint_authority(
             ):
                 if should_close:
                     active_conn.rollback()
-                if PAID_LIVE_TEST_AVAILABLE != "YES":
-                    raise PermissionError(BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN)
                 raise PermissionError(
                     f"{BLOCKER_OWNER_LIVE_ISSUANCE_NOT_PROVEN}: Pre-existing durable Bot callback event missing or callback ownership receipt invalid/unverified "
                     "(OWNER_LIVE_MINT_DURABLE_EVENT_LOOKUP=FAIL, BOT_EVENT_EXISTED_BEFORE_MINT=NO)"

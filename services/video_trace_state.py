@@ -1847,8 +1847,12 @@ SELF_ASSERT_DISPATCH_FALLBACK: str = "ABSENT"
 PROJECT_AUTHORITY_DEFAULT: str = "ABSENT"
 TEST_VALIDATOR_PRODUCTION_ESCAPE: str = "ABSENT"
 TEST_TO_PRODUCTION_AUTHORITY_ESCAPE_COUNT: int = 0
+CANONICAL_CALLBACK_VALIDATOR: str = "services.video_trace_state:register_registered_callback_dispatch_event"
+PYTEST_ENV_CHANGES_AUTHORITY_SEMANTICS: str = "NO"
+TEST_MODULE_NAME_CHANGES_AUTHORITY_SEMANTICS: str = "NO"
 MISSING_OWNER_RECEIPT_BLOCKED: str = "YES"
 COMPLETE_AUTHORITY_TUPLE_BINDING: str = "PASS"
+COMPLETE_CALLBACK_TUPLE_BINDING: str = "PASS"
 
 MODULE_LOCAL_SECRET_IS_SECURITY_AUTHORITY: str = "NO"
 STACK_INSPECTION_SECURITY_AUTHORITY: str = "NO"
@@ -2620,39 +2624,27 @@ def record_owner_live_callback_origin_in_trace(
 
     val = str(callback_ownership_receipt.get("validator") or "").strip()
     prov = str(callback_ownership_receipt.get("provenance") or "").strip()
-    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
     ev_dict: dict[str, Any] = {}
     exec_id_ev: str = str(callback_ownership_receipt.get("dispatcher_execution_id") or "").strip()
     event_id: str = str(callback_ownership_receipt.get("event_id") or callback_ownership_receipt.get("receipt_id") or "").strip()
 
-    if val != "services.video_trace_state:register_registered_callback_dispatch_event":
-        if not (is_pytest and val.startswith("tests.")):
-            if should_close:
-                c.close()
-            raise PermissionError(
-                f"Unauthorized callback receipt validator '{val}' "
-                "(WRONG_VALIDATOR_BLOCKED=YES, POSITIVE_ALLOWLIST=YES, TEST_VALIDATOR_PRODUCTION_ESCAPE=ABSENT)"
-            )
-        if (
-            validation_source == "video_trace_state:begin_video_confirm_execution"
-            or validation_callsite == "bot.py:handle_product_video_owner_live_accept_callback"
-        ) and prov != "REGISTERED_CALLBACK_VALIDATION":
-            if should_close:
-                c.close()
-            raise PermissionError(
-                f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
-            )
-    else:
-        if prov != "REGISTERED_CALLBACK_VALIDATION":
-            if should_close:
-                c.close()
-            raise PermissionError(
-                f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
-            )
-        if not event_id:
-            if should_close:
-                c.close()
-            raise PermissionError("event_id missing in callback_ownership_receipt")
+    if val != CANONICAL_CALLBACK_VALIDATOR:
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Unauthorized callback receipt validator '{val}' "
+            "(WRONG_VALIDATOR_BLOCKED=YES, POSITIVE_ALLOWLIST=YES, TEST_VALIDATOR_PRODUCTION_ESCAPE=ABSENT)"
+        )
+    if prov != "REGISTERED_CALLBACK_VALIDATION":
+        if should_close:
+            c.close()
+        raise PermissionError(
+            f"Callback receipt provenance '{prov}' is forbidden (CALLBACK_PROVENANCE_POSITIVE_ALLOWLIST=YES)"
+        )
+    if not event_id:
+        if should_close:
+            c.close()
+        raise PermissionError("event_id missing in callback_ownership_receipt")
 
         # Validate durable event in bot_registered_callback_events
         cur_pre = c.cursor()
