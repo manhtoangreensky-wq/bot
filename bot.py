@@ -70681,10 +70681,25 @@ def video_editor_callback_state_guard(callback_handler):
     async def guarded(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         query = getattr(update, "callback_query", None)
         user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
+        callback_data_override = str(kwargs.get("callback_data_override") or "")
+        raw_callback_data = callback_data_override or str(getattr(query, "data", "") or "")
+        raw_action = raw_callback_data.split("|", 2)[1] if "|" in raw_callback_data else "menu"
+        answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
+        if query is not None and raw_action == "hub":
+            try:
+                await query.answer()
+            except Exception as exc:
+                logger.warning(
+                    "videoedit hub callback answer skipped | error_type=%s",
+                    type(exc).__name__,
+                )
+            else:
+                _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
         state_key = video_editor_pending_key(user_id) if user_id else ""
         try:
             restored_state = dict(get_video_editor_pending(user_id) or {}) if user_id else {}
         except VideoEditorStateUnavailableError:
+            _VIDEO_EDIT_CALLBACK_ANSWERED.reset(answered_token)
             await notify_video_editor_state_unavailable(query)
             return True
         had_state = bool(restored_state)
@@ -70692,8 +70707,6 @@ def video_editor_callback_state_guard(callback_handler):
         guard_snapshot_token = _VIDEO_EDITOR_GUARD_SNAPSHOT.set(snapshot)
         write_token = _VIDEO_EDITOR_STATE_WRITE.set(None)
         submission_token = _VIDEO_EDITOR_SUBMISSION_COMMITTED.set(False)
-        answered_token = _VIDEO_EDIT_CALLBACK_ANSWERED.set(False)
-        callback_data_override = str(kwargs.get("callback_data_override") or "")
         transactional_token = _VIDEO_EDIT_CALLBACK_TRANSACTIONAL.set(
             callback_data_override.startswith("videoedit|")
         )
@@ -71165,6 +71178,50 @@ def _local_video_planning_delete(user_id: str, chat_id: str, plan_key: str) -> b
         conn.close()
 
 
+_LOCAL_VIDEO_STUDIO_ANSWERED_CALLBACKS: set[str] = set()
+
+
+def _local_video_studio_callback_key(query) -> str:
+    callback_id = str(getattr(query, "id", "") or "").strip()
+    return callback_id or f"object:{id(query)}"
+
+
+def _local_video_studio_callback_was_answered(query) -> bool:
+    return _local_video_studio_callback_key(query) in _LOCAL_VIDEO_STUDIO_ANSWERED_CALLBACKS
+
+
+def _local_video_studio_mark_callback_answered(query) -> None:
+    _LOCAL_VIDEO_STUDIO_ANSWERED_CALLBACKS.add(_local_video_studio_callback_key(query))
+
+
+async def _local_video_studio_ack_navigation(query) -> bool:
+    """ACK a valid planner navigation callback before state/lock/render work."""
+    if _local_video_studio_callback_was_answered(query):
+        return True
+    responder = getattr(query, "answer", None)
+    if not callable(responder):
+        return False
+    try:
+        await responder()
+    except Exception:
+        return False
+    _local_video_studio_mark_callback_answered(query)
+    return True
+
+
+async def _local_video_studio_answer_once(query, text: str = "", **kwargs):
+    """Preserve one Telegram answer when an early ACK already happened."""
+    if _local_video_studio_callback_was_answered(query):
+        _LOCAL_VIDEO_STUDIO_ANSWERED_CALLBACKS.discard(_local_video_studio_callback_key(query))
+        return True
+    responder = getattr(query, "answer", None)
+    if not callable(responder):
+        return True
+    result = await responder(text, **kwargs)
+    _local_video_studio_mark_callback_answered(query)
+    return result
+
+
 async def _local_video_studio_public_deliver(
     query,
     text: str,
@@ -71215,17 +71272,24 @@ async def _local_video_studio_public_deliver(
         return False
 
     async def answer():
+        if _local_video_studio_callback_was_answered(query):
+            return True
         responder = getattr(query, "answer", None)
         if callable(responder):
-            return await responder(feedback)
+            result = await responder(feedback)
+            _local_video_studio_mark_callback_answered(query)
+            return result
         return True
 
-    return await local_video_studio_public.deliver_then_commit(
-        edit,
-        reply,
-        commit,
-        answer,
-    )
+    try:
+        return await local_video_studio_public.deliver_then_commit(
+            edit,
+            reply,
+            commit,
+            answer,
+        )
+    finally:
+        _LOCAL_VIDEO_STUDIO_ANSWERED_CALLBACKS.discard(_local_video_studio_callback_key(query))
 
 
 async def handle_local_video_studio_public_callback(
@@ -71503,6 +71567,8 @@ async def _handle_option_c_video_planning_callback(
         if callable(responder):
             return await responder("Không xác định được phiên lập kế hoạch.", show_alert=True)
         return None
+    if verb in {"open", "back"} and not _transaction_locked:
+        await _local_video_studio_ack_navigation(query)
     if not _transaction_locked:
         try:
             lock = (
@@ -71513,7 +71579,11 @@ async def _handle_option_c_video_planning_callback(
         except local_video_studio_public.PreviewActionError:
             responder = getattr(query, "answer", None)
             if callable(responder):
-                return await responder("Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.", show_alert=True)
+                return await _local_video_studio_answer_once(
+                    query,
+                    "Thao tác lập kế hoạch không hợp lệ hoặc đã cũ.",
+                    show_alert=True,
+                )
             return None
         async with lock:
             return await _handle_option_c_video_planning_callback(
@@ -71527,14 +71597,18 @@ async def _handle_option_c_video_planning_callback(
     if store is None:
         responder = getattr(query, "answer", None)
         if callable(responder):
-            return await responder("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Phiên lập kế hoạch đã hết hạn hoặc đã đóng.",
+                show_alert=True,
+            )
         return None
     callback_id = str(getattr(query, "id", "") or "").strip()
     if verb == "open":
         try:
             duplicate = local_video_studio_public.store_has_callback_id(store, callback_id, now=now)
             if duplicate:
-                return await query.answer("Thao tác này đã được nhận.")
+                return await _local_video_studio_answer_once(query, "Thao tác này đã được nhận.")
             result = local_video_studio_public.apply_callback(
                 local_video_studio_public.new_session(now=now),
                 raw_callback,
@@ -71542,7 +71616,11 @@ async def _handle_option_c_video_planning_callback(
             )
             view = local_video_studio_public.render_view(result["session"])
         except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
-            return await query.answer("Không thể mở bản lập kế hoạch.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Không thể mở bản lập kế hoạch.",
+                show_alert=True,
+            )
 
         def commit_open():
             candidate = local_video_studio_public.commit_callback_id(
@@ -71567,9 +71645,13 @@ async def _handle_option_c_video_planning_callback(
     except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
         session = None
     if session is None:
-        return await query.answer("Phiên lập kế hoạch đã hết hạn hoặc đã đóng.", show_alert=True)
+        return await _local_video_studio_answer_once(
+            query,
+            "Phiên lập kế hoạch đã hết hạn hoặc đã đóng.",
+            show_alert=True,
+        )
     if local_video_studio_public.store_has_callback_id(store, callback_id, now=now):
-        return await query.answer("Thao tác này đã được nhận.")
+        return await _local_video_studio_answer_once(query, "Thao tác này đã được nhận.")
 
     try:
         result = local_video_studio_public.apply_callback(
@@ -71577,12 +71659,20 @@ async def _handle_option_c_video_planning_callback(
         )
         custom_view = None
     except local_video_studio_public.PublicSessionExpired:
-        return await query.answer("Phiên lập kế hoạch đã hết hạn.", show_alert=True)
+        return await _local_video_studio_answer_once(
+            query,
+            "Phiên lập kế hoạch đã hết hạn.",
+            show_alert=True,
+        )
     except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
-        return await query.answer("Thao tác không hợp lệ; kế hoạch hiện tại được giữ nguyên.", show_alert=True)
+        return await _local_video_studio_answer_once(
+            query,
+            "Thao tác không hợp lệ; kế hoạch hiện tại được giữ nguyên.",
+            show_alert=True,
+        )
 
     if result.get("duplicate"):
-        return await query.answer("Thao tác này đã được nhận.")
+        return await _local_video_studio_answer_once(query, "Thao tác này đã được nhận.")
     candidate = result["session"]
     if result.get("closed"):
         text = "✖️ <b>Đã đóng bản lập kế hoạch</b>\n\nKhông có xử lý media hoặc tác vụ chạy ngầm."
@@ -71614,7 +71704,11 @@ async def _handle_option_c_video_planning_callback(
             local_video_planning_store.PlanStoreError,
             sqlite3.Error,
         ):
-            return await query.answer("Chưa lưu được kế hoạch; dữ liệu hiện tại vẫn được giữ nguyên.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Chưa lưu được kế hoạch; dữ liệu hiện tại vẫn được giữ nguyên.",
+                show_alert=True,
+            )
         try:
             candidate = local_video_studio_public.session_from_plan(
                 saved["plan"], session_id=session_id, now=now
@@ -71625,7 +71719,8 @@ async def _handle_option_c_video_planning_callback(
             local_video_studio_public.PreviewActionError,
             local_video_studio_public.PreviewDataError,
         ):
-            return await query.answer(
+            return await _local_video_studio_answer_once(
+                query,
                 "Kế hoạch đã được lưu nhưng chưa thể hiển thị lại; hãy mở Kế hoạch của tôi.",
                 show_alert=True,
             )
@@ -71642,7 +71737,11 @@ async def _handle_option_c_video_planning_callback(
         try:
             plans = _local_video_planning_list_plans(user_id, chat_id)
         except (local_video_planning_store.PlanStoreError, sqlite3.Error):
-            return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Kho kế hoạch đang tạm thời chưa mở được.",
+                show_alert=True,
+            )
         custom_view = _local_video_planning_library_view(candidate, plans)
 
     action = str(result.get("saved_plan_action") or "")
@@ -71654,9 +71753,17 @@ async def _handle_option_c_video_planning_callback(
         try:
             item = _local_video_planning_get_plan(user_id, chat_id, key)
         except (local_video_planning_store.PlanStoreError, sqlite3.Error):
-            return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Kho kế hoạch đang tạm thời chưa mở được.",
+                show_alert=True,
+            )
         if item is None:
-            return await query.answer("Không tìm thấy kế hoạch trong kho của bạn.", show_alert=True)
+            return await _local_video_studio_answer_once(
+                query,
+                "Không tìm thấy kế hoạch trong kho của bạn.",
+                show_alert=True,
+            )
         if action == "view":
             custom_view = _local_video_planning_plan_view(candidate, item)
         elif action == "delete":
@@ -71667,13 +71774,21 @@ async def _handle_option_c_video_planning_callback(
                     item["plan"], session_id=session_id, now=now
                 )
             except (local_video_studio_public.PreviewActionError, local_video_studio_public.PreviewDataError):
-                return await query.answer("Kế hoạch này không còn hợp lệ để mở.", show_alert=True)
+                return await _local_video_studio_answer_once(
+                    query,
+                    "Kế hoạch này không còn hợp lệ để mở.",
+                    show_alert=True,
+                )
             custom_view = None
         else:
             try:
                 plans = _local_video_planning_list_plans(user_id, chat_id)
             except (local_video_planning_store.PlanStoreError, sqlite3.Error):
-                return await query.answer("Kho kế hoạch đang tạm thời chưa mở được.", show_alert=True)
+                return await _local_video_studio_answer_once(
+                    query,
+                    "Kho kế hoạch đang tạm thời chưa mở được.",
+                    show_alert=True,
+                )
             plans = [plan for plan in plans if str(plan.get("plan_key") or "") != key]
             delete_key = key
             if str(candidate.get("plan_id") or "") == key:
@@ -83642,12 +83757,18 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
         )
         return True
     user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
+    callback_answered = False
 
     if action == "entry":
         product = str(values[0] if values else "")
         if product not in video_uiflow3.ENTRY_ADAPTERS or product == "video_idea":
             await query.answer("Kho Ý tưởng dùng quy trình riêng và không sửa nội dung gốc trong kho.", show_alert=True)
             return True
+        # A valid Video entry must acknowledge the Telegram callback before
+        # creating/rendering its draft.  The entry path is UI-only here; no
+        # provider, worker, job, wallet, or engine action is started.
+        await query.answer()
+        callback_answered = True
         state = start_video_uiflow3_state(context, product)
         state["owner_user_id"] = user_id
         state["owner_chat_id"] = safe_int(getattr(getattr(query, "message", None), "chat_id", 0), 0)
@@ -83668,7 +83789,8 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
 
     state, claimed = video_uiflow3.claim_callback(state, str(getattr(query, "id", "") or ""))
     if not claimed:
-        await query.answer("Đã nhận lựa chọn này.")
+        if not callback_answered:
+            await query.answer("Đã nhận lựa chọn này.")
         return True
     is_film_flow = str(state.get("parent_product") or "") in {"multi_scene_film", "video_long"}
     if not is_film_flow and action not in {"entry", "resume", "back"} and (
@@ -83677,8 +83799,12 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
     ):
         await query.answer("Nút này thuộc bản kế hoạch cũ. Bản hiện tại vẫn được giữ nguyên.", show_alert=True)
         return await video_uiflow3_render(query, context, state)
+    if action == "back":
+        # All Back edges are navigation-only after the common ownership and
+        # stale-token guards above. ACK before state persistence/stack/render.
+        await query.answer()
+        callback_answered = True
     save_video_uiflow3_state(context, state)
-    callback_answered = False
 
     try:
         storyboard_marker = video_storyboard_entity_bridge_marker(state)
@@ -83785,7 +83911,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
                 nav = dict(state.get("navigation") or {})
                 stack = list(nav.get("visible_step_stack") or [])
                 if not stack:
-                    await query.answer()
+                    if not callback_answered:
+                        await query.answer()
+                        callback_answered = True
                     user_id = safe_int(getattr(getattr(query, "from_user", None), "id", 0), 0)
                     lang = (get_user_language(user_id) or "vi") if user_id else "vi"
                     return await safe_edit_or_send(
@@ -108796,11 +108924,11 @@ async def task3d_render_step(target, user_id, session: dict, lang: str = "vi", c
 @video_public_callback_failure_guard
 async def handle_video_prompt_library_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     uid = query.from_user.id
     lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
-    await query.answer()
     if action in {"start", "menu", "back"}:
         set_video_route_session(uid, "prompt_library", "tool_home")
         return await safe_edit_or_send(
@@ -118848,7 +118976,6 @@ async def handle_video_tail9_pending_text(update: Update, context: ContextTypes.
 async def handle_video_product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     uid = query.from_user.id
-    lang = get_user_language(uid) or "vi"
     callback_data = str(
         getattr(context, "_product_video_callback_data_override", "")
         or query.data
@@ -118857,6 +118984,24 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     parts = callback_data.split("|")
     action = parts[1] if len(parts) > 1 else "open"
     value = parts[2] if len(parts) > 2 else ""
+    callback_answered = False
+
+    # Public Video entry buttons are navigation-only at this boundary.  ACK
+    # them before the shared language/state reads so a slow local read cannot
+    # leave Telegram's button spinner visible.  Delegated/authoritative paths
+    # keep their existing acknowledgement owner.
+    if action == "open" and value in {
+        "video_trend",
+        "script_image_video",
+        "video_reference",
+        "motion_prompt",
+        "frame_video_local",
+        "self_shot_scene_change",
+        "storyboard_prompt",
+    }:
+        await query.answer()
+        callback_answered = True
+    lang = get_user_language(uid) or "vi"
     if action in {"ss2", "ss3"}:
         session = get_video_session(uid)
         product_id = str(session.get("product_id") or "")
@@ -119455,7 +119600,8 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
     if action == "b14_confirm" and not bool(getattr(context, "_product_video_authoritative_confirm", False)):
         return await handle_product_video_public_confirm_callback(update, context)
     if action == "open" and value == "storyboard_prompt":
-        await query.answer()
+        if not callback_answered:
+            await query.answer()
         storyboard2_new_outer_state(context)
         return await storyboard2_render(query, context, storyboard2_state(context))
     if (
@@ -119473,7 +119619,7 @@ async def handle_video_product_callback(update: Update, context: ContextTypes.DE
         return await storyboard2_render(query, context, storyboard2_state(context))
     # Delegated legacy handlers answer their own callback. Answering here as
     # well can produce a Telegram "query is too old/already answered" error.
-    if action not in {"legacy", "prompt_image_execute"}:
+    if action not in {"legacy", "prompt_image_execute"} and not callback_answered:
         await query.answer()
     if action == "open" and value == "video_trend":
         legacy_state = save_video_trend2_state(context, {
@@ -133903,12 +134049,13 @@ async def handle_self_scene_ai_callback(update: Update, context: ContextTypes.DE
 @video_public_callback_failure_guard
 async def handle_long_video_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    uid = query.from_user.id
-    lang = get_user_language(uid) or "vi"
     parts = str(query.data or "").split("|")
     action = parts[1] if len(parts) > 1 else "start"
     if action in {"public_guard", "start"}:
         await query.answer()
+    uid = query.from_user.id
+    lang = get_user_language(uid) or "vi"
+    if action in {"public_guard", "start"}:
         state = start_video_uiflow3_state(context, "multi_scene_film")
         state["owner_user_id"] = uid
         state["owner_chat_id"] = safe_int(
@@ -143057,7 +143204,18 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     system_back_origin = ""
     system_operator_child_origin = False
     menu_timing_enabled = action in ("main", "main_video")
+    menu_fast_path = action in {"main", "main_video", "guide_video_ai"}
     menu_timing_start = time.perf_counter() if menu_timing_enabled else 0.0
+    menu_callback_answered = False
+    menu_ack_start = 0.0
+    menu_ack_done = 0.0
+    if menu_fast_path:
+        if menu_timing_enabled:
+            menu_ack_start = menu_timing_start
+        await query.answer()
+        if menu_timing_enabled:
+            menu_ack_done = time.perf_counter()
+        menu_callback_answered = True
     user_is_admin = is_admin_user(query.from_user.id)
     if action.startswith("operator|"):
         parts = action.split("|")
@@ -143241,9 +143399,11 @@ async def handle_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         if runtime_help_parent not in {"admin_security_db", "admin_system_ops"}:
             return await query.answer("Nút hướng dẫn đã hết phiên. Vui lòng mở lại từ menu Quản trị.", show_alert=True)
         action = "system_runtime_help"
-    menu_ack_start = time.perf_counter() if menu_timing_enabled else 0.0
-    await query.answer()
-    menu_ack_done = time.perf_counter() if menu_timing_enabled else 0.0
+    if not menu_callback_answered:
+        menu_ack_start = time.perf_counter() if menu_timing_enabled else 0.0
+        await query.answer()
+        menu_ack_done = time.perf_counter() if menu_timing_enabled else 0.0
+        menu_callback_answered = True
     if isinstance(getattr(context, "user_data", None), dict):
         context.user_data.pop(VIDEO_TAIL9_TEXT_INPUT_KEY, None)
     if user_is_admin:
@@ -270641,8 +270801,14 @@ async def handle_video_editor_callback(
 ):
     query = update.callback_query
     uid = query.from_user.id
-    lang = get_user_language(uid) or "vi"
     parts = str(callback_data_override or query.data or "").split("|")
+    raw_action = parts[1] if len(parts) > 1 else "menu"
+    if raw_action == "hub" and not _VIDEO_EDIT_CALLBACK_ANSWERED.get():
+        # The hub is a read-only landing screen.  ACK before the guarded
+        # state/language reads so a slow local lookup cannot delay the menu.
+        await query.answer()
+        _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
+    lang = get_user_language(uid) or "vi"
     if not video_editor_callback_arity_valid(parts):
         await query.answer(
             "Nút Chỉnh sửa video này không hợp lệ hoặc đã cũ. Phiên hiện tại được giữ nguyên.",
@@ -270650,7 +270816,6 @@ async def handle_video_editor_callback(
         )
         _VIDEO_EDIT_CALLBACK_ANSWERED.set(True)
         return True
-    raw_action = parts[1] if len(parts) > 1 else "menu"
     callback_entry_state = video_editor_state_snapshot(
         get_video_editor_pending(uid)
     )
