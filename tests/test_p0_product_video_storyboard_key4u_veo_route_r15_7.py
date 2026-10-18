@@ -14,7 +14,7 @@ Enforces 18 test contracts:
  6. test_no_tmp_or_base64_leak: Zero /tmp path leak and zero raw base64 on wire.
  7. test_duration_8: duration: 8 on wire request.
  8. test_ratio_9_16: aspect_ratio: "9:16" on wire request.
- 9. test_submit_endpoint: Submit endpoint maps to https://api.key4u.vn/v1/video/create.
+ 9. test_submit_endpoint: Submit endpoint maps to canonical https://api.key4u.vn/v1/videos and legacy /v1/video/create fails closed.
 10. test_task_id_extraction: Parse data.task_id or task_id from response.
 11. test_poll_binding: Poll URL is https://api.key4u.vn/v1/video/query?id={task_id}.
 12. test_native_8s_acceptance: 8.0s clip passes storyboard duration validation.
@@ -212,7 +212,7 @@ def test_image_https_reference():
             "selected_family": "google_veo",
         },
     }
-    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/video/create")
+    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/videos")
     assert "metadata" in wire
     assert "images" in wire["metadata"]
     assert wire["metadata"]["images"] == ["https://toanaas.vn/provider-media/v1/sample.jpg"]
@@ -242,7 +242,7 @@ def test_no_tmp_or_base64_leak(tmp_path):
     }
 
     env = {"BASE_URL": "https://tg.toanaas.vn"}
-    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/video/create", env=env)
+    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/videos", env=env)
 
     # 1. No raw base64 top-level or in images
     assert "image" not in wire
@@ -272,7 +272,7 @@ def test_duration_8():
         "image_paths": ["https://toanaas.vn/provider-media/v1/sample.jpg"],
         "metadata": {"selected_family": "google_veo"},
     }
-    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/video/create")
+    wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/videos")
     assert wire["duration"] == 8
 
 
@@ -291,7 +291,7 @@ def test_ratio_9_16():
             "image_paths": ["https://toanaas.vn/provider-media/v1/sample.jpg"],
             "metadata": {"selected_family": "google_veo"},
         }
-        wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/video/create")
+        wire = _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/videos")
         assert wire["aspect_ratio"] == "9:16"
 
 
@@ -299,13 +299,29 @@ def test_ratio_9_16():
 # CONTRACT 9: test_submit_endpoint
 # ---------------------------------------------------------------------------
 def test_submit_endpoint():
-    """Submit endpoint maps to https://api.key4u.vn/v1/video/create."""
+    """Submit endpoint maps to https://api.key4u.vn/v1/videos and legacy /v1/video/create fails closed."""
+    # 1. Canonical specialized endpoint maps to /v1/videos
     provider = GenericHttpVideoProvider(
         provider_name="key4u_video",
         submit_url_env="KEY4U_VIDEO_SUBMIT_URL",
-        env={"KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create"},
+        env={"KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/videos"},
     )
-    assert provider._submit_url() == "https://api.key4u.vn/v1/video/create"
+    assert provider._submit_url() == "https://api.key4u.vn/v1/videos"
+
+    # 2. Legacy /v1/video/create fails closed with key4u_veo_legacy_create_rejected_no_charge
+    payload = {
+        "model": "veo_3_1-fast",
+        "prompt": "Test legacy reject",
+        "duration": 8,
+        "ratio": "9:16",
+        "capability": "image_to_video",
+        "image_paths": ["https://toanaas.vn/provider-media/v1/sample.jpg"],
+        "metadata": {"selected_family": "google_veo"},
+    }
+    with pytest.raises(VideoProviderContractError) as exc_info:
+        _key4u_wire_payload(payload, submit_url="https://api.key4u.vn/v1/video/create")
+    assert exc_info.value.args[0] == "key4u_veo_legacy_create_rejected_no_charge"
+    assert exc_info.value.debug.get("no_charge") is True
 
 
 # ---------------------------------------------------------------------------
