@@ -16,7 +16,7 @@ Enforces 18 test contracts:
  8. test_ratio_9_16: aspect_ratio: "9:16" on wire request.
  9. test_submit_endpoint: Submit endpoint maps to canonical https://api.key4u.vn/v1/videos and legacy /v1/video/create fails closed.
 10. test_task_id_extraction: Parse data.task_id or task_id from response.
-11. test_poll_binding: Poll URL is https://api.key4u.vn/v1/video/query?id={task_id}.
+11. test_poll_binding: Poll URL is https://api.key4u.vn/v1/videos/{task_id}.
 12. test_native_8s_acceptance: 8.0s clip passes storyboard duration validation.
 13. test_short_output_fail_closed: 6.016s raw clip fails closed with scene_duration_short_no_charge.
 14. test_two_scene_16s_concat: Two 8.0s scenes yield 16.0s total master MP4 duration.
@@ -344,16 +344,43 @@ def test_task_id_extraction():
 # CONTRACT 11: test_poll_binding
 # ---------------------------------------------------------------------------
 def test_poll_binding():
-    """Polling URL derived correctly as https://api.key4u.vn/v1/video/query?id={task_id}."""
-    provider = GenericHttpVideoProvider(
-        provider_name="key4u_video",
-        poll_url_env="KEY4U_VIDEO_POLL_URL",
-        env={"KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/v1/video/query?id={task_id}"},
+    """Polling URL derived correctly as https://api.key4u.vn/v1/videos/{task_id}."""
+    from services.video_provider_router import _generic_adapter_for
+    from services.video_provider_catalog import resolve_product_video_model
+
+    env = {
+        "KEY4U_ENABLED": "1",
+        "KEY4U_VIDEO_ENABLED": "1",
+        "KEY4U_BASE_URL": "https://api.key4u.vn",
+        "KEY4U_API_KEY": "test-key-veo-token",
+        "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test-key-veo-token",
+        # Generic legacy envs (must NOT override specialized Veo contract)
+        "KEY4U_VIDEO_SUBMIT_URL": "https://api.key4u.vn/v1/video/create",
+        "KEY4U_VIDEO_POLL_URL": "https://api.key4u.vn/v1/video/query?id={task_id}",
+        "KEY4U_VIDEO_MODEL": "veo_3_1-fast",
+    }
+
+    # 1. Specialized adapter binds canonical /v1/videos/{task_id}
+    adapter = _generic_adapter_for("key4u_video", env)
+    assert adapter._poll_url() == "https://api.key4u.vn/v1/videos/{task_id}"
+    resolved = adapter._poll_url().replace("{task_id}", "k4u-task-999")
+    assert resolved == "https://api.key4u.vn/v1/videos/k4u-task-999"
+
+    # 2. Negative assertion: Generic legacy poll /v1/video/query cannot override specialized Veo
+    assert "/v1/video/query" not in adapter._poll_url()
+    assert "/v1/video/create" not in adapter._submit_url()
+
+    # 3. Catalog resolution also derives canonical specialized poll URL
+    res = resolve_product_video_model(
+        tier=400,
+        provider_chain=["key4u_video"],
+        scene_count=2,
+        required_capability="text_to_video",
+        requires_concat=True,
+        env=env,
     )
-    poll_template = provider._poll_url()
-    assert poll_template == "https://api.key4u.vn/v1/video/query?id={task_id}"
-    resolved = poll_template.replace("{task_id}", "k4u-task-999")
-    assert resolved == "https://api.key4u.vn/v1/video/query?id=k4u-task-999"
+    assert res.get("provider_poll_url_override") == "https://api.key4u.vn/v1/videos/{task_id}"
+    assert "/v1/video/query" not in str(res.get("provider_poll_url_override") or "")
 
 
 # ---------------------------------------------------------------------------
