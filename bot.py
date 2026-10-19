@@ -274548,8 +274548,6 @@ def telegram_message_idempotent(handler):
     """Serialize and suppress duplicate deliveries of one Telegram message."""
     @wraps(handler)
     async def guarded(update, context):
-        if update is not None:
-            _normalize_update_object(update)
         key = telegram_message_dedupe_key(update)
         if not key:
             return await handler(update, context)
@@ -274568,9 +274566,7 @@ def telegram_message_idempotent(handler):
 
 async def process_telegram_update_once(update, payload: dict | None = None):
     """Process one Telegram event once even when two Bot API owners forward it."""
-    if update is not None:
-        _normalize_update_object(update)
-    current_payload = _normalize_telegram_payload(payload) if isinstance(payload, dict) else {}
+    current_payload = payload if isinstance(payload, dict) else {}
     callback = current_payload.get("callback_query")
     if isinstance(callback, dict) and str(callback.get("id") or "").strip():
         key = f"callback:{str(callback.get('id') or '').strip()[:240]}"
