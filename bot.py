@@ -92,7 +92,7 @@ from google.genai import types
 from openai import OpenAI
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, KeyboardButton
+    ReplyKeyboardMarkup, KeyboardButton, Bot
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -368,6 +368,60 @@ except Exception as e:
 _TelegramInlineKeyboardMarkup = InlineKeyboardMarkup
 
 
+def _repair_mojibake_str(s: str) -> str:
+    """Repair double-encoded UTF-8 in latin1/cp1252 and enforce NFC Unicode."""
+    if not isinstance(s, str) or not s:
+        return s
+    # Detect double-encoded UTF-8 in latin1 / cp1252
+    if any(marker in s for marker in ("Ã", "áº", "á»", "Ä", "â\x80", "â\x96")):
+        try:
+            candidate = s.encode("latin1").decode("utf-8")
+            return unicodedata.normalize("NFC", candidate)
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
+    return unicodedata.normalize("NFC", s)
+
+
+def _normalize_telegram_payload(val: Any) -> Any:
+    """Recursively enforce NFC Unicode and repair UTF-8 mojibake on all outgoing text, button labels, and payloads."""
+    if val is None:
+        return val
+    if isinstance(val, str):
+        return _repair_mojibake_str(val)
+    if isinstance(val, dict):
+        return {k: _normalize_telegram_payload(v) for k, v in val.items()}
+    if isinstance(val, list):
+        return [_normalize_telegram_payload(item) for item in val]
+    if isinstance(val, tuple):
+        return tuple(_normalize_telegram_payload(item) for item in val)
+    if hasattr(val, "inline_keyboard"):
+        for row in val.inline_keyboard:
+            for btn in row:
+                if hasattr(btn, "text") and isinstance(btn.text, str):
+                    object.__setattr__(btn, "text", _repair_mojibake_str(btn.text))
+                if hasattr(btn, "callback_data") and isinstance(btn.callback_data, str):
+                    object.__setattr__(btn, "callback_data", _repair_mojibake_str(btn.callback_data))
+    elif hasattr(val, "keyboard"):
+        for row in val.keyboard:
+            for btn in row:
+                if hasattr(btn, "text") and isinstance(btn.text, str):
+                    object.__setattr__(btn, "text", _repair_mojibake_str(btn.text))
+    return val
+
+
+_original_bot_do_post = Bot._do_post
+
+
+async def _safe_utf8_bot_do_post(self, endpoint: str, data: dict[str, Any], *args, **kwargs):
+    if isinstance(data, dict):
+        for k in list(data.keys()):
+            data[k] = _normalize_telegram_payload(data[k])
+    return await _original_bot_do_post(self, endpoint, data, *args, **kwargs)
+
+
+Bot._do_post = _safe_utf8_bot_do_post
+
+
 class InlineKeyboardMarkup(_TelegramInlineKeyboardMarkup):
     """Telegram markup with one canonical Back/Main bottom row when present."""
 
@@ -376,7 +430,66 @@ class InlineKeyboardMarkup(_TelegramInlineKeyboardMarkup):
             inline_keyboard,
             button_factory=InlineKeyboardButton,
         )
+        for row in rows:
+            for btn in row:
+                if hasattr(btn, "text") and isinstance(btn.text, str):
+                    object.__setattr__(btn, "text", _repair_mojibake_str(btn.text))
+                if hasattr(btn, "callback_data") and isinstance(btn.callback_data, str):
+                    object.__setattr__(btn, "callback_data", _repair_mojibake_str(btn.callback_data))
         super().__init__(rows, *args, **kwargs)
+
+
+def _normalize_update_object(update: Any) -> Any:
+    """Ensure in-memory Update object has repaired UTF-8 and NFC normalized strings."""
+    if update is None:
+        return update
+    for attr in (
+        "message",
+        "edited_message",
+        "channel_post",
+        "edited_channel_post",
+        "business_message",
+        "edited_business_message",
+    ):
+        msg = getattr(update, attr, None)
+        if msg is not None:
+            if hasattr(msg, "text") and isinstance(msg.text, str):
+                object.__setattr__(msg, "text", _repair_mojibake_str(msg.text))
+            if hasattr(msg, "caption") and isinstance(msg.caption, str):
+                object.__setattr__(msg, "caption", _repair_mojibake_str(msg.caption))
+    cb = getattr(update, "callback_query", None)
+    if cb is not None:
+        if hasattr(cb, "data") and isinstance(cb.data, str):
+            object.__setattr__(cb, "data", _repair_mojibake_str(cb.data))
+        cb_msg = getattr(cb, "message", None)
+        if cb_msg is not None:
+            if hasattr(cb_msg, "text") and isinstance(cb_msg.text, str):
+                object.__setattr__(cb_msg, "text", _repair_mojibake_str(cb_msg.text))
+            if hasattr(cb_msg, "caption") and isinstance(cb_msg.caption, str):
+                object.__setattr__(cb_msg, "caption", _repair_mojibake_str(cb_msg.caption))
+    cir = getattr(update, "chosen_inline_result", None)
+    if cir is not None:
+        if hasattr(cir, "query") and isinstance(cir.query, str):
+            object.__setattr__(cir, "query", _repair_mojibake_str(cir.query))
+    iq = getattr(update, "inline_query", None)
+    if iq is not None:
+        if hasattr(iq, "query") and isinstance(iq.query, str):
+            object.__setattr__(iq, "query", _repair_mojibake_str(iq.query))
+    return update
+
+
+_original_update_de_json = Update.de_json
+
+
+@classmethod
+def _safe_utf8_update_de_json(cls, data: Any, bot: Any = None):
+    if data is not None and isinstance(data, dict):
+        data = _normalize_telegram_payload(data)
+    upd = _original_update_de_json(data, bot=bot)
+    return _normalize_update_object(upd)
+
+
+Update.de_json = _safe_utf8_update_de_json
 
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
@@ -139377,14 +139490,14 @@ def _job_artifact_snapshot(job_id: int | str) -> dict:
 
 async def cmd_storage_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     report = run_storage_cleanup_report(delete=False, confirm_delete=False)
     await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="audit"), limit=3900)
 
 
 async def cmd_storage_cleanup_dry_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     report = run_storage_cleanup_report(delete=False, confirm_delete=False)
     await reply_html_lines(update, storage_cleanup_report_lines(report, storage_cleanup_disk_usage(), mode="dry_run"), limit=3900)
 
@@ -139395,7 +139508,7 @@ async def cmd_storage_cleanup_preview(update: Update, context: ContextTypes.DEFA
 
 async def cmd_storage_cleanup_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = list(getattr(context, "args", []) or [])
     if not args or str(args[0]).strip() != STORAGE_CLEANUP_CONFIRM_TOKEN:
         report = run_storage_cleanup_report(delete=False, confirm_delete=False)
@@ -139406,7 +139519,7 @@ async def cmd_storage_cleanup_confirm(update: Update, context: ContextTypes.DEFA
 
 async def cmd_storage_cleanup_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = list(getattr(context, "args", []) or [])
     if not args or str(args[0]).strip().lower() != "confirm":
         report = run_storage_cleanup_report(delete=False, confirm_delete=False)
@@ -139417,7 +139530,7 @@ async def cmd_storage_cleanup_run(update: Update, context: ContextTypes.DEFAULT_
 
 async def cmd_storage_cleanup_auto_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     lines = [
         "<b>STORAGE CLEANUP AUTO STATUS</b>",
         "",
@@ -139434,7 +139547,7 @@ async def cmd_storage_cleanup_auto_status(update: Update, context: ContextTypes.
 
 async def cmd_storage_job_artifacts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
-        return await update.message.reply_text("? B?n kh?ng c? quy?n d?ng l?nh n?y.")
+        return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
     args = list(getattr(context, "args", []) or [])
     snapshot = _job_artifact_snapshot(args[0] if args else 0)
     if not snapshot.get("ok"):
@@ -274435,6 +274548,8 @@ def telegram_message_idempotent(handler):
     """Serialize and suppress duplicate deliveries of one Telegram message."""
     @wraps(handler)
     async def guarded(update, context):
+        if update is not None:
+            _normalize_update_object(update)
         key = telegram_message_dedupe_key(update)
         if not key:
             return await handler(update, context)
@@ -274453,7 +274568,9 @@ def telegram_message_idempotent(handler):
 
 async def process_telegram_update_once(update, payload: dict | None = None):
     """Process one Telegram event once even when two Bot API owners forward it."""
-    current_payload = payload if isinstance(payload, dict) else {}
+    if update is not None:
+        _normalize_update_object(update)
+    current_payload = _normalize_telegram_payload(payload) if isinstance(payload, dict) else {}
     callback = current_payload.get("callback_query")
     if isinstance(callback, dict) and str(callback.get("id") or "").strip():
         key = f"callback:{str(callback.get('id') or '').strip()[:240]}"
