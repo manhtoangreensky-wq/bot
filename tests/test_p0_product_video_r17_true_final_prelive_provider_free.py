@@ -37,8 +37,19 @@ import unicodedata
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
+import sys
+
 from telegram import Update, User
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ExtBot
+
+# Ensure optional external heavy packages don't break import of bot if not installed
+for _m in ("google", "google.genai", "google.genai.types", "openai", "uvicorn"):
+    if _m not in sys.modules:
+        try:
+            __import__(_m)
+        except ImportError:
+            from unittest.mock import MagicMock
+            sys.modules[_m] = MagicMock()
 
 import bot
 from providers import video_generic_http_provider
