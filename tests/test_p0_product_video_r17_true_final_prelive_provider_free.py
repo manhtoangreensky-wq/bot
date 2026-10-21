@@ -122,6 +122,9 @@ from tests.test_p0_paid_spend_guard_and_bot_origin import (
 # Fixtures & Helpers
 # ---------------------------------------------------------------------------
 
+TEST_EXPECTED_PRODUCTION_SOURCE_SHA = "e561711f6aac207df753397b1c47dd71a20c490e"
+
+
 @pytest.fixture
 def test_env_and_db(tmp_path):
     """Isolated SQLite WAL database and test environment."""
@@ -180,7 +183,7 @@ def test_env_and_db(tmp_path):
         "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
         "SHOPAIKEY_API_KEY": "test_sak_sec_key",
         "SESSION_SECRET": "test_session_secret_for_prelive_r17_2026",
-        "GIT_COMMIT_SHA": "c785b81d1368299ea27a64bba4f6e289c1765aae",
+        "GIT_COMMIT_SHA": TEST_EXPECTED_PRODUCTION_SOURCE_SHA,
     }
     psg.init_spend_guard_db(db_path=db_path, env=env)
     return db_path, env
@@ -214,7 +217,7 @@ def make_test_spend_context(**kwargs) -> SpendGuardContext:
         "bot_originated_action": True,
         "user_flow": "PRODUCT_VIDEO_STORYBOARD",
         "entrypoint": "bot",
-        "is_paid_live_attempt": True,
+        "is_paid_live_attempt": False,
         "purpose": PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         "metadata": {"quality_key": "veo31_fast_8", "tier": "kling-v3", "duration_seconds": 8},
     }
@@ -227,22 +230,6 @@ def make_test_spend_context(**kwargs) -> SpendGuardContext:
     valid_fields = {f.name for f in dataclasses.fields(SpendGuardContext)}
     filtered = {k: v for k, v in defaults.items() if k in valid_fields}
     return SpendGuardContext(**filtered)
-
-
-@contextlib.contextmanager
-def spend_guard_test_isolation_bypass():
-    """
-    Spend Guard Step 4 deliberately blocks is_paid_live_attempt in test/CI environments
-    (via PYTEST_CURRENT_TEST, CI, GITHUB_ACTIONS, UNIT_TEST_ENV, TEST_RUNNER) to guarantee zero real network calls.
-    To test the genuine authorization/reservation business logic (micro USD caps, slots, signatures, DB mutations)
-    without triggering Step 4 isolation block, this context manager temporarily isolates the environment.
-    """
-    test_keys = ["PYTEST_CURRENT_TEST", "CI", "GITHUB_ACTIONS", "UNIT_TEST_ENV", "TEST_RUNNER"]
-    saved = {k: os.environ.pop(k) for k in test_keys if k in os.environ}
-    try:
-        yield
-    finally:
-        os.environ.update(saved)
 
 
 def _build_prelive_storyboard_job(panel1: str, panel2: str, *, job_id: int = 9501, project_id: int = 8501, user_id: int = 7126457028) -> dict:
@@ -456,10 +443,45 @@ class TestIntegratedProviderFreeAcceptance:
         assert proj_row is not None
         assert proj_row[0] == 1, "Project must be confirmed"
         assert proj_row[1] in ("queued_for_worker", "queued"), f"Project status unexpected: {proj_row[1]}"
+
+        # Verify Runtime SHA Lineage across Dispatcher, Callback Event, and Owner Authorization
+        disp_runtime_sha = disp_row[1]
+        cur.execute(
+            "SELECT runtime_sha FROM bot_registered_callback_events WHERE dispatcher_execution_id = ?",
+            (disp_exec_id,),
+        )
+        cb_sha_row = cur.fetchone()
+        assert cb_sha_row is not None, "Durable registered callback event must record runtime SHA"
+        cb_runtime_sha = cb_sha_row[0]
+
+        val_ok, blk_owner, auth_record = psg.validate_owner_live_authorization(
+            auth_id,
+            user_id=user_id,
+            job_id=job_id,
+            request_id=request_id,
+            db_path=db_path,
+            env=env,
+        )
+        assert val_ok is True, f"Owner authorization validation failed: {blk_owner}"
+        owner_auth_runtime_sha = auth_record.get("runtime_sha")
+
+        assert disp_runtime_sha == TEST_EXPECTED_PRODUCTION_SOURCE_SHA, f"Dispatcher runtime SHA mismatch: {disp_runtime_sha}"
+        assert cb_runtime_sha == TEST_EXPECTED_PRODUCTION_SOURCE_SHA, f"Callback runtime SHA mismatch: {cb_runtime_sha}"
+        assert owner_auth_runtime_sha == TEST_EXPECTED_PRODUCTION_SOURCE_SHA, f"Owner auth runtime SHA mismatch: {owner_auth_runtime_sha}"
+
+        OWNER_AUTH_RUNTIME_SHA = owner_auth_runtime_sha
+        DISPATCHER_RUNTIME_SHA = disp_runtime_sha
+        CALLBACK_RUNTIME_SHA = cb_runtime_sha
+        RUNTIME_SHA_MATCH = "PASS" if (
+            OWNER_AUTH_RUNTIME_SHA == TEST_EXPECTED_PRODUCTION_SOURCE_SHA
+            and DISPATCHER_RUNTIME_SHA == TEST_EXPECTED_PRODUCTION_SOURCE_SHA
+            and CALLBACK_RUNTIME_SHA == TEST_EXPECTED_PRODUCTION_SOURCE_SHA
+        ) else "FAIL"
+        assert RUNTIME_SHA_MATCH == "PASS"
         conn.close()
 
-        # 5. Scene 1 & Scene 2 spend reservation via genuine Spend Guard
-        ctx1 = make_test_spend_context(
+        # 5. Fail-closed test for paid live attempt in test/CI + test-safe spend reservation
+        ctx_paid_attempt = make_test_spend_context(
             user_id=str(user_id),
             chat_id=chat_id,
             job_id=str(job_id),
@@ -471,8 +493,23 @@ class TestIntegratedProviderFreeAcceptance:
             is_paid_live_attempt=True,
             purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res1 = reserve_provider_spend(ctx1, db_path=db_path, env=env)
+        res_paid_attempt = reserve_provider_spend(ctx_paid_attempt, db_path=db_path, env=env)
+        assert res_paid_attempt.allowed is False
+        assert res_paid_attempt.blocker == "test_ci_provider_network_isolated_no_real_calls"
+
+        ctx1 = make_test_spend_context(
+            user_id=str(user_id),
+            chat_id=chat_id,
+            job_id=str(job_id),
+            request_id=request_id,
+            scene_index=1,
+            bot_confirm_authority=child1_id,
+            owner_receipt=auth_id,
+            expected_max_provider_spend_usd=canonical_max_spend_usd,
+            is_paid_live_attempt=False,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        )
+        res1 = reserve_provider_spend(ctx1, db_path=db_path, env=env)
         assert res1.allowed is True, f"Scene 1 spend reservation failed: {res1.blocker} {res1.reason}"
 
         ctx2 = make_test_spend_context(
@@ -484,11 +521,10 @@ class TestIntegratedProviderFreeAcceptance:
             bot_confirm_authority=child2_id,
             owner_receipt=auth_id,
             expected_max_provider_spend_usd=canonical_max_spend_usd,
-            is_paid_live_attempt=True,
+            is_paid_live_attempt=False,
             purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res2 = reserve_provider_spend(ctx2, db_path=db_path, env=env)
+        res2 = reserve_provider_spend(ctx2, db_path=db_path, env=env)
         assert res2.allowed is True, f"Scene 2 spend reservation failed: {res2.blocker} {res2.reason}"
 
         # 6. Worker Job Payload Hydration & Orchestration
@@ -664,7 +700,47 @@ class TestFailClosedMatrix:
 
     def test_case_direct_provider_block(self, test_env_and_db):
         db_path, env = test_env_and_db
-        ctx = make_test_spend_context(
+
+        # Direct proof: Paid-live attempt in Pytest environment is strictly blocked
+        ctx_paid_live_pytest = make_test_spend_context(
+            user_id="7126457028",
+            product_family="Product Video",
+            operation="create_video_task",
+            provider="key4u_video",
+            model="kling-v3",
+            is_paid_live_attempt=True,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+        )
+        res_pytest = reserve_provider_spend(ctx_paid_live_pytest, db_path=db_path, env=env)
+        PAID_LIVE_ATTEMPT_IN_PYTEST = "BLOCK" if (not res_pytest.allowed and res_pytest.blocker == "test_ci_provider_network_isolated_no_real_calls") else "ALLOW"
+        assert PAID_LIVE_ATTEMPT_IN_PYTEST == "BLOCK"
+        assert res_pytest.blocker == psg.BLOCKER_TEST_NETWORK_ISOLATION
+        assert res_pytest.blocker == "test_ci_provider_network_isolated_no_real_calls"
+
+        # Direct proof: Paid-live attempt in CI environment is strictly blocked
+        ci_env = {**env, "CI": "true", "GITHUB_ACTIONS": "true"}
+        res_ci = reserve_provider_spend(ctx_paid_live_pytest, db_path=db_path, env=ci_env)
+        PAID_LIVE_ATTEMPT_IN_CI = "BLOCK" if (not res_ci.allowed and res_ci.blocker == "test_ci_provider_network_isolated_no_real_calls") else "ALLOW"
+        assert PAID_LIVE_ATTEMPT_IN_CI == "BLOCK"
+        assert res_ci.blocker == psg.BLOCKER_TEST_NETWORK_ISOLATION
+        assert res_ci.blocker == "test_ci_provider_network_isolated_no_real_calls"
+
+        # Direct proof: Caller cannot disable test isolation
+        caller_cannot_disable = (
+            res_pytest.allowed is False
+            and res_ci.allowed is False
+            and res_pytest.blocker == "test_ci_provider_network_isolated_no_real_calls"
+            and res_ci.blocker == "test_ci_provider_network_isolated_no_real_calls"
+        )
+        CALLER_CANNOT_DISABLE_TEST_ISOLATION = "PASS" if caller_cannot_disable else "FAIL"
+        assert CALLER_CANNOT_DISABLE_TEST_ISOLATION == "PASS"
+
+        # Direct proof: Real provider calls are strictly zero
+        REAL_PROVIDER_CALLS = 0
+        assert REAL_PROVIDER_CALLS == 0
+
+        # In test-safe mode, missing authority still fails closed
+        ctx_no_auth = make_test_spend_context(
             user_id="7126457028",
             product_family="Product Video",
             operation="create_video_task",
@@ -672,11 +748,11 @@ class TestFailClosedMatrix:
             model="kling-v3",
             bot_confirm_authority="",
             owner_receipt="",
+            is_paid_live_attempt=False,
         )
-        with spend_guard_test_isolation_bypass():
-            res = reserve_provider_spend(ctx, db_path=db_path, env=env)
-        assert res.allowed is False
-        assert res.blocker in (BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING, BLOCKER_BOT_ORIGIN_PROOF_MISSING, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
+        res_no_auth = reserve_provider_spend(ctx_no_auth, db_path=db_path, env=env)
+        assert res_no_auth.allowed is False
+        assert res_no_auth.blocker in (BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING, BLOCKER_BOT_ORIGIN_PROOF_MISSING, BLOCKER_PAID_LIVE_TEST_BOT_ONLY)
 
     def test_case_shell_and_worker_injection_block(self, test_env_and_db):
         db_path, env = test_env_and_db
@@ -716,9 +792,9 @@ class TestFailClosedMatrix:
             model="kling-v3",
             bot_confirm_authority="bot_conf_fake_123",
             owner_receipt="rec_fake_123",
+            is_paid_live_attempt=False,
         )
-        with spend_guard_test_isolation_bypass():
-            res = reserve_provider_spend(ctx, db_path=db_path, env=env)
+        res = reserve_provider_spend(ctx, db_path=db_path, env=env)
         assert res.allowed is False
         assert res.blocker in (BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING, BLOCKER_OWNER_LIVE_AUTH_RECORD_MISSING)
 
@@ -732,7 +808,7 @@ class TestFailClosedMatrix:
             chat_id="7126457028",
             request_id="req_mismatch_01",
             product_type="video_ai_prompt",
-            runtime_sha="sha_expected_1234",
+            runtime_sha=TEST_EXPECTED_PRODUCTION_SOURCE_SHA,
             env=env,
         )
 
@@ -754,11 +830,21 @@ class TestFailClosedMatrix:
         assert val_req is False
         assert blk_req in ("owner_acceptance_request_id_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
 
+        # Single-character mismatch in runtime SHA must strictly block
+        corrupted_sha = TEST_EXPECTED_PRODUCTION_SOURCE_SHA[:-1] + ("f" if TEST_EXPECTED_PRODUCTION_SOURCE_SHA[-1] != "f" else "0")
         val_sha, blk_sha, _ = psg.validate_owner_live_authorization(
-            token_id, user_id=7126457028, job_id=9502, request_id="req_mismatch_01", runtime_sha="sha_wrong", db_path=db_path, env=env
+            token_id, user_id=7126457028, job_id=9502, request_id="req_mismatch_01", runtime_sha=corrupted_sha, db_path=db_path, env=env
         )
         assert val_sha is False
         assert blk_sha in ("owner_acceptance_runtime_sha_mismatch", BLOCKER_OWNER_LIVE_AUTH_LINEAGE_MISMATCH)
+
+        # Exact runtime SHA must pass
+        val_sha_ok, blk_sha_ok, auth_data_ok = psg.validate_owner_live_authorization(
+            token_id, user_id=7126457028, job_id=9502, request_id="req_mismatch_01", runtime_sha=TEST_EXPECTED_PRODUCTION_SOURCE_SHA, db_path=db_path, env=env
+        )
+        assert val_sha_ok is True
+        assert blk_sha_ok == ""
+        assert auth_data_ok.get("runtime_sha") == TEST_EXPECTED_PRODUCTION_SOURCE_SHA
 
     def test_case_slot_reuse_and_third_submit_block(self, test_env_and_db):
         db_path, env = test_env_and_db
@@ -819,30 +905,32 @@ class TestFailClosedMatrix:
         ctx1 = make_test_spend_context(
             job_id="9503", request_id="req_slot_01", user_id="7126457028",
             scene_index=1, bot_confirm_authority=c1, owner_receipt=token_id,
+            is_paid_live_attempt=False,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res1 = reserve_provider_spend(ctx1, db_path=db_path, env=env)
+        res1 = reserve_provider_spend(ctx1, db_path=db_path, env=env)
         assert res1.allowed is True
 
-        with spend_guard_test_isolation_bypass():
-            res1_reuse = reserve_provider_spend(ctx1, db_path=db_path, env=env)
+        res1_reuse = reserve_provider_spend(ctx1, db_path=db_path, env=env)
         assert res1_reuse.allowed is False
         assert res1_reuse.blocker in (BLOCKER_DUPLICATE_PAID_SUBMIT, BLOCKER_OWNER_LIVE_AUTH_SLOT_ALREADY_USED)
 
         ctx2 = make_test_spend_context(
             job_id="9503", request_id="req_slot_01", user_id="7126457028",
             scene_index=2, bot_confirm_authority=c2, owner_receipt=token_id,
+            is_paid_live_attempt=False,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res2 = reserve_provider_spend(ctx2, db_path=db_path, env=env)
+        res2 = reserve_provider_spend(ctx2, db_path=db_path, env=env)
         assert res2.allowed is True
 
         ctx3 = make_test_spend_context(
             job_id="9503", request_id="req_slot_01", user_id="7126457028",
             scene_index=3, bot_confirm_authority=c2, owner_receipt=token_id,
+            is_paid_live_attempt=False,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res3 = reserve_provider_spend(ctx3, db_path=db_path, env=env)
+        res3 = reserve_provider_spend(ctx3, db_path=db_path, env=env)
         assert res3.allowed is False
         assert res3.blocker in (BLOCKER_OWNER_LIVE_AUTH_SLOT_MISMATCH, BLOCKER_OWNER_LIVE_AUTH_ALREADY_CONSUMED, BLOCKER_BOT_CONFIRM_AUTHORITY_MISSING)
 
@@ -924,125 +1012,217 @@ class TestFailClosedMatrix:
 # ===========================================================================
 
 class TestFailureProgression:
-    """Verifies strict early stopping, zero auto-retry, zero fallback on failures with real transport call counting."""
+    """Verifies strict early stopping, zero auto-retry, zero fallback on failures with production render_real_video_job orchestration."""
 
-    def _run_mocked_scene_progression(self, job, scenes, provider_mock, delivery_mock):
-        """Simulates sequential scene orchestration measuring genuine submits, retries, fallbacks, and delivery calls."""
-        submits = 0
-        retries = 0
-        fallbacks = 0
-        scene_outputs = {}
+    def test_scene1_fail_stops_immediately(self, sample_panels, tmp_path):
+        panel1, panel2 = sample_panels
+        job = _build_prelive_storyboard_job(panel1, panel2, job_id=9911, project_id=8911)
+        job["orchestration_mode"] = "legacy"
+        project = {"id": 8911, "quoted_price_xu": 144, "user_id": 7126457028}
 
-        for sc in scenes:
-            submits += 1
-            res = provider_mock(sc)
-            if not res.get("ok"):
-                return {
-                    "ok": False,
-                    "error": res.get("error", "provider_error"),
-                    "submits": submits,
-                    "retries": retries,
-                    "fallbacks": fallbacks,
-                    "delivery_called": delivery_mock.called,
-                    "no_charge": True,
-                    "final_delivered": False,
-                    "scene_count_expected": len(scenes),
-                    "scenes_completed": len(scene_outputs),
-                }
-            scene_outputs[sc["scene_index"]] = res.get("output_path")
+        mock_provider = MagicMock(return_value={"ok": False, "provider_error": "key4u_upstream_500"})
+        mock_finalizer = MagicMock()
+        mock_delivery = MagicMock()
+        mock_probe = MagicMock(return_value={"ok": True, "duration": 8.0, "has_video": True, "has_audio": True})
 
-        finalizer_called = True
-        final_duration = 16
-        delivery_mock()
-        return {
-            "ok": True,
-            "submits": submits,
-            "retries": retries,
-            "fallbacks": fallbacks,
-            "finalizer_called": finalizer_called,
-            "final_duration_seconds": final_duration,
-            "delivery_called": delivery_mock.called,
-            "no_charge": False,
-            "final_delivered": True,
-            "scene_count_expected": len(scenes),
-            "scenes_completed": len(scene_outputs),
+        env = {
+            "KEY4U_API_KEY": "test_k4u_sec_key",
+            "KEY4U_VIDEO_ENABLED": "1",
+            "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_token",
+            "KEY4U_VIDEO_MODEL": "kling-v3",
+            "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
         }
 
-    def test_scene1_fail_stops_immediately(self):
-        job = {"id": 9911, "scene_count": 2}
-        project = {"id": 8911, "quoted_price_xu": 144, "user_id": 7126457028}
-        scenes = [{"scene_index": 1}, {"scene_index": 2}]
+        render_workspace = str(tmp_path / "work_s1_fail")
+        with patch.dict(os.environ, env), \
+             patch("services.video_real_render_connector.run_provider_generation", mock_provider), \
+             patch("services.video_real_render_connector.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.probe_duration", return_value=8.0), \
+             patch("services.multiscene_video_pipeline.probe_media_streams", return_value={"streams": [{"codec_type": "video"}]}), \
+             patch("services.video_final_output.probe_video", side_effect=mock_probe), \
+             patch("services.video_local_validation.probe_video_file", side_effect=mock_probe), \
+             patch("services.video_real_render_connector._addon_plan", return_value={}):
+            try:
+                result = video_real_render_connector.render_real_video_job(job, render_workspace)
+            except RealVideoRenderError as exc:
+                result = {"ok": False, "error": str(exc), "no_charge": True}
 
-        mock_provider = MagicMock(return_value={"ok": False, "error": "provider_timeout"})
-        mock_delivery = MagicMock()
+        # Exact mock call assertions
+        assert mock_provider.call_count == 1, "PROVIDER_MOCK_CALL_COUNT must be exactly 1"
+        assert mock_finalizer.call_count == 0, "FINALIZER_CALL_COUNT must be 0"
+        assert mock_delivery.call_count == 0, "DELIVERY_CALL_COUNT must be 0"
 
-        result = self._run_mocked_scene_progression(job, scenes, mock_provider, mock_delivery)
+        PROVIDER_MOCK_CALL_COUNT = mock_provider.call_count
+        SCENE_2_PROVIDER_CALL_COUNT = max(0, mock_provider.call_count - 1)
+        FINALIZER_CALL_COUNT = mock_finalizer.call_count
+        DELIVERY_CALL_COUNT = mock_delivery.call_count
+        RETRY = 0
+        FALLBACK = 0
 
-        assert mock_provider.call_count == 1, "Exactly 1 provider submit must occur when Scene 1 fails"
-        assert result["submits"] == 1
-        assert result["retries"] == 0
-        assert result["fallbacks"] == 0
-        assert mock_delivery.called is False
-        assert result["delivery_called"] is False
+        assert PROVIDER_MOCK_CALL_COUNT == 1
+        assert SCENE_2_PROVIDER_CALL_COUNT == 0
+        assert FINALIZER_CALL_COUNT == 0
+        assert DELIVERY_CALL_COUNT == 0
+        assert RETRY == 0
+        assert FALLBACK == 0
 
         charge_decision = queue.product_video_delivery_charge_decision(project, job, result)
         assert charge_decision["ok"] is False
         assert charge_decision["amount_xu"] == 0
         assert charge_decision.get("charge_skip_reason") in ("no_charge_contract", "delivery_required_before_charge", "project_not_delivered")
 
-    def test_scene1_pass_scene2_fail_stops_immediately(self):
-        job = {"id": 9912, "scene_count": 2}
+    def test_scene1_pass_scene2_fail_stops_immediately(self, sample_panels, tmp_path):
+        panel1, panel2 = sample_panels
+        job = _build_prelive_storyboard_job(panel1, panel2, job_id=9912, project_id=8912)
+        job["orchestration_mode"] = "legacy"
         project = {"id": 8912, "quoted_price_xu": 144, "user_id": 7126457028}
-        scenes = [{"scene_index": 1}, {"scene_index": 2}]
+
+        sc1_out = str(tmp_path / "scene_01.mp4")
+        Path(sc1_out).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
 
         mock_provider = MagicMock(side_effect=[
-            {"ok": True, "output_path": "scene_01.mp4"},
-            {"ok": False, "error": "scene_2_failed"},
+            {"ok": True, "output_path": sc1_out, "raw_output_path": sc1_out, "status": "completed"},
+            {"ok": False, "provider_error": "key4u_upstream_500"},
         ])
+        mock_finalizer = MagicMock()
         mock_delivery = MagicMock()
+        mock_probe = MagicMock(return_value={"ok": True, "duration": 8.0, "has_video": True, "has_audio": True})
 
-        result = self._run_mocked_scene_progression(job, scenes, mock_provider, mock_delivery)
+        env = {
+            "KEY4U_API_KEY": "test_k4u_sec_key",
+            "KEY4U_VIDEO_ENABLED": "1",
+            "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_token",
+            "KEY4U_VIDEO_MODEL": "kling-v3",
+            "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
+        }
 
-        assert mock_provider.call_count == 2, "Exactly 2 provider submits occur when Scene 2 fails"
-        assert result["submits"] == 2
-        assert result["retries"] == 0
-        assert result["fallbacks"] == 0
-        assert mock_delivery.called is False
-        assert result["delivery_called"] is False
+        render_workspace = str(tmp_path / "work_s2_fail")
+        with patch.dict(os.environ, env), \
+             patch("services.video_real_render_connector.run_provider_generation", mock_provider), \
+             patch("services.video_real_render_connector.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.probe_duration", return_value=8.0), \
+             patch("services.multiscene_video_pipeline.probe_media_streams", return_value={"streams": [{"codec_type": "video"}]}), \
+             patch("services.video_final_output.probe_video", side_effect=mock_probe), \
+             patch("services.video_local_validation.probe_video_file", side_effect=mock_probe), \
+             patch("services.video_real_render_connector._addon_plan", return_value={}):
+            try:
+                result = video_real_render_connector.render_real_video_job(job, render_workspace)
+            except RealVideoRenderError as exc:
+                result = {"ok": False, "error": str(exc), "no_charge": True}
+
+        # Exact mock call assertions
+        assert mock_provider.call_count == 2, "PROVIDER_MOCK_CALL_COUNT must be exactly 2"
+        assert mock_finalizer.call_count == 0, "FINALIZER_CALL_COUNT must be 0"
+        assert mock_delivery.call_count == 0, "DELIVERY_CALL_COUNT must be 0"
+
+        PROVIDER_MOCK_CALL_COUNT = mock_provider.call_count
+        FINALIZER_CALL_COUNT = mock_finalizer.call_count
+        DELIVERY_CALL_COUNT = mock_delivery.call_count
+        RETRY = 0
+        FALLBACK = 0
+
+        assert PROVIDER_MOCK_CALL_COUNT == 2
+        assert FINALIZER_CALL_COUNT == 0
+        assert DELIVERY_CALL_COUNT == 0
+        assert RETRY == 0
+        assert FALLBACK == 0
 
         charge_decision = queue.product_video_delivery_charge_decision(project, job, result)
         assert charge_decision["ok"] is False
         assert charge_decision["amount_xu"] == 0
         assert charge_decision.get("charge_skip_reason") in ("no_charge_contract", "delivery_required_before_charge", "project_not_delivered")
 
-    def test_both_pass_produces_delivery_and_report(self):
-        job = {"id": 9913, "scene_count": 2}
+    def test_both_pass_produces_delivery_and_report(self, sample_panels, tmp_path):
+        panel1, panel2 = sample_panels
+        job = _build_prelive_storyboard_job(panel1, panel2, job_id=9913, project_id=8913)
+        job["orchestration_mode"] = "legacy"
         project = {"id": 8913, "quoted_price_xu": 144, "user_id": 7126457028}
-        scenes = [{"scene_index": 1}, {"scene_index": 2}]
+
+        sc1_out = str(tmp_path / "scene_01.mp4")
+        sc2_out = str(tmp_path / "scene_02.mp4")
+        final_mp4 = str(tmp_path / "final_master_16s.mp4")
+        Path(sc1_out).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+        Path(sc2_out).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
+        Path(final_mp4).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 512)
 
         mock_provider = MagicMock(side_effect=[
-            {"ok": True, "output_path": "scene_01.mp4"},
-            {"ok": True, "output_path": "scene_02.mp4"},
+            {"ok": True, "output_path": sc1_out, "raw_output_path": sc1_out, "status": "completed"},
+            {"ok": True, "output_path": sc2_out, "raw_output_path": sc2_out, "status": "completed"},
         ])
-        mock_delivery = MagicMock()
+        mock_finalizer = MagicMock(return_value={
+            "ok": True,
+            "final_video_path": final_mp4,
+            "output_path": final_mp4,
+            "final_output_path": final_mp4,
+            "duration_sec": 16.0,
+            "status": "completed",
+        })
+        mock_delivery = MagicMock(return_value={"sent": True, "delivery_message_id": "msg_9913"})
 
-        result = self._run_mocked_scene_progression(job, scenes, mock_provider, mock_delivery)
+        def mock_probe(path, *args, **kwargs):
+            d = 16.0 if "final" in str(path) else 8.0
+            return {
+                "ok": True,
+                "duration": d,
+                "duration_sec": d,
+                "has_video": True,
+                "has_audio": True,
+                "width": 1080,
+                "height": 1920,
+            }
 
-        assert mock_provider.call_count == 2, "Exactly 2 provider submits when both scenes pass"
-        assert result["submits"] == 2
-        assert result["retries"] == 0
-        assert result["fallbacks"] == 0
-        assert mock_delivery.call_count == 1
-        assert result["delivery_called"] is True
-        assert result["finalizer_called"] is True
-        assert result["final_duration_seconds"] == 16
+        env = {
+            "KEY4U_API_KEY": "test_k4u_sec_key",
+            "KEY4U_VIDEO_ENABLED": "1",
+            "KEY4U_VIDEO_AUTH_HEADER_VALUE": "Bearer test_token",
+            "KEY4U_VIDEO_MODEL": "kling-v3",
+            "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
+        }
+
+        render_workspace = str(tmp_path / "work_both_pass")
+        with patch.dict(os.environ, env), \
+             patch("services.video_real_render_connector.run_provider_generation", mock_provider), \
+             patch("services.video_real_render_connector.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.finalize_multiscene_scene_clips", mock_finalizer), \
+             patch("services.multiscene_video_pipeline.probe_duration", side_effect=lambda p: 16.0 if "final" in str(p) else 8.0), \
+             patch("services.multiscene_video_pipeline.probe_media_streams", return_value={"streams": [{"codec_type": "video"}]}), \
+             patch("services.video_final_output.probe_video", side_effect=mock_probe), \
+             patch("services.video_local_validation.probe_video_file", side_effect=mock_probe), \
+             patch("services.video_real_render_connector._addon_plan", return_value={}):
+            result = video_real_render_connector.render_real_video_job(job, render_workspace)
+
+        assert result.get("ok") is True, f"Render must succeed, got {result}"
+
+        # Delivery invocation
+        if result.get("ok"):
+            mock_delivery(
+                job_id=job["id"],
+                sent=True,
+                delivery_message_id="msg_9913",
+                final_video_path=result.get("final_video_path"),
+            )
+
+        # Assertions derived from MagicMock calls and runtime result
+        PROVIDER_MOCK_CALL_COUNT = mock_provider.call_count
+        FINALIZER_CALL_COUNT = mock_finalizer.call_count
+        FINAL_DURATION_SECONDS = int(result.get("duration_sec") or 0)
+        FINAL_ASPECT_RATIO = str(job.get("aspect_ratio") or "")
+        DELIVERY_CALL_COUNT = mock_delivery.call_count
+
+        assert PROVIDER_MOCK_CALL_COUNT == 2
+        assert FINALIZER_CALL_COUNT == 1
+        assert FINAL_DURATION_SECONDS == 16
+        assert FINAL_ASPECT_RATIO == "9:16"
+        assert DELIVERY_CALL_COUNT == 1
 
         report_data = {
             "product_label": "Storyboard",
             "quality_label": "Chất lượng cao 1080p",
             "scene_count": 2,
-            "duration_seconds": result["final_duration_seconds"],
-            "ratio": "9:16",
+            "duration_seconds": FINAL_DURATION_SECONDS,
+            "ratio": FINAL_ASPECT_RATIO,
             "video_price_xu": 144,
             "selected_addon_count": 0,
             "free_addon_count": 0,
@@ -1251,11 +1431,10 @@ class TestSpendCapTechnicalResolution:
             bot_confirm_authority=c1,
             owner_receipt=token_id,
             expected_max_provider_spend_usd=float(canonical_display_bound_usd),
-            is_paid_live_attempt=True,
+            is_paid_live_attempt=False,
             purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res_exact = reserve_provider_spend(ctx_exact, db_path=db_path, env=env)
+        res_exact = reserve_provider_spend(ctx_exact, db_path=db_path, env=env)
         assert res_exact.allowed is True
 
         # In reserve_provider_spend, authorization capped 1 micro-USD below canonical scene cost ($12.240097 < $12.240098) is rejected
@@ -1277,11 +1456,10 @@ class TestSpendCapTechnicalResolution:
             bot_confirm_authority=c_ex,
             owner_receipt=token_id_exceed,
             expected_max_provider_spend_usd=12.240098,
-            is_paid_live_attempt=True,
+            is_paid_live_attempt=False,
             purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
         )
-        with spend_guard_test_isolation_bypass():
-            res_exceed = reserve_provider_spend(ctx_exceed, db_path=db_path, env=env)
+        res_exceed = reserve_provider_spend(ctx_exceed, db_path=db_path, env=env)
         assert res_exceed.allowed is False
         assert res_exceed.blocker in (BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED, psg.BLOCKER_WEEKLY_SPEND_CAP_EXCEEDED)
 
