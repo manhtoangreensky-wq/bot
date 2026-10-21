@@ -43,7 +43,27 @@ from telegram import Update, User
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, ExtBot
 
 # Ensure optional external heavy packages don't break import of bot if not installed
-for _m in ("google", "google.genai", "google.genai.types", "openai", "uvicorn"):
+for _m in (
+    "google",
+    "google.genai",
+    "google.genai.types",
+    "openai",
+    "uvicorn",
+    "numpy",
+    "onnxruntime",
+    "cv2",
+    "PIL",
+    "PIL.Image",
+    "av",
+    "faster_whisper",
+    "ctranslate2",
+    "edge_tts",
+    "yt_dlp",
+    "paramiko",
+    "docx",
+    "fitz",
+    "pypdf",
+):
     if _m not in sys.modules:
         try:
             __import__(_m)
