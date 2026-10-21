@@ -142,6 +142,10 @@ jobs:
             tests/test_customer_stale_ticket_action_id_single_ack.py \
             tests/test_knowledge_vault_callback_single_ack.py
 
+      - name: Product Video R17 Provider-Free Prelive Technical Acceptance Matrix
+        run: |
+          python -m pytest -q tests/test_p0_product_video_r17_true_final_prelive_provider_free.py
+
       - name: Current-main Stale Menu Root Callback Guards
         run: |
           python -m unittest \
