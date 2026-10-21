@@ -63,6 +63,8 @@ for _m in (
     "docx",
     "fitz",
     "pypdf",
+    "multipart",
+    "multipart.multipart",
 ):
     if _m not in sys.modules:
         try:
