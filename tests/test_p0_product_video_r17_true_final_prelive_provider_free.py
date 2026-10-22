@@ -1017,10 +1017,16 @@ class TestFailureProgression:
     def test_scene1_fail_stops_immediately(self, sample_panels, tmp_path):
         panel1, panel2 = sample_panels
         job = _build_prelive_storyboard_job(panel1, panel2, job_id=9911, project_id=8911)
-        job["orchestration_mode"] = "legacy"
         project = {"id": 8911, "quoted_price_xu": 144, "user_id": 7126457028}
 
-        mock_provider = MagicMock(return_value={"ok": False, "provider_error": "key4u_upstream_500"})
+        # Canonical multi-scene Product Video/Storyboard orchestration assertions
+        assert job["orchestration_mode"] == "per_scene_8s"
+        assert job["scene_count"] == 2
+        assert job["selected_provider"] == "key4u_video"
+        assert job["selected_model"] == "kling-v3"
+        assert job["provider_order"] == ["key4u_video"]
+
+        mock_provider = MagicMock(side_effect=RuntimeError("key4u_upstream_500"))
         mock_finalizer = MagicMock()
         mock_delivery = MagicMock()
         mock_probe = MagicMock(return_value={"ok": True, "duration": 8.0, "has_video": True, "has_audio": True})
@@ -1057,15 +1063,16 @@ class TestFailureProgression:
         SCENE_2_PROVIDER_CALL_COUNT = max(0, mock_provider.call_count - 1)
         FINALIZER_CALL_COUNT = mock_finalizer.call_count
         DELIVERY_CALL_COUNT = mock_delivery.call_count
-        RETRY = 0
-        FALLBACK = 0
 
         assert PROVIDER_MOCK_CALL_COUNT == 1
         assert SCENE_2_PROVIDER_CALL_COUNT == 0
         assert FINALIZER_CALL_COUNT == 0
         assert DELIVERY_CALL_COUNT == 0
-        assert RETRY == 0
-        assert FALLBACK == 0
+
+        # NO_RETRY_PROOF: exact provider mock call count equals number of scenes reached (1), with zero additional invocation
+        assert mock_provider.call_count == 1
+        # NO_FALLBACK_PROOF: provider_order remains exactly ["key4u_video"] and no alternate provider dispatch occurs
+        assert job["provider_order"] == ["key4u_video"]
 
         charge_decision = queue.product_video_delivery_charge_decision(project, job, result)
         assert charge_decision["ok"] is False
@@ -1075,15 +1082,21 @@ class TestFailureProgression:
     def test_scene1_pass_scene2_fail_stops_immediately(self, sample_panels, tmp_path):
         panel1, panel2 = sample_panels
         job = _build_prelive_storyboard_job(panel1, panel2, job_id=9912, project_id=8912)
-        job["orchestration_mode"] = "legacy"
         project = {"id": 8912, "quoted_price_xu": 144, "user_id": 7126457028}
+
+        # Canonical multi-scene Product Video/Storyboard orchestration assertions
+        assert job["orchestration_mode"] == "per_scene_8s"
+        assert job["scene_count"] == 2
+        assert job["selected_provider"] == "key4u_video"
+        assert job["selected_model"] == "kling-v3"
+        assert job["provider_order"] == ["key4u_video"]
 
         sc1_out = str(tmp_path / "scene_01.mp4")
         Path(sc1_out).write_bytes(b"\x00\x00\x00 ftypisom" + b"\x00" * 256)
 
         mock_provider = MagicMock(side_effect=[
             {"ok": True, "output_path": sc1_out, "raw_output_path": sc1_out, "status": "completed"},
-            {"ok": False, "provider_error": "key4u_upstream_500"},
+            RuntimeError("key4u_upstream_500"),
         ])
         mock_finalizer = MagicMock()
         mock_delivery = MagicMock()
@@ -1120,14 +1133,15 @@ class TestFailureProgression:
         PROVIDER_MOCK_CALL_COUNT = mock_provider.call_count
         FINALIZER_CALL_COUNT = mock_finalizer.call_count
         DELIVERY_CALL_COUNT = mock_delivery.call_count
-        RETRY = 0
-        FALLBACK = 0
 
         assert PROVIDER_MOCK_CALL_COUNT == 2
         assert FINALIZER_CALL_COUNT == 0
         assert DELIVERY_CALL_COUNT == 0
-        assert RETRY == 0
-        assert FALLBACK == 0
+
+        # NO_RETRY_PROOF: exact provider mock call count equals number of scenes reached (2), with zero additional invocation
+        assert mock_provider.call_count == 2
+        # NO_FALLBACK_PROOF: provider_order remains exactly ["key4u_video"] and no alternate provider dispatch occurs
+        assert job["provider_order"] == ["key4u_video"]
 
         charge_decision = queue.product_video_delivery_charge_decision(project, job, result)
         assert charge_decision["ok"] is False
@@ -1137,8 +1151,14 @@ class TestFailureProgression:
     def test_both_pass_produces_delivery_and_report(self, sample_panels, tmp_path):
         panel1, panel2 = sample_panels
         job = _build_prelive_storyboard_job(panel1, panel2, job_id=9913, project_id=8913)
-        job["orchestration_mode"] = "legacy"
         project = {"id": 8913, "quoted_price_xu": 144, "user_id": 7126457028}
+
+        # Canonical multi-scene Product Video/Storyboard orchestration assertions
+        assert job["orchestration_mode"] == "per_scene_8s"
+        assert job["scene_count"] == 2
+        assert job["selected_provider"] == "key4u_video"
+        assert job["selected_model"] == "kling-v3"
+        assert job["provider_order"] == ["key4u_video"]
 
         sc1_out = str(tmp_path / "scene_01.mp4")
         sc2_out = str(tmp_path / "scene_02.mp4")
@@ -1195,7 +1215,7 @@ class TestFailureProgression:
 
         assert result.get("ok") is True, f"Render must succeed, got {result}"
 
-        # Delivery invocation
+        # Post-render test harness delivery invocation (delivery is external to render_real_video_job)
         if result.get("ok"):
             mock_delivery(
                 job_id=job["id"],
@@ -1216,6 +1236,13 @@ class TestFailureProgression:
         assert FINAL_DURATION_SECONDS == 16
         assert FINAL_ASPECT_RATIO == "9:16"
         assert DELIVERY_CALL_COUNT == 1
+
+        # Diagnostic assertions for retry and fallback directly from production result
+        assert result.get("fallback_allowed_count") == 0
+        assert result.get("fallback_used") is False
+        assert result.get("fallback_count_by_scene") == {"1": 0, "2": 0}
+        assert result.get("artifact_download_retry_count") == 0
+        assert job["provider_order"] == ["key4u_video"]
 
         report_data = {
             "product_label": "Storyboard",
