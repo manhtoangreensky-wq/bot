@@ -107541,7 +107541,16 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         elif candidate_model == "veo3.1-fast":
             storyboard_provider = "shopaikey_video"
         else:
-            storyboard_provider = "shopaikey_video"
+            quality_tier = safe_int(
+                draft.get("b14_quality_xu")
+                or (draft.get("asset_pack") or {}).get("selected_quality_tier")
+                or (draft.get("b14_invoice") or {}).get("quality_xu"),
+                0
+            )
+            if quality_tier in {700, 800, 1000, 1200, 1500}:
+                storyboard_provider = "key4u_video"
+            else:
+                storyboard_provider = "shopaikey_video"
 
         storyboard_model = _resolve_storyboard_i2v_model(
             {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},

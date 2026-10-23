@@ -919,6 +919,9 @@ def _provider_order(job: dict | None = None) -> list[str]:
     asset_pack = _json_loads(job.get("asset_pack"), {})
     if not asset_pack and isinstance(job.get("project"), dict):
         asset_pack = _json_loads((job.get("project") or {}).get("asset_pack_json"), {})
+    invoice = _json_loads(job.get("invoice"), {})
+    if not invoice and isinstance(job.get("project"), dict):
+        invoice = _json_loads((job.get("project") or {}).get("invoice_json"), {})
     product_type = str(job.get("product_type") or asset_pack.get("product_type") or "").strip().lower()
     is_storyboard = bool(
         product_type in {"storyboard_prompt", "storyboard_to_video"}
@@ -932,20 +935,53 @@ def _provider_order(job: dict | None = None) -> list[str]:
         selected_provider = str(
             job.get("selected_provider")
             or asset_pack.get("selected_provider")
+            or invoice.get("selected_provider")
             or ""
         ).strip().lower()
         model_req = str(
             job.get("selected_model")
             or job.get("model")
             or asset_pack.get("selected_model")
+            or invoice.get("selected_model")
             or ""
         ).strip()
         if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            return ["key4u_video"]
+        if model_req == "veo3.1-fast":
+            return ["shopaikey_video"]
+        if model_req == "veo_3_1-fast":
+            if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+                return ["shopaikey_video"]
             return ["key4u_video"]
         if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
             return ["shopaikey_video"]
         if selected_provider in {"key4u", "k4u", "key4u_video"}:
             return ["key4u_video"]
+
+        tier_val = 0
+        for src in (job, asset_pack, invoice):
+            if isinstance(src, dict):
+                t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
+                if t:
+                    try:
+                        tier_val = int(t)
+                        break
+                    except (ValueError, TypeError):
+                        pass
+        tier_str = str(
+            job.get("selected_tier")
+            or job.get("quality_tier")
+            or job.get("routing_quality_tier")
+            or asset_pack.get("selected_tier")
+            or asset_pack.get("quality_tier")
+            or invoice.get("selected_tier")
+            or invoice.get("quality_tier")
+            or ""
+        ).strip().lower()
+        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+            return ["key4u_video"]
+        if tier_val in {200, 300, 400} or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+            return ["shopaikey_video"]
         return ["shopaikey_video"]
     raw = (
         job.get("provider_order")
@@ -3941,7 +3977,30 @@ def _resolve_storyboard_i2v_model(
             target_provider = "key4u_video"
 
     if not target_provider:
-        target_provider = "shopaikey_video"
+        tier_val = 0
+        for src in (job, asset_pack, invoice):
+            if isinstance(src, dict):
+                t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
+                if t:
+                    try:
+                        tier_val = int(t)
+                        break
+                    except (ValueError, TypeError):
+                        pass
+        tier_str = str(
+            (job or {}).get("selected_tier")
+            or (job or {}).get("quality_tier")
+            or (job or {}).get("routing_quality_tier")
+            or (asset_pack or {}).get("selected_tier")
+            or (asset_pack or {}).get("quality_tier")
+            or (invoice or {}).get("selected_tier")
+            or (invoice or {}).get("quality_tier")
+            or ""
+        ).strip().lower()
+        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+            target_provider = "key4u_video"
+        else:
+            target_provider = "shopaikey_video"
 
     if target_provider not in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER:
         raise RealVideoRenderError(
@@ -6242,7 +6301,30 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             elif model_req in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
                 storyboard_provider = "shopaikey_video"
             else:
-                storyboard_provider = "shopaikey_video"
+                tier_val = 0
+                for src in (job, asset_pack, invoice):
+                    if isinstance(src, dict):
+                        t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
+                        if t:
+                            try:
+                                tier_val = int(t)
+                                break
+                            except (ValueError, TypeError):
+                                pass
+                tier_str = str(
+                    (job or {}).get("selected_tier")
+                    or (job or {}).get("quality_tier")
+                    or (job or {}).get("routing_quality_tier")
+                    or (asset_pack or {}).get("selected_tier")
+                    or (asset_pack or {}).get("quality_tier")
+                    or (invoice or {}).get("selected_tier")
+                    or (invoice or {}).get("quality_tier")
+                    or ""
+                ).strip().lower()
+                if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+                    storyboard_provider = "key4u_video"
+                else:
+                    storyboard_provider = "shopaikey_video"
 
         storyboard_model = _resolve_storyboard_i2v_model(
             job,
