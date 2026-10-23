@@ -978,10 +978,23 @@ def _provider_order(job: dict | None = None) -> list[str]:
             or invoice.get("quality_tier")
             or ""
         ).strip().lower()
-        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+        if tier_val == 800 or any(k in tier_str for k in ("pro", "premium", "kling")):
             return ["key4u_video"]
-        if tier_val in {200, 300, 400} or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+        if tier_val == 400 or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
             return ["shopaikey_video"]
+        if tier_val in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
         return ["shopaikey_video"]
     raw = (
         job.get("provider_order")
@@ -3997,8 +4010,26 @@ def _resolve_storyboard_i2v_model(
             or (invoice or {}).get("quality_tier")
             or ""
         ).strip().lower()
-        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+        if tier_val == 800 or any(k in tier_str for k in ("pro", "premium", "kling")):
             target_provider = "key4u_video"
+        elif tier_val == 400 or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+            target_provider = "shopaikey_video"
+        elif tier_val in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
         else:
             target_provider = "shopaikey_video"
 
@@ -6321,8 +6352,26 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                     or (invoice or {}).get("quality_tier")
                     or ""
                 ).strip().lower()
-                if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+                if tier_val == 800 or any(k in tier_str for k in ("pro", "premium", "kling")):
                     storyboard_provider = "key4u_video"
+                elif tier_val == 400 or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+                    storyboard_provider = "shopaikey_video"
+                elif tier_val in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
+                    raise RealVideoRenderError(
+                        f"storyboard_unsupported_tier:{tier_val}",
+                        diagnostics={
+                            "ok": False,
+                            "scene_index": scene_index,
+                            "scene_id": scene_index,
+                            "request_job_id": request_job_id,
+                            "error": f"storyboard_unsupported_tier:{tier_val}",
+                            "blocker": "storyboard_unsupported_tier",
+                            "allowed_tiers": [400, 800],
+                            "provider_attempted": False,
+                            "provider_submit_called": False,
+                            "no_charge": True,
+                        },
+                    )
                 else:
                     storyboard_provider = "shopaikey_video"
 

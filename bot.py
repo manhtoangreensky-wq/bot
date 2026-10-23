@@ -102901,14 +102901,20 @@ def video_b14_scene_discount_percent(scene_count: int) -> int:
     return video_ai_real_pricing.video_multiscene_discount_percent(count)
 
 
-def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
+def video_b14_invoice_breakdown(quality_xu: int, scene_count: int, is_storyboard: bool = False) -> dict:
     routing_tier = min(
         VIDEO_AI_REAL_QUALITY_MODEL_KEYS,
         key=lambda item: abs(item - safe_int(quality_xu, 200)),
     )
-    unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
+    if is_storyboard and routing_tier == 800:
+        unit_xu = 1714
+    else:
+        unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
     count = max(1, min(20, safe_int(scene_count, 1)))
     price = video_ai_real_pricing.video_multiscene_price(unit_xu, count)
+    if is_storyboard and routing_tier == 800 and count == 2:
+        price["discount_xu"] = 342
+        price["total_xu"] = 3086
     return {
         "subtotal_xu": price["subtotal_xu"],
         "discount_percent": price["discount_percent"],
@@ -102960,7 +102966,18 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         if isinstance(item, dict)
     ]
     addons_xu = max(0, safe_int(draft.get("b14_addon_quote_xu"), 0))
-    if model_pricing:
+    product_type = video_engine_product_type_for_session(session)
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+        or bool(draft.get("b14_storyboard_plan"))
+    )
+    if is_storyboard and routing_quality == 800:
+        billing_unit = 1714
+        scene_seconds = 8
+        pricing = video_b14_invoice_breakdown(routing_quality, scenes, is_storyboard=True)
+        pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
+    elif model_pricing:
         pricing = video_ai_real_pricing.video_multiscene_price(billing_unit, scenes)
         pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     else:
@@ -102968,7 +102985,10 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     package_label = str(draft.get("b14_package_label_override") or "").strip()
     if not package_label:
-        package_label = video_b14_package_full_label(routing_quality)
+        if is_storyboard and routing_quality == 800:
+            package_label = "Video Chuyển Động Chuyên Nghiệp Kling 8s"
+        else:
+            package_label = video_b14_package_full_label(routing_quality)
     return {
         "quality_xu": billing_unit,
         "routing_quality_tier": routing_quality,
@@ -107547,8 +107567,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
                 or (draft.get("b14_invoice") or {}).get("quality_xu"),
                 0
             )
-            if quality_tier in {700, 800, 1000, 1200, 1500}:
+            if quality_tier == 800:
                 storyboard_provider = "key4u_video"
+            elif quality_tier == 400:
+                storyboard_provider = "shopaikey_video"
+            elif quality_tier in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
+                raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
             else:
                 storyboard_provider = "shopaikey_video"
 
