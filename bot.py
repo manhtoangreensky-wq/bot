@@ -287411,6 +287411,181 @@ async def api_internal_web_image_transform_prepare(request: Request):
     return JSONResponse(status_code=200, content=prepare_response)
 
 
+# ─── FREE TOOLS CANONICAL INTERNAL APIS (R38) ────────────────────────────────
+
+@fastapi_app.api_route("/internal/v1/free-tools/rate", methods=["GET", "POST"])
+async def api_internal_free_tools_rate(request: Request):
+    """Canonical Bot Core exchange rate & Xu conversion endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_exchange_rate
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method=request.method,
+        path="/internal/v1/free-tools/rate",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+    raw_input = data.get("raw_input") or data.get("query") or request.query_params.get("raw_input") or request.query_params.get("query") or ""
+    target_lang = data.get("target_lang") or request.query_params.get("target_lang") or "vi"
+
+    ok, result, status_code = handle_exchange_rate(raw_input, target_lang=target_lang)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.api_route("/internal/v1/free-tools/weather", methods=["GET", "POST"])
+async def api_internal_free_tools_weather(request: Request):
+    """Canonical Bot Core weather forecast endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_weather
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method=request.method,
+        path="/internal/v1/free-tools/weather",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+    location = data.get("location") or request.query_params.get("location") or ""
+    unit = data.get("unit") or request.query_params.get("unit") or "celsius"
+
+    ok, result, status_code = handle_weather(location, unit=unit)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/avatar")
+async def api_internal_free_tools_avatar(request: Request):
+    """Canonical Bot Core AI avatar URL construction endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_avatar
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/avatar",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    seed = data.get("seed") or "toanaas_user"
+    avatar_set = data.get("avatar_set") or 1
+    confirmed_rights = bool(data.get("confirmed_rights", False))
+    style = data.get("style") or "realistic"
+
+    ok, result, status_code = handle_avatar(seed=seed, avatar_set=avatar_set, confirmed_rights=confirmed_rights, style=style)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/downloader/inspect")
+async def api_internal_free_tools_downloader_inspect(request: Request):
+    """Canonical Bot Core video downloader inspection endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_downloader_inspect
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/downloader/inspect",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    url = data.get("url") or ""
+    requested_asset = data.get("requested_asset") or "video"
+
+    ok, result, status_code = handle_downloader_inspect(url=url, requested_asset=requested_asset)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/downloader/download")
+async def api_internal_free_tools_downloader_download(request: Request):
+    """Canonical Bot Core video downloader safe download & delivery endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_downloader_download
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/downloader/download",
+        body_bytes=raw_body,
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    url = data.get("url") or ""
+    requested_asset = data.get("requested_asset") or "video"
+    confirmed_rights = bool(data.get("confirmed_rights", False))
+
+    ok, result, status_code = handle_downloader_download(
+        url=url,
+        requested_asset=requested_asset,
+        confirmed_rights=confirmed_rights,
+        user_id=header_actor,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(
