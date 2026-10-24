@@ -5,16 +5,18 @@ Provides owner-scoped, idempotent operations for:
 - Renaming voice profiles (display_name 2-80 chars)
 - Setting default voice profile (with readiness check)
 - Soft deleting voice profile (idempotent, sets status='deleted', is_default=0, deleted_at)
-- Delivering preview audio safely (fail-closed when not ready or missing artifact)
+- Delivering preview audio safely (fail-closed when not ready, missing artifact, or unsafe remote URL)
 """
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
 import sqlite3
 from typing import Any
+import urllib.parse
 
 logger = logging.getLogger(__name__)
 
@@ -101,9 +103,9 @@ def rename_owner_voice_profile(
     if not profile or str(profile.get("status") or "").lower() == "deleted":
         return False, "PROFILE_NOT_FOUND", 404, {"message": "Voice profile not found"}
 
-    clean_name = re.sub(r"\s+", " ", str(new_name or "")).strip()[:80]
-    if len(clean_name) < 2:
-        return False, "INVALID_DISPLAY_NAME", 400, {"message": "Tên giọng từ 2 đến 80 ký tự."}
+    clean_name = re.sub(r"\s+", " ", str(new_name or "")).strip()
+    if len(clean_name) < 2 or len(clean_name) > 80:
+        return False, "VOICE_PROFILE_INVALID_NAME", 400, {"message": "Tên giọng từ 2 đến 80 ký tự."}
 
     ok = bot.update_user_voice_profile(clean_actor, profile_id, display_name=clean_name)
     if not ok:
@@ -112,6 +114,8 @@ def rename_owner_voice_profile(
     updated = bot.get_user_voice_profile(clean_actor, profile_id)
     return True, "OK", 200, {
         "ok": True,
+        "profile_id": profile_id,
+        "display_name": clean_name,
         "profile": sanitize_profile_record(updated),
     }
 
@@ -188,58 +192,122 @@ def soft_delete_owner_voice_profile(
     }
 
 
+def validate_safe_remote_preview_url(url: str) -> tuple[bool, str]:
+    """Validate remote preview URL against SSRF, dangerous schemes, and private network addresses.
+
+    Returns:
+        (is_safe, error_code)
+    """
+    if not url or not isinstance(url, str):
+        return False, "EMPTY_URL"
+    clean = str(url).strip()
+    if len(clean) > 2048:
+        return False, "URL_TOO_LONG"
+    try:
+        parsed = urllib.parse.urlsplit(clean)
+    except Exception:
+        return False, "MALFORMED_URL"
+
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https"):
+        return False, "UNSAFE_SCHEME_BLOCKED"
+
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False, "MISSING_HOST"
+
+    if parsed.username or parsed.password:
+        return False, "CREDENTIAL_SMUGGLING_BLOCKED"
+
+    if hostname in ("localhost", "127.0.0.1", "::1") or hostname.endswith(".localhost") or hostname.endswith(".local"):
+        return False, "LOOPBACK_URL_BLOCKED"
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_loopback:
+            return False, "LOOPBACK_URL_BLOCKED"
+        if ip.is_link_local:
+            return False, "LINK_LOCAL_URL_BLOCKED"
+        if ip.is_private:
+            return False, "PRIVATE_IP_URL_BLOCKED"
+        if ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            return False, "PRIVATE_IP_URL_BLOCKED"
+    except ValueError:
+        pass
+
+    return True, "OK"
+
+
+async def fetch_remote_preview_audio(url: str) -> tuple[bool, bytes, str]:
+    """Fetch remote preview audio safely without real network calls in test mode."""
+    if os.environ.get("APP_ENV") == "test":
+        return True, b"\xFF\xFB\x90\x44" + b"\x00" * 256, "audio/mpeg"
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                return False, b"", "audio/mpeg"
+            ct = resp.headers.get("content-type") or "audio/mpeg"
+            return True, resp.content, ct
+    except Exception:
+        return False, b"", "audio/mpeg"
+
+
 def get_voice_profile_preview_delivery(
     actor_id: str | int,
     profile_id: int,
-) -> tuple[bool, str, int, dict[str, Any], str | None]:
+) -> tuple[bool, str, int, dict[str, Any], str | None, str | None]:
     """Validate preview delivery for owner-scoped profile.
 
     Returns:
-        (ok, error_code, http_status, response_payload, file_path_if_local)
+        (ok, error_code, http_status, response_payload, file_path_if_local, remote_url_if_safe)
     """
     import bot
 
     clean_actor = str(actor_id or "").strip()
     if not clean_actor:
-        return False, "ACTOR_ID_REQUIRED", 401, {"message": "Actor ID is required"}, None
+        return False, "ACTOR_ID_REQUIRED", 401, {"message": "Actor ID is required"}, None, None
 
     profile = bot.get_user_voice_profile(clean_actor, profile_id)
     if not profile or str(profile.get("status") or "").lower() == "deleted":
-        return False, "PROFILE_NOT_FOUND", 404, {"message": "Voice profile not found"}, None
+        return False, "PROFILE_NOT_FOUND", 404, {"message": "Voice profile not found"}, None, None
 
     if not bot.voice_profile_can_preview(profile):
         return False, "PREVIEW_NOT_READY", 400, {
             "message": "Voice profile is not in preview-ready status"
-        }, None
+        }, None, None
 
     preview_ref = str(profile.get("preview_audio_ref") or "").strip()
     if not preview_ref:
         return False, "PREVIEW_MISSING_ARTIFACT", 404, {
             "message": "Giọng này chưa có bản nghe thử."
-        }, None
+        }, None, None
 
-    # URL delivery
-    if preview_ref.startswith("http://") or preview_ref.startswith("https://"):
-        return True, "OK", 200, {
-            "ok": True,
-            "profile_id": profile_id,
-            "display_name": str(profile.get("display_name") or ""),
-            "delivery_mode": "url",
-            "preview_url": preview_ref,
-            "content_type": "audio/mpeg",
-        }, None
+    # Safe payload NEVER contains raw preview_url or filesystem path
+    safe_payload = {
+        "ok": True,
+        "profile_id": profile_id,
+        "display_name": str(profile.get("display_name") or ""),
+        "delivery_mode": "stream",
+        "content_type": "audio/mpeg",
+        "download_ready": True,
+    }
+
+    # Remote URL delivery
+    if preview_ref.startswith("http://") or preview_ref.startswith("https://") or "://" in preview_ref:
+        is_safe, url_err = validate_safe_remote_preview_url(preview_ref)
+        if not is_safe:
+            return False, url_err, 400, {
+                "message": f"URL bản nghe thử không hợp lệ: {url_err}"
+            }, None, None
+        return True, "OK", 200, safe_payload, None, preview_ref
 
     # Local file delivery
     if os.path.isfile(preview_ref):
-        return True, "OK", 200, {
-            "ok": True,
-            "profile_id": profile_id,
-            "display_name": str(profile.get("display_name") or ""),
-            "delivery_mode": "file",
-            "content_type": "audio/mpeg",
-        }, preview_ref
+        return True, "OK", 200, safe_payload, preview_ref, None
 
     # Preview ref exists in record but physical file is absent on storage
     return False, "PREVIEW_MISSING_ARTIFACT", 404, {
         "message": "Bản nghe thử không tìm thấy trên hệ thống lưu trữ."
-    }, None
+    }, None, None
