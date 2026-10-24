@@ -107,7 +107,7 @@ def test_rename_success_and_validation_and_foreign_blocked(test_db):
     ok_inv, code_inv, status_inv, _ = rename_owner_voice_profile("1001", pid, "A")
     assert ok_inv is False
     assert status_inv == 400
-    assert code_inv == "INVALID_DISPLAY_NAME"
+    assert code_inv == "VOICE_PROFILE_INVALID_NAME"
 
     # RENAME_FOREIGN_BLOCKED
     ok_foreign, code_foreign, status_foreign, _ = rename_owner_voice_profile("9999", pid, "Hacked Name")
@@ -185,38 +185,90 @@ def test_preview_delivery_contracts(test_db):
         pid_not_ready = _seed_profile("1001", "Not Ready", status="deleted", preview_ref=temp_audio.name)
 
         # PREVIEW_READY_SUCCESS (file delivery)
-        ok_f, code_f, status_f, res_f, fpath = get_voice_profile_preview_delivery("1001", pid_ready_file)
+        ok_f, code_f, status_f, res_f, fpath, rurl_f = get_voice_profile_preview_delivery("1001", pid_ready_file)
         assert ok_f is True
         assert status_f == 200
         assert fpath == temp_audio.name
+        assert rurl_f is None
         assert "password" not in json.dumps(res_f)  # NO_PRIVATE_METADATA_LEAK
+        assert "preview_url" not in res_f  # RAW_PREVIEW_URL_META_EXPOSURE=NO
 
         # PREVIEW_READY_SUCCESS (url delivery)
-        ok_u, code_u, status_u, res_u, _ = get_voice_profile_preview_delivery("1001", pid_ready_url)
+        ok_u, code_u, status_u, res_u, _, rurl_u = get_voice_profile_preview_delivery("1001", pid_ready_url)
         assert ok_u is True
         assert status_u == 200
-        assert res_u["preview_url"] == "https://cdn.toanaas.vn/preview.mp3"
+        assert rurl_u == "https://cdn.toanaas.vn/preview.mp3"
+        assert "preview_url" not in res_u  # RAW_PREVIEW_URL_META_EXPOSURE=NO
+        assert res_u["delivery_mode"] == "stream"
+
+        # LOOPBACK_URL_BLOCKED
+        pid_lb = _seed_profile("1001", "Loopback", status="active", preview_ref="http://127.0.0.1/audio.mp3")
+        ok_lb, code_lb, status_lb, _, _, _ = get_voice_profile_preview_delivery("1001", pid_lb)
+        assert ok_lb is False
+        assert status_lb == 400
+        assert code_lb == "LOOPBACK_URL_BLOCKED"
+
+        pid_lb2 = _seed_profile("1001", "Localhost", status="active", preview_ref="http://localhost:8080/audio.mp3")
+        ok_lb2, code_lb2, status_lb2, _, _, _ = get_voice_profile_preview_delivery("1001", pid_lb2)
+        assert ok_lb2 is False
+        assert status_lb2 == 400
+        assert code_lb2 == "LOOPBACK_URL_BLOCKED"
+
+        # PRIVATE_IP_URL_BLOCKED
+        pid_priv = _seed_profile("1001", "Private IP", status="active", preview_ref="http://10.0.0.5/audio.mp3")
+        ok_pr, code_pr, status_pr, _, _, _ = get_voice_profile_preview_delivery("1001", pid_priv)
+        assert ok_pr is False
+        assert status_pr == 400
+        assert code_pr == "PRIVATE_IP_URL_BLOCKED"
+
+        pid_priv2 = _seed_profile("1001", "Private IP 192", status="active", preview_ref="http://192.168.1.1/audio.mp3")
+        ok_pr2, code_pr2, status_pr2, _, _, _ = get_voice_profile_preview_delivery("1001", pid_priv2)
+        assert ok_pr2 is False
+        assert status_pr2 == 400
+        assert code_pr2 == "PRIVATE_IP_URL_BLOCKED"
+
+        # LINK_LOCAL_URL_BLOCKED
+        pid_ll = _seed_profile("1001", "Link Local", status="active", preview_ref="http://169.254.169.254/latest/meta-data")
+        ok_ll, code_ll, status_ll, _, _, _ = get_voice_profile_preview_delivery("1001", pid_ll)
+        assert ok_ll is False
+        assert status_ll == 400
+        assert code_ll == "LINK_LOCAL_URL_BLOCKED"
+
+        # UNSAFE_SCHEME_BLOCKED
+        pid_scheme = _seed_profile("1001", "Unsafe Scheme", status="active", preview_ref="file:///etc/passwd")
+        ok_sc, code_sc, status_sc, _, _, _ = get_voice_profile_preview_delivery("1001", pid_scheme)
+        assert ok_sc is False
+        assert status_sc == 400
+        assert code_sc == "UNSAFE_SCHEME_BLOCKED"
+
+        # SIGNED_QUERY_TOKEN_NOT_LEAKED & RAW_SOURCE_URL_NOT_LEAKED
+        pid_signed = _seed_profile("1001", "Signed Token URL", status="active", preview_ref="https://cdn.toanaas.vn/preview.mp3?token=secret_query_token_xyz")
+        ok_sg, code_sg, status_sg, res_sg, _, safe_remote = get_voice_profile_preview_delivery("1001", pid_signed)
+        assert ok_sg is True
+        assert status_sg == 200
+        assert "secret_query_token_xyz" not in json.dumps(res_sg)  # SIGNED_QUERY_TOKEN_NOT_LEAKED
+        assert "preview_url" not in res_sg  # RAW_SOURCE_URL_NOT_LEAKED
 
         # PREVIEW_MISSING_ARTIFACT_TRUTHFUL
-        ok_ma, code_ma, status_ma, _, _ = get_voice_profile_preview_delivery("1001", pid_missing_art)
+        ok_ma, code_ma, status_ma, _, _, _ = get_voice_profile_preview_delivery("1001", pid_missing_art)
         assert ok_ma is False
         assert status_ma == 404
         assert code_ma == "PREVIEW_MISSING_ARTIFACT"
 
         # PREVIEW_MISSING_ARTIFACT_TRUTHFUL (missing file on disk)
-        ok_md, code_md, status_md, _, _ = get_voice_profile_preview_delivery("1001", pid_missing_disk)
+        ok_md, code_md, status_md, _, _, _ = get_voice_profile_preview_delivery("1001", pid_missing_disk)
         assert ok_md is False
         assert status_md == 404
         assert code_md == "PREVIEW_MISSING_ARTIFACT"
 
         # PREVIEW_READY_FALSE_BLOCKED
-        ok_nr, code_nr, status_nr, _, _ = get_voice_profile_preview_delivery("1001", pid_not_ready)
+        ok_nr, code_nr, status_nr, _, _, _ = get_voice_profile_preview_delivery("1001", pid_not_ready)
         assert ok_nr is False
         assert status_nr == 404  # Deleted profile treated as not found
         assert code_nr == "PROFILE_NOT_FOUND"
 
         # PREVIEW_FOREIGN_BLOCKED
-        ok_for, code_for, status_for, _, _ = get_voice_profile_preview_delivery("9999", pid_ready_file)
+        ok_for, code_for, status_for, _, _, _ = get_voice_profile_preview_delivery("9999", pid_ready_file)
         assert ok_for is False
         assert status_for == 404
         assert code_for == "PROFILE_NOT_FOUND"

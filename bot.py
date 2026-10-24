@@ -284602,7 +284602,7 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
             content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    ok, err_code, status_code, result, file_path = get_voice_profile_preview_delivery(clean_actor, profile_id)
+    ok, err_code, status_code, result, file_path, remote_url = get_voice_profile_preview_delivery(clean_actor, profile_id)
     if not ok:
         return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
 
@@ -284611,16 +284611,28 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
 
     if mode == "meta":
         return JSONResponse(status_code=200, content=result)
+
+    filename = f"voice_preview_{profile_id}.mp3"
+    content_disposition_type = "attachment" if download else "inline"
+
     if file_path:
-        content_disposition_type = "attachment" if download else "inline"
-        filename = f"voice_preview_{profile_id}.mp3"
         return FileResponse(
             file_path,
             media_type="audio/mpeg",
             headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
         )
-    if result.get("delivery_mode") == "url":
-        return RedirectResponse(result["preview_url"], status_code=307)
+
+    if remote_url:
+        from services.voice_vault_service import fetch_remote_preview_audio
+        ok_fetch, audio_bytes, media_type = await fetch_remote_preview_audio(remote_url)
+        if not ok_fetch:
+            return JSONResponse(status_code=502, content={"ok": False, "error_code": "PREVIEW_FETCH_FAILED", "message": "Không thể tải tệp âm thanh"})
+        return Response(
+            content=audio_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
+        )
+
     return JSONResponse(status_code=200, content=result)
 
 
