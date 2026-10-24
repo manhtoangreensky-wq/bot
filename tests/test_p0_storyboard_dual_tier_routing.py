@@ -29,6 +29,39 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import sys
+
+# Ensure optional external heavy packages don't break import of bot if not installed
+for _m in (
+    "google",
+    "google.genai",
+    "google.genai.types",
+    "openai",
+    "uvicorn",
+    "numpy",
+    "onnxruntime",
+    "cv2",
+    "PIL",
+    "PIL.Image",
+    "av",
+    "faster_whisper",
+    "ctranslate2",
+    "edge_tts",
+    "yt_dlp",
+    "paramiko",
+    "docx",
+    "fitz",
+    "pypdf",
+    "multipart",
+    "multipart.multipart",
+):
+    if _m not in sys.modules:
+        try:
+            __import__(_m)
+        except ImportError:
+            from unittest.mock import MagicMock
+            sys.modules[_m] = MagicMock()
+
 import pytest
 
 import bot
