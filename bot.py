@@ -284609,6 +284609,8 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
     mode = str(request.query_params.get("mode") or "").strip().lower()
     download = str(request.query_params.get("download") or "").strip().lower() in ("1", "true", "yes")
 
+    if mode == "meta":
+        return JSONResponse(status_code=200, content=result)
     if file_path:
         content_disposition_type = "attachment" if download else "inline"
         filename = f"voice_preview_{profile_id}.mp3"
@@ -284617,7 +284619,7 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
             media_type="audio/mpeg",
             headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
         )
-    if result.get("delivery_mode") == "url" and mode != "meta":
+    if result.get("delivery_mode") == "url":
         return RedirectResponse(result["preview_url"], status_code=307)
     return JSONResponse(status_code=200, content=result)
 
