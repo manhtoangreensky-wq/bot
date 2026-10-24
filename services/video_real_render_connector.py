@@ -914,6 +914,37 @@ def _contains_raw_prompt_marker(text: Any) -> bool:
     return any(marker in value for marker in RAW_PROMPT_FRAME_MARKERS)
 
 
+def _storyboard_accepted_runtime_models(tier: int) -> set[str]:
+    try:
+        from services.provider_spend_guard import _load_product_video_route_map
+        route_map = _load_product_video_route_map()
+        sb_routes = route_map.get("storyboard_tier_routes", {})
+        tier_cfg = sb_routes.get(str(tier), {})
+        models = set(str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip())
+        cfg_raw = str(tier_cfg.get("raw_model") or "").strip().lower()
+        cfg_model = str(tier_cfg.get("model") or "").strip().lower()
+        if cfg_raw:
+            models.add(cfg_raw)
+        if cfg_model:
+            models.add(cfg_model)
+        if models:
+            return models
+    except Exception:
+        pass
+    if tier == 400:
+        return {"veo3.1-fast"}
+    elif tier == 800:
+        return {"kling-v3", "kling-video"}
+    return set()
+
+
+def _storyboard_accepted_providers(tier: int) -> set[str]:
+    if tier == 400:
+        return {"shopai", "shopaikey", "shopaikey_video"}
+    elif tier == 800:
+        return {"key4u", "k4u", "key4u_video"}
+    return set()
+
 def _provider_order(job: dict | None = None) -> list[str]:
     job = dict(job or {})
     asset_pack = _json_loads(job.get("asset_pack"), {})
@@ -978,12 +1009,15 @@ def _provider_order(job: dict | None = None) -> list[str]:
                 },
             )
         if tier_val == 400:
-            if selected_provider in {"key4u", "k4u", "key4u_video"} or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            prov_mismatch = bool(selected_provider and selected_provider.lower() not in _storyboard_accepted_providers(400))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(400))
+            if prov_mismatch or model_mismatch:
+                offender = (selected_provider if prov_mismatch else "") or model_req
                 raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
+                    f"storyboard_cross_tier_override:400:{offender}",
                     diagnostics={
                         "ok": False,
-                        "error": f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
+                        "error": f"storyboard_cross_tier_override:400:{offender}",
                         "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,
@@ -993,12 +1027,15 @@ def _provider_order(job: dict | None = None) -> list[str]:
                 )
             return ["shopaikey_video"]
         elif tier_val == 800:
-            if selected_provider in {"shopai", "shopaikey", "shopaikey_video"} or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+            prov_mismatch = bool(selected_provider and selected_provider.lower() not in _storyboard_accepted_providers(800))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(800))
+            if prov_mismatch or model_mismatch:
+                offender = (selected_provider if prov_mismatch else "") or model_req
                 raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
+                    f"storyboard_cross_tier_override:800:{offender}",
                     diagnostics={
                         "ok": False,
-                        "error": f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
+                        "error": f"storyboard_cross_tier_override:800:{offender}",
                         "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,
@@ -4059,15 +4096,18 @@ def _resolve_storyboard_i2v_model(
             },
         )
     if tier_val == 400:
-        if target_provider == "key4u_video" or candidate in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+        prov_mismatch = bool(target_provider and target_provider.lower() not in _storyboard_accepted_providers(400))
+        model_mismatch = bool(candidate and candidate.lower() not in _storyboard_accepted_runtime_models(400))
+        if prov_mismatch or model_mismatch:
+            offender = (target_provider if prov_mismatch else "") or candidate
             raise RealVideoRenderError(
-                f"storyboard_cross_tier_override:400:{target_provider or candidate}",
+                f"storyboard_cross_tier_override:400:{offender}",
                 diagnostics={
                     "ok": False,
                     "scene_index": scene_index,
                     "scene_id": scene_index,
                     "request_job_id": request_job_id,
-                    "error": f"storyboard_cross_tier_override:400:{target_provider or candidate}",
+                    "error": f"storyboard_cross_tier_override:400:{offender}",
                     "blocker": "storyboard_cross_tier_override",
                     "allowed_tiers": [400, 800],
                     "provider_attempted": False,
@@ -4078,15 +4118,18 @@ def _resolve_storyboard_i2v_model(
         target_provider = "shopaikey_video"
         return "veo3.1-fast"
     elif tier_val == 800:
-        if target_provider == "shopaikey_video" or candidate in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+        prov_mismatch = bool(target_provider and target_provider.lower() not in _storyboard_accepted_providers(800))
+        model_mismatch = bool(candidate and candidate.lower() not in _storyboard_accepted_runtime_models(800))
+        if prov_mismatch or model_mismatch:
+            offender = (target_provider if prov_mismatch else "") or candidate
             raise RealVideoRenderError(
-                f"storyboard_cross_tier_override:800:{target_provider or candidate}",
+                f"storyboard_cross_tier_override:800:{offender}",
                 diagnostics={
                     "ok": False,
                     "scene_index": scene_index,
                     "scene_id": scene_index,
                     "request_job_id": request_job_id,
-                    "error": f"storyboard_cross_tier_override:800:{target_provider or candidate}",
+                    "error": f"storyboard_cross_tier_override:800:{offender}",
                     "blocker": "storyboard_cross_tier_override",
                     "allowed_tiers": [400, 800],
                     "provider_attempted": False,
@@ -6449,15 +6492,18 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 },
             )
         if tier_val == 400:
-            if storyboard_provider == "key4u_video" or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+            prov_mismatch = bool(storyboard_provider and storyboard_provider.lower() not in _storyboard_accepted_providers(400))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(400))
+            if prov_mismatch or model_mismatch:
+                offender = (storyboard_provider if prov_mismatch else "") or model_req
                 raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
+                    f"storyboard_cross_tier_override:400:{offender}",
                     diagnostics={
                         "ok": False,
                         "scene_index": scene_index,
                         "scene_id": scene_index,
                         "request_job_id": request_job_id,
-                        "error": f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
+                        "error": f"storyboard_cross_tier_override:400:{offender}",
                         "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,
@@ -6467,15 +6513,18 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
                 )
             storyboard_provider = "shopaikey_video"
         elif tier_val == 800:
-            if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"} or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+            prov_mismatch = bool(storyboard_provider and storyboard_provider.lower() not in _storyboard_accepted_providers(800))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(800))
+            if prov_mismatch or model_mismatch:
+                offender = (storyboard_provider if prov_mismatch else "") or model_req
                 raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
+                    f"storyboard_cross_tier_override:800:{offender}",
                     diagnostics={
                         "ok": False,
                         "scene_index": scene_index,
                         "scene_id": scene_index,
                         "request_job_id": request_job_id,
-                        "error": f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
+                        "error": f"storyboard_cross_tier_override:800:{offender}",
                         "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,

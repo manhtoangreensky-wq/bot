@@ -539,7 +539,10 @@
         "subtotal_xu": 742,
         "discount_xu": 74,
         "total_xu": 668
-      }
+      },
+      "accepted_runtime_models": [
+        "veo3.1-fast"
+      ]
     },
     "800": {
       "product": "storyboard",
@@ -557,7 +560,10 @@
         "subtotal_xu": 3428,
         "discount_xu": 342,
         "total_xu": 3086
-      }
+      },
+      "accepted_runtime_models": [
+        "kling-v3"
+      ]
     }
   }
 }

@@ -107580,13 +107580,19 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         if quality_tier > 0 and quality_tier not in {400, 800}:
             raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
         if quality_tier == 400:
-            if raw_provider in {"key4u", "k4u", "key4u_video"} or candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                raise ValueError(f"storyboard_cross_tier_override:400:{raw_provider or candidate_model}")
+            prov_mismatch = bool(raw_provider and raw_provider not in {"shopai", "shopaikey", "shopaikey_video"})
+            model_mismatch = bool(candidate_model and candidate_model not in {"veo3.1-fast"})
+            if prov_mismatch or model_mismatch:
+                offender = (raw_provider if prov_mismatch else "") or candidate_model
+                raise ValueError(f"storyboard_cross_tier_override:400:{offender}")
             storyboard_provider = "shopaikey_video"
             candidate_model = "veo3.1-fast"
         elif quality_tier == 800:
-            if raw_provider in {"shopai", "shopaikey", "shopaikey_video"} or candidate_model in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
-                raise ValueError(f"storyboard_cross_tier_override:800:{raw_provider or candidate_model}")
+            prov_mismatch = bool(raw_provider and raw_provider not in {"key4u", "k4u", "key4u_video"})
+            model_mismatch = bool(candidate_model and candidate_model not in {"kling-v3", "kling-video"})
+            if prov_mismatch or model_mismatch:
+                offender = (raw_provider if prov_mismatch else "") or candidate_model
+                raise ValueError(f"storyboard_cross_tier_override:800:{offender}")
             storyboard_provider = "key4u_video"
             candidate_model = "kling-v3"
         else:

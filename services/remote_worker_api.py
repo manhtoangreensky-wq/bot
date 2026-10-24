@@ -1691,40 +1691,56 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         product_type in {"storyboard_prompt", "storyboard_to_video"}
         or str(hydrated_job.get("engine_adapter") or persisted_result.get("engine_adapter") or asset_pack.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
     )
-    explicit_job_tier = (
-        hydrated_job.get("selected_quality_tier")
-        or hydrated_job.get("routing_quality_tier")
-        or hydrated_job.get("tier_id")
-        or hydrated_job.get("quality_tier")
-        or persisted_result.get("selected_quality_tier")
-        or persisted_result.get("routing_quality_tier")
-        or persisted_result.get("tier_id")
-        or persisted_result.get("quality_tier")
-        or asset_pack.get("selected_quality_tier")
-        or asset_pack.get("routing_quality_tier")
-        or asset_pack.get("tier_id")
-        or asset_pack.get("quality_tier")
-        or invoice.get("selected_quality_tier")
-        or invoice.get("routing_quality_tier")
-        or invoice.get("tier_id")
-        or invoice.get("quality_tier")
-        or project.get("tier_id")
-    )
+    def _extract_positive_int_tier(val: Any) -> int:
+        if val in (None, "", False):
+            return 0
+        try:
+            parsed = int(str(val).strip())
+            return parsed if parsed > 0 else 0
+        except (ValueError, TypeError):
+            return 0
+
+    candidate_tier_sources = [
+        hydrated_job.get("selected_quality_tier"),
+        hydrated_job.get("routing_quality_tier"),
+        hydrated_job.get("tier_id"),
+        hydrated_job.get("quality_tier"),
+        persisted_result.get("selected_quality_tier"),
+        persisted_result.get("routing_quality_tier"),
+        persisted_result.get("tier_id"),
+        persisted_result.get("quality_tier"),
+        asset_pack.get("selected_quality_tier"),
+        asset_pack.get("routing_quality_tier"),
+        asset_pack.get("tier_id"),
+        asset_pack.get("quality_tier"),
+        invoice.get("selected_quality_tier"),
+        invoice.get("routing_quality_tier"),
+        invoice.get("tier_id"),
+        invoice.get("quality_tier"),
+        project.get("tier_id"),
+    ]
+    resolved_positive_tier = 0
+    for cand in candidate_tier_sources:
+        pos_tier = _extract_positive_int_tier(cand)
+        if pos_tier > 0:
+            resolved_positive_tier = pos_tier
+            break
+
     if is_storyboard_route:
-        if explicit_job_tier not in (None, ""):
-            quality_tier = _safe_int(explicit_job_tier, 0)
+        if resolved_positive_tier > 0:
+            quality_tier = resolved_positive_tier
         else:
-            proj_tier = _safe_int(project.get("quality_tier"), 0)
+            proj_tier = _extract_positive_int_tier(project.get("quality_tier"))
             if proj_tier in {400, 800}:
                 quality_tier = proj_tier
             else:
                 quality_tier = 0
     else:
-        quality_source = explicit_job_tier or project.get("quality_tier")
-        if quality_source not in (None, ""):
-            quality_tier = _safe_int(quality_source, 0)
+        if resolved_positive_tier > 0:
+            quality_tier = resolved_positive_tier
         else:
-            quality_tier = 200
+            proj_tier = _extract_positive_int_tier(project.get("quality_tier"))
+            quality_tier = proj_tier if proj_tier > 0 else 200
     scene_count = max(1, _safe_int(project.get("scene_count") or hydrated_job.get("scene_count") or len(scene_cards) or 1, 1))
     ratio = str(project.get("ratio") or hydrated_job.get("aspect_ratio") or hydrated_job.get("ratio") or "9:16")
     render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or hydrated_job.get("render_mode") or RENDER_MODE_REAL).strip().lower().replace("-", "_")
@@ -1740,10 +1756,36 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or ""
     )[:8000]
     cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
-    provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or hydrated_job.get("provider_order") or "shopaikey,key4u"
-    source = str(asset_pack.get("source") or invoice.get("source") or hydrated_job.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
     # product_type resolved above
-    is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"}
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or is_storyboard_route
+    )
+    if is_storyboard:
+        if quality_tier == 400:
+            default_storyboard_provider = "shopaikey_video"
+            default_storyboard_model = "veo3.1-fast"
+            default_storyboard_provider_order = "shopaikey_video"
+        elif quality_tier == 800:
+            default_storyboard_provider = "key4u_video"
+            default_storyboard_model = "kling-v3"
+            default_storyboard_provider_order = "key4u_video"
+        else:
+            default_storyboard_provider = "key4u_video"
+            default_storyboard_model = "kling-v3"
+            default_storyboard_provider_order = "key4u_video"
+    else:
+        default_storyboard_provider = ""
+        default_storyboard_model = ""
+        default_storyboard_provider_order = "shopaikey,key4u"
+
+    provider_order = (
+        asset_pack.get("provider_order")
+        or invoice.get("provider_order")
+        or hydrated_job.get("provider_order")
+        or default_storyboard_provider_order
+    )
+    source = str(asset_pack.get("source") or invoice.get("source") or hydrated_job.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
     engine_adapter = str(
         hydrated_job.get("engine_adapter")
         or asset_pack.get("engine_adapter")
@@ -1770,7 +1812,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or asset_pack.get("selected_provider")
         or invoice.get("selected_provider")
         or persisted_result.get("selected_provider")
-        or ("key4u_video" if is_storyboard else "")
+        or default_storyboard_provider
     )
     selected_model = str(
         hydrated_job.get("selected_model")
@@ -1779,7 +1821,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or hydrated_job.get("model")
         or persisted_result.get("selected_model")
         or persisted_result.get("model")
-        or ("kling-v3" if is_storyboard else "")
+        or default_storyboard_model
     )
     model = str(
         hydrated_job.get("model")
@@ -1788,7 +1830,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or hydrated_job.get("selected_model")
         or persisted_result.get("model")
         or persisted_result.get("selected_model")
-        or ("kling-v3" if is_storyboard else "")
+        or default_storyboard_model
     )
     pinned_wire_model = str(
         hydrated_job.get("pinned_wire_model")
@@ -1832,6 +1874,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "engine_adapter": engine_adapter,
         "orchestration_mode": orchestration_mode,
         "required_capability": required_capability,
+        "provider": selected_provider,
         "selected_provider": selected_provider,
         "selected_model": selected_model,
         "model": model,
@@ -1845,6 +1888,8 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         "addon_plan": addon_plan,
         "quality_tier": quality_tier,
         "package_xu": quality_tier,
+        "tier_id": quality_tier,
+        "tier": quality_tier,
         "scene_count": scene_count,
         "scene_duration_seconds": scene_duration_seconds,
         "duration_seconds": expected_duration_seconds,
@@ -1864,6 +1909,8 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             "mime": "video/mp4",
             "aspect_ratio": ratio,
             "quality_tier": quality_tier,
+            "tier_id": quality_tier,
+            "tier": quality_tier,
             "scene_count": scene_count,
             "final_video_bytes_gt_zero": True,
         },
@@ -2460,6 +2507,20 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
             ):
                 if key not in model_context and source_dict.get(key) not in (None, "", [], {}):
                     model_context[key] = source_dict.get(key)
+        if is_storyboard:
+            if not model_context.get("selected_provider"):
+                model_context["selected_provider"] = selected_provider
+            if not model_context.get("selected_model"):
+                model_context["selected_model"] = selected_model
+            if not model_context.get("model"):
+                model_context["model"] = model
+            if not model_context.get("provider"):
+                model_context["provider"] = selected_provider
+            if not model_context.get("product_video_tier"):
+                model_context["product_video_tier"] = str(quality_tier)
+            model_context["provider_order"] = [selected_provider] if selected_provider else (["shopaikey_video"] if quality_tier == 400 else ["key4u_video"])
+            model_context["provider_chain"] = model_context["provider_order"]
+            model_context["effective_provider_chain"] = model_context["provider_order"]
         if not model_context.get("selected_model"):
             model_resolution = resolve_product_video_model(
                 tier=invoice.get("tier")

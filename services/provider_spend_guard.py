@@ -2663,14 +2663,24 @@ def resolve_canonical_cost_micro_usd(
 
             cfg_model = str(tier_cfg.get("model") or "").strip().lower()
             cfg_raw_model = str(tier_cfg.get("raw_model") or "").strip().lower()
-            allowed_models = {cfg_model, cfg_raw_model}
-            if tier_num == 400:
-                allowed_models.update({"veo3.1-fast", "veo-3.1-fast"})
-            elif tier_num == 800:
-                allowed_models.update({"kling-video", "kling-v3", "kling-3.0-turbo"})
+            accepted_models = [str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip()]
+            allowed_models = set(accepted_models)
+            if cfg_model:
+                allowed_models.add(cfg_model)
+            if cfg_raw_model:
+                allowed_models.add(cfg_raw_model)
+            if not allowed_models:
+                if tier_num == 400:
+                    allowed_models = {"veo3.1-fast"}
+                elif tier_num == 800:
+                    allowed_models = {"kling-v3", "kling-video"}
 
-            if target_model not in allowed_models and raw_model not in allowed_models:
-                return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{raw_model}"
+            checked_model = raw_model or target_model
+            norm_raw_model = str(raw_model or "").strip().lower()
+            if norm_raw_model and norm_raw_model not in allowed_models:
+                return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
+            if target_model and target_model not in allowed_models:
+                return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
 
             cfg_seconds = int(tier_cfg.get("seconds_per_scene") or 8)
             if duration_param and int(float(duration_param)) != cfg_seconds:

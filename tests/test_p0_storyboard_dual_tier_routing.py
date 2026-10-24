@@ -24,6 +24,7 @@ Verifies the Owner-approved dual-tier routing architecture for Storyboard (Direc
 
 from __future__ import annotations
 
+import json
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -66,6 +67,7 @@ import pytest
 
 import bot
 from services import provider_spend_guard as psg
+from services import remote_worker_api
 from tests.test_p0_paid_spend_guard_and_bot_origin import (
     _create_owner_live_authorization_test_fixture,
     create_test_mint_authority,
@@ -1422,3 +1424,303 @@ class TestStoryboardDualTierRenderProgression:
                 req = call[0][0]
                 model = getattr(req, "model", None) or (getattr(req, "metadata", {}) or {}).get("model")
                 assert model == "kling-v3"
+
+
+
+class TestExactModelContractFailClosed:
+    """Canonical Storyboard Direction A exact model contract fail-closed tests."""
+
+    def test_tier400_exact_model_contract_allow_and_blocks(self):
+        job = {"product_type": "storyboard_to_video", "quality_tier": 400}
+
+        # TIER400_MODEL_VEO31_FAST=ALLOW
+        job_veo = dict(job, selected_model="veo3.1-fast")
+        assert _resolve_storyboard_i2v_model(job_veo, provider="shopaikey_video") == "veo3.1-fast"
+
+        # TIER400_MODEL_KLING_V3=BLOCK
+        job_kling = dict(job, selected_model="kling-v3")
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _resolve_storyboard_i2v_model(job_kling, provider="shopaikey_video")
+        assert "storyboard_cross_tier_override:400:kling-v3" in str(exc_info.value)
+
+        # TIER400_MODEL_KLING_3_0_TURBO=BLOCK
+        job_kling_turbo = dict(job, selected_model="kling-3.0-turbo")
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _resolve_storyboard_i2v_model(job_kling_turbo, provider="shopaikey_video")
+        assert "storyboard_cross_tier_override:400:kling-3.0-turbo" in str(exc_info.value)
+
+        # TIER400_MODEL_KEY4U_VEO_UNDERSCORE=BLOCK
+        job_veo_underscore = dict(job, selected_model="veo_3_1-fast")
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _resolve_storyboard_i2v_model(job_veo_underscore, provider="shopaikey_video")
+        assert "storyboard_cross_tier_override:400:veo_3_1-fast" in str(exc_info.value)
+
+    def test_tier800_exact_model_contract_allow_and_blocks(self):
+        job = {"product_type": "storyboard_to_video", "quality_tier": 800}
+
+        # TIER800_MODEL_KLING_V3=ALLOW
+        job_kling = dict(job, selected_model="kling-v3")
+        assert _resolve_storyboard_i2v_model(job_kling, provider="key4u_video") == "kling-v3"
+
+        # TIER800_MODEL_VEO31_FAST=BLOCK
+        job_veo = dict(job, selected_model="veo3.1-fast")
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _resolve_storyboard_i2v_model(job_veo, provider="key4u_video")
+        assert "storyboard_cross_tier_override:800:veo3.1-fast" in str(exc_info.value)
+
+        # TIER800_MODEL_KLING_3_0_TURBO=BLOCK (No silent coercion to kling-v3)
+        job_kling_turbo = dict(job, selected_model="kling-3.0-turbo")
+        with pytest.raises(RealVideoRenderError) as exc_info:
+            _resolve_storyboard_i2v_model(job_kling_turbo, provider="key4u_video")
+        assert "storyboard_cross_tier_override:800:kling-3.0-turbo" in str(exc_info.value)
+
+    def test_spend_guard_exact_model_cost_resolution(self):
+        auth_shopai = psg.resolve_paid_transport_authority("Product Video", "shopaikey_video", "image_to_video")
+        auth_key4u = psg.resolve_paid_transport_authority("Product Video", "key4u_video", "image_to_video")
+
+        def _cost(prov, mod, dur, tier):
+            auth = auth_shopai if "shopai" in prov else auth_key4u
+            ctx = psg.SpendGuardContext(
+                job_id="j", request_id="r", trace_id="t", chat_id="c", user_id="u",
+                scene_index=1, product_family="Product Video", provider=prov,
+                operation="image_to_video", model=mod, entrypoint="bot",
+                user_flow="product_video_bot", bot_originated_action=True,
+                is_paid_live_attempt=False, owner_receipt="rcpt",
+                metadata={"quality_tier": tier, "product_type": "storyboard_prompt", "duration_seconds": dur},
+            )
+            cost, ok, reason = psg.resolve_canonical_cost_micro_usd(ctx, auth)
+            return cost if ok else 0
+
+        # Tier 400: Veo exact allow; others 0 (blocked)
+        assert _cost("shopaikey_video", "veo3.1-fast", 8, 400) == 700000
+        assert _cost("shopaikey_video", "kling-v3", 8, 400) == 0
+        assert _cost("shopaikey_video", "kling-3.0-turbo", 8, 400) == 0
+        assert _cost("shopaikey_video", "veo_3_1-fast", 8, 400) == 0
+
+        # Tier 800: Kling exact allow; others 0 (blocked)
+        assert _cost("key4u_video", "kling-v3", 8, 800) == 12240098
+        assert _cost("key4u_video", "kling-video", 8, 800) == 12240098
+        assert _cost("key4u_video", "veo3.1-fast", 8, 800) == 0
+        assert _cost("key4u_video", "kling-3.0-turbo", 8, 800) == 0
+
+    def test_bot_invoice_preparation_cross_tier_override_fail_closed(self):
+        session_bad_400 = {
+            "draft": {
+                "b14_quality_xu": 400,
+                "b14_selected_provider": "shopaikey_video",
+                "b14_selected_model": "kling-v3",
+                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+            }
+        }
+        with pytest.raises(ValueError) as exc:
+            bot.video_b14_prepare_project_for_invoice(12345, session_bad_400)
+        assert "storyboard_cross_tier_override:400" in str(exc.value)
+
+        session_bad_800 = {
+            "draft": {
+                "b14_quality_xu": 800,
+                "b14_selected_provider": "key4u_video",
+                "b14_selected_model": "kling-3.0-turbo",
+                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+            }
+        }
+        with pytest.raises(ValueError) as exc:
+            bot.video_b14_prepare_project_for_invoice(12345, session_bad_800)
+        assert "storyboard_cross_tier_override:800" in str(exc.value)
+
+    def test_spend_guard_production_reservations(self, tmp_path):
+        db_path = str(tmp_path / "spend_guard_res.db")
+        env = {
+            "SPEND_GUARD_DB_PATH": db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "UNIT_TEST_ENV": "true",
+        }
+        psg.init_spend_guard_db(db_path=db_path, env=env)
+
+        # Create valid authorizations for test
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_prod_sb",
+            product_family="Product Video",
+            provider="key4u_video",
+            tier="kling-v3",
+            user_id="user_sb",
+            job_id="job_prod_sb",
+            request_id="req_prod_sb",
+            operation="image_to_video",
+            allowed_scene_slots="1",
+            expected_max_provider_spend_micro_usd=24480196,
+            db_path=db_path,
+            env=env,
+        )
+
+        conf_sb = psg.create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_sb", user_id="user_sb", job_id="job_prod_sb",
+                request_id="req_prod_sb", purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_prod_sb", expected_max_provider_spend_usd=Decimal("24.480196"),
+            ),
+            chat_id="chat_sb", user_id="user_sb", job_id="job_prod_sb", request_id="req_prod_sb",
+            operation="image_to_video", scene_index=1, purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_prod_sb", expected_max_cost_usd=Decimal("24.480196"),
+            db_path=db_path, env=env,
+        )
+
+        # 1. TIER800_KLING_V3_RESERVATION=ALLOW_TEST_SAFE
+        ctx_800_kling = psg.SpendGuardContext(
+            job_id="job_prod_sb", request_id="req_prod_sb", trace_id="tr_800_k",
+            chat_id="chat_sb", user_id="user_sb", scene_index=1, product_family="Product Video",
+            provider="key4u_video", operation="image_to_video", model="kling-v3",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_sb, owner_receipt="rcpt_prod_sb",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "duration_seconds": 8},
+        )
+        res_800_kling = psg.reserve_provider_spend(ctx_800_kling, db_path=db_path, env=env)
+        assert res_800_kling.allowed is True
+        assert res_800_kling.cost_micro_usd == 12240098
+
+        # 2. TIER800_KLING_3_0_TURBO_RESERVATION=BLOCK
+        ctx_800_turbo = psg.SpendGuardContext(
+            job_id="job_prod_sb", request_id="req_prod_sb", trace_id="tr_800_t",
+            chat_id="chat_sb", user_id="user_sb", scene_index=1, product_family="Product Video",
+            provider="key4u_video", operation="image_to_video", model="kling-3.0-turbo",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_sb, owner_receipt="rcpt_prod_sb",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "duration_seconds": 8},
+        )
+        res_800_turbo = psg.reserve_provider_spend(ctx_800_turbo, db_path=db_path, env=env)
+        assert res_800_turbo.allowed is False
+        assert res_800_turbo.cost_micro_usd == 0
+
+        # 3. TIER800_VEO_RESERVATION=BLOCK
+        ctx_800_veo = psg.SpendGuardContext(
+            job_id="job_prod_sb", request_id="req_prod_sb", trace_id="tr_800_v",
+            chat_id="chat_sb", user_id="user_sb", scene_index=1, product_family="Product Video",
+            provider="key4u_video", operation="image_to_video", model="veo3.1-fast",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_sb, owner_receipt="rcpt_prod_sb",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "duration_seconds": 8},
+        )
+        res_800_veo = psg.reserve_provider_spend(ctx_800_veo, db_path=db_path, env=env)
+        assert res_800_veo.allowed is False
+        assert res_800_veo.cost_micro_usd == 0
+
+        # Now for Tier 400
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_prod_400",
+            product_family="Product Video",
+            provider="shopaikey_video",
+            tier="veo3.1-fast",
+            user_id="user_400",
+            job_id="job_prod_400",
+            request_id="req_prod_400",
+            operation="image_to_video",
+            allowed_scene_slots="1",
+            expected_max_provider_spend_micro_usd=1400000,
+            db_path=db_path,
+            env=env,
+        )
+        conf_400 = psg.create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400", user_id="user_400", job_id="job_prod_400",
+                request_id="req_prod_400", purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_prod_400", expected_max_provider_spend_usd=Decimal("1.40"),
+            ),
+            chat_id="chat_400", user_id="user_400", job_id="job_prod_400", request_id="req_prod_400",
+            operation="image_to_video", scene_index=1, purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_prod_400", expected_max_cost_usd=Decimal("1.40"),
+            db_path=db_path, env=env,
+        )
+
+        # 4. TIER400_VEO31_FAST_RESERVATION=ALLOW_TEST_SAFE
+        ctx_400_veo = psg.SpendGuardContext(
+            job_id="job_prod_400", request_id="req_prod_400", trace_id="tr_400_v",
+            chat_id="chat_400", user_id="user_400", scene_index=1, product_family="Product Video",
+            provider="shopaikey_video", operation="image_to_video", model="veo3.1-fast",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_400, owner_receipt="rcpt_prod_400",
+            metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "duration_seconds": 8},
+        )
+        res_400_veo = psg.reserve_provider_spend(ctx_400_veo, db_path=db_path, env=env)
+        assert res_400_veo.allowed is True
+        assert res_400_veo.cost_micro_usd == 700000
+
+        # 5. TIER400_KLING_RESERVATION=BLOCK
+        ctx_400_kling = psg.SpendGuardContext(
+            job_id="job_prod_400", request_id="req_prod_400", trace_id="tr_400_k",
+            chat_id="chat_400", user_id="user_400", scene_index=1, product_family="Product Video",
+            provider="shopaikey_video", operation="image_to_video", model="kling-v3",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_400, owner_receipt="rcpt_prod_400",
+            metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "duration_seconds": 8},
+        )
+        res_400_kling = psg.reserve_provider_spend(ctx_400_kling, db_path=db_path, env=env)
+        assert res_400_kling.allowed is False
+        assert res_400_kling.cost_micro_usd == 0
+
+
+class TestWorkerPayloadTierLineageAndDirectionA:
+    """Proves build_worker_job_payload tier lineage, unmasking, and Direction A defaults."""
+
+    def test_worker_payload_storyboard_tier400_preserved(self):
+        job = {
+            "product_type": "storyboard_to_video",
+            "quality_tier": 400,
+            "project": {"product_type": "storyboard_to_video"},
+        }
+        payload = remote_worker_api.build_worker_job_payload(job)
+        assert payload.get("quality_tier") == 400
+        assert payload.get("tier_id") == 400
+        assert payload.get("selected_provider") == "shopaikey_video"
+        assert payload.get("selected_model") == "veo3.1-fast"
+
+    def test_worker_payload_storyboard_tier800_preserved(self):
+        job = {
+            "product_type": "storyboard_to_video",
+            "quality_tier": 800,
+            "project": {"product_type": "storyboard_to_video"},
+        }
+        payload = remote_worker_api.build_worker_job_payload(job)
+        assert payload.get("quality_tier") == 800
+        assert payload.get("tier_id") == 800
+        assert payload.get("selected_provider") == "key4u_video"
+        assert payload.get("selected_model") == "kling-v3"
+
+    def test_worker_payload_storyboard_unsupported_tier999_preserved(self):
+        job = {
+            "product_type": "storyboard_to_video",
+            "quality_tier": 999,
+            "project": {"product_type": "storyboard_to_video"},
+        }
+        payload = remote_worker_api.build_worker_job_payload(job)
+        assert payload.get("quality_tier") == 999
+        assert payload.get("tier_id") == 999
+
+    def test_worker_payload_quality_tier_common_does_not_mask_numeric_tier800(self):
+        job = {
+            "product_type": "storyboard_to_video",
+            "quality_tier": "common",
+            "project": {
+                "product_type": "storyboard_to_video",
+                "asset_pack_json": json.dumps({"tier_id": 800}),
+            },
+        }
+        payload = remote_worker_api.build_worker_job_payload(job)
+        assert payload.get("quality_tier") == 800
+        assert payload.get("tier_id") == 800
+        assert payload.get("selected_provider") == "key4u_video"
+        assert payload.get("selected_model") == "kling-v3"
+
+    def test_worker_payload_quality_tier_common_does_not_mask_numeric_tier999(self):
+        job = {
+            "product_type": "storyboard_to_video",
+            "quality_tier": "common",
+            "project": {
+                "product_type": "storyboard_to_video",
+                "invoice_json": json.dumps({"tier_id": 999}),
+            },
+        }
+        payload = remote_worker_api.build_worker_job_payload(job)
+        assert payload.get("quality_tier") == 999
+        assert payload.get("tier_id") == 999
