@@ -2646,9 +2646,9 @@ def resolve_canonical_cost_micro_usd(
 
             # If tier not explicitly given, infer from canonical provider / model pair
             if tier_num == 0:
-                if prov_key == "shopaikey" and (target_model in {"veo3.1-fast", "veo-3.1-fast"} or raw_model in {"veo3.1-fast", "veo-3.1-fast"}):
+                if prov_key == "shopaikey" and (raw_model in {"veo3.1-fast", "veo-3.1-fast"} or target_model in {"veo3.1-fast", "veo-3.1-fast"}):
                     tier_num = 400
-                elif prov_key == "key4u" and (target_model in {"kling-video", "kling-v3", "kling-3.0-turbo"} or raw_model in {"kling-video", "kling-v3", "kling-3.0-turbo"}):
+                elif prov_key == "key4u" and (raw_model in {"kling-v3"} or target_model in {"kling-v3"}):
                     tier_num = 800
                 else:
                     return 0, False, f"ambiguous_storyboard_route_pricing:{prov_key}:{raw_model}"
@@ -2664,23 +2664,21 @@ def resolve_canonical_cost_micro_usd(
             cfg_model = str(tier_cfg.get("model") or "").strip().lower()
             cfg_raw_model = str(tier_cfg.get("raw_model") or "").strip().lower()
             accepted_models = [str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip()]
-            allowed_models = set(accepted_models)
-            if cfg_model:
-                allowed_models.add(cfg_model)
-            if cfg_raw_model:
-                allowed_models.add(cfg_raw_model)
-            if not allowed_models:
-                if tier_num == 400:
-                    allowed_models = {"veo3.1-fast"}
-                elif tier_num == 800:
-                    allowed_models = {"kling-v3", "kling-video"}
+            if accepted_models:
+                allowed_runtime_models = set(accepted_models)
+            elif cfg_raw_model:
+                allowed_runtime_models = {cfg_raw_model}
+            else:
+                allowed_runtime_models = {"veo3.1-fast"} if tier_num == 400 else {"kling-v3"}
 
             checked_model = raw_model or target_model
             norm_raw_model = str(raw_model or "").strip().lower()
-            if norm_raw_model and norm_raw_model not in allowed_models:
-                return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
-            if target_model and target_model not in allowed_models:
-                return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
+            if norm_raw_model:
+                if norm_raw_model not in allowed_runtime_models:
+                    return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
+            else:
+                if target_model and target_model.lower() not in allowed_runtime_models:
+                    return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
 
             cfg_seconds = int(tier_cfg.get("seconds_per_scene") or 8)
             if duration_param and int(float(duration_param)) != cfg_seconds:

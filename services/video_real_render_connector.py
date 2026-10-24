@@ -920,21 +920,18 @@ def _storyboard_accepted_runtime_models(tier: int) -> set[str]:
         route_map = _load_product_video_route_map()
         sb_routes = route_map.get("storyboard_tier_routes", {})
         tier_cfg = sb_routes.get(str(tier), {})
-        models = set(str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip())
+        configured = [str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip()]
+        if configured:
+            return set(configured)
         cfg_raw = str(tier_cfg.get("raw_model") or "").strip().lower()
-        cfg_model = str(tier_cfg.get("model") or "").strip().lower()
         if cfg_raw:
-            models.add(cfg_raw)
-        if cfg_model:
-            models.add(cfg_model)
-        if models:
-            return models
+            return {cfg_raw}
     except Exception:
         pass
     if tier == 400:
         return {"veo3.1-fast"}
     elif tier == 800:
-        return {"kling-v3", "kling-video"}
+        return {"kling-v3"}
     return set()
 
 

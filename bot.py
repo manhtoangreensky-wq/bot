@@ -107589,7 +107589,7 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             candidate_model = "veo3.1-fast"
         elif quality_tier == 800:
             prov_mismatch = bool(raw_provider and raw_provider not in {"key4u", "k4u", "key4u_video"})
-            model_mismatch = bool(candidate_model and candidate_model not in {"kling-v3", "kling-video"})
+            model_mismatch = bool(candidate_model and candidate_model not in {"kling-v3"})
             if prov_mismatch or model_mismatch:
                 offender = (raw_provider if prov_mismatch else "") or candidate_model
                 raise ValueError(f"storyboard_cross_tier_override:800:{offender}")
