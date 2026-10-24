@@ -284367,6 +284367,214 @@ async def api_internal_subdub_voice_profiles(request: Request):
     )
 
 
+@fastapi_app.patch("/internal/v1/voice/profiles/{profile_id}")
+async def api_internal_voice_profile_rename(profile_id: int, request: Request):
+    """Rename a voice profile with owner isolation (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import rename_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="PATCH",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    display_name = str(payload.get("display_name") or payload.get("name") or "")
+    ok, err_code, status_code, result = rename_owner_voice_profile(clean_actor, profile_id, display_name)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/voice/profiles/{profile_id}/default")
+async def api_internal_voice_profile_set_default(profile_id: int, request: Request):
+    """Set a voice profile as default for the owner, enforcing readiness (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import set_default_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}/default"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result = set_default_owner_voice_profile(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.delete("/internal/v1/voice/profiles/{profile_id}")
+async def api_internal_voice_profile_delete(profile_id: int, request: Request):
+    """Soft delete a voice profile with owner isolation (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import soft_delete_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="DELETE",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result = soft_delete_owner_voice_profile(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/voice/profiles/{profile_id}/preview")
+async def api_internal_voice_profile_preview(profile_id: int, request: Request):
+    """Deliver preview audio safely without private path leakage (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import get_voice_profile_preview_delivery
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}/preview"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result, file_path, remote_url = get_voice_profile_preview_delivery(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+
+    mode = str(request.query_params.get("mode") or "").strip().lower()
+    download = str(request.query_params.get("download") or "").strip().lower() in ("1", "true", "yes")
+
+    if mode == "meta":
+        return JSONResponse(status_code=200, content=result)
+
+    filename = f"voice_preview_{profile_id}.mp3"
+    content_disposition_type = "attachment" if download else "inline"
+
+    if file_path:
+        return FileResponse(
+            file_path,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
+        )
+
+    if remote_url:
+        from services.voice_vault_service import fetch_remote_preview_audio
+        ok_fetch, audio_bytes, media_type = await fetch_remote_preview_audio(remote_url)
+        if not ok_fetch:
+            return JSONResponse(status_code=502, content={"ok": False, "error_code": "PREVIEW_FETCH_FAILED", "message": "Không thể tải tệp âm thanh"})
+        return Response(
+            content=audio_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
+        )
+
+    return JSONResponse(status_code=200, content=result)
+
+
 @fastapi_app.post("/internal/v1/voice/resolve")
 async def api_internal_subdub_voice_resolve(request: Request):
     """Canonical Bot Core SubDub voice resolution authority endpoint (BOT-SUBDUB-D3).
