@@ -147,6 +147,10 @@ jobs:
           python -m pip install "python-telegram-bot>=20.0" fastapi pydantic httpx numpy python-multipart
           python -m pytest -q tests/test_p0_product_video_r17_true_final_prelive_provider_free.py
 
+      - name: Product Video Storyboard Dual Tier Routing Acceptance Matrix
+        run: |
+          python -m pytest -q tests/test_p0_storyboard_dual_tier_routing.py
+
       - name: Current-main Stale Menu Root Callback Guards
         run: |
           python -m unittest \

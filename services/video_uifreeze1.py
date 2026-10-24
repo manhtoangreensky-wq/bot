@@ -158,6 +158,11 @@ def compatible_quality_tiers(
             "first_last_frame_video",
         }.intersection(capabilities):
             continue
+        if product == "storyboard_prompt" and tier_id == 800:
+            spec = dict(spec)
+            spec["unit_xu"] = 1714
+            spec["seconds"] = 8
+            spec["name"] = "Video Chuyển Động Chuyên Nghiệp Kling 8s"
         offers.append(spec)
     return offers
 

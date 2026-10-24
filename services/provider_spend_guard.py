@@ -2595,7 +2595,11 @@ def resolve_canonical_cost_micro_usd(
         target_model = PRODUCT_VIDEO_MODEL_ALIAS_MAP.get((prov_key, raw_model), raw_model)
 
         target_tier = str(
-            context.metadata.get("quality_key")
+            context.metadata.get("tier_id")
+            or context.metadata.get("quality_tier")
+            or context.metadata.get("selected_quality_tier")
+            or context.metadata.get("routing_quality_tier")
+            or context.metadata.get("quality_key")
             or context.metadata.get("tier")
             or context.metadata.get("b14_quality")
             or ""
@@ -2609,6 +2613,98 @@ def resolve_canonical_cost_micro_usd(
             or context.metadata.get("scene_duration_seconds")
             or (context.metadata.get("selected_request_defaults") or {}).get("duration")
         )
+
+        product_type = str(
+            context.metadata.get("product_type")
+            or context.metadata.get("product")
+            or context.metadata.get("flow_kind")
+            or context.metadata.get("engine_route")
+            or ""
+        ).strip().lower()
+        is_storyboard = bool(
+            "storyboard" in product_type
+            or context.metadata.get("is_storyboard")
+            or context.metadata.get("storyboard")
+            or str(context.user_flow or "").strip().lower() == "storyboard"
+        )
+        if is_storyboard:
+            # Storyboard-specific pricing authority dynamically derived from route map
+            sb_routes = route_map.get("storyboard_tier_routes", {})
+            norm_tier = str(target_tier or "").strip().lower()
+            tier_num = 0
+            try:
+                tier_num = int(norm_tier)
+            except (ValueError, TypeError):
+                if norm_tier in {"veo31_fast_8", "storyboard_veo31_fast_8s"}:
+                    tier_num = 400
+                elif norm_tier in {"motion_pro_audio_10", "storyboard_kling_pro_audio_8s"}:
+                    tier_num = 800
+
+            # Fail-closed for ANY positive numeric tier not in allowed {400, 800}
+            if tier_num > 0 and tier_num not in {400, 800}:
+                return 0, False, f"storyboard_unsupported_tier:{tier_num}"
+
+            # If tier not explicitly given, infer from canonical provider / model pair
+            if tier_num == 0:
+                if prov_key == "shopaikey" and (raw_model in {"veo3.1-fast", "veo-3.1-fast"} or target_model in {"veo3.1-fast", "veo-3.1-fast"}):
+                    tier_num = 400
+                elif prov_key == "key4u" and (raw_model in {"kling-v3"} or target_model in {"kling-v3"}):
+                    tier_num = 800
+                else:
+                    return 0, False, f"ambiguous_storyboard_route_pricing:{prov_key}:{raw_model}"
+
+            tier_cfg = sb_routes.get(str(tier_num))
+            if not tier_cfg:
+                return 0, False, f"storyboard_tier_config_missing:{tier_num}"
+
+            cfg_provider = str(tier_cfg.get("provider") or "").strip().lower()
+            if prov_key != cfg_provider:
+                return 0, False, f"storyboard_tier_provider_mismatch:{tier_num}:{prov_key}"
+
+            cfg_model = str(tier_cfg.get("model") or "").strip().lower()
+            cfg_raw_model = str(tier_cfg.get("raw_model") or "").strip().lower()
+            accepted_models = [str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip()]
+            if accepted_models:
+                allowed_runtime_models = set(accepted_models)
+            elif cfg_raw_model:
+                allowed_runtime_models = {cfg_raw_model}
+            else:
+                allowed_runtime_models = {"veo3.1-fast"} if tier_num == 400 else {"kling-v3"}
+
+            checked_model = raw_model or target_model
+            norm_raw_model = str(raw_model or "").strip().lower()
+            if norm_raw_model:
+                if norm_raw_model not in allowed_runtime_models:
+                    return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
+            else:
+                if target_model and target_model.lower() not in allowed_runtime_models:
+                    return 0, False, f"storyboard_tier_model_mismatch:{tier_num}:{checked_model}"
+
+            cfg_seconds = int(tier_cfg.get("seconds_per_scene") or 8)
+            if duration_param and int(float(duration_param)) != cfg_seconds:
+                return 0, False, f"storyboard_tier_duration_mismatch:{tier_num}:{duration_param}"
+
+            # Dynamically derive cost strictly from JSON config (NO hardcoded numbers in Python)
+            if "usd_per_scene" in tier_cfg:
+                unit_cost = Decimal(str(tier_cfg["usd_per_scene"]))
+            elif "usd_per_second" in tier_cfg:
+                unit_cost = Decimal(str(tier_cfg["usd_per_second"])) * Decimal(cfg_seconds)
+            else:
+                return 0, False, f"storyboard_tier_cost_basis_missing:{tier_num}"
+
+            scene_idx = 0
+            try:
+                scene_idx = int(context.scene_index or 0)
+            except Exception:
+                pass
+            if scene_idx >= 1:
+                total_usd = unit_cost
+            else:
+                scene_count = int(context.metadata.get("scene_count", 1) or 1)
+                total_usd = unit_cost * Decimal(max(1, scene_count))
+
+            source_id = f"config/product_video_price_route_map_20260827.json:storyboard:{cfg_provider}:{cfg_raw_model}:{cfg_seconds}s"
+            return to_micro_usd(total_usd), True, source_id
 
         filtered_tiers = tiers
         if target_tier:
@@ -3884,6 +3980,7 @@ def reserve_provider_spend(
                 rec_owner_receipt,
                 rec_exp_micro,
             ) = confirm_row
+
 
             # Section 7: Parent confirmation is NOT submit authority
             if str(c_record_type or "").upper() == RECORD_TYPE_PARENT_PLAN:

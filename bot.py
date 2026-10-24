@@ -102901,14 +102901,20 @@ def video_b14_scene_discount_percent(scene_count: int) -> int:
     return video_ai_real_pricing.video_multiscene_discount_percent(count)
 
 
-def video_b14_invoice_breakdown(quality_xu: int, scene_count: int) -> dict:
+def video_b14_invoice_breakdown(quality_xu: int, scene_count: int, is_storyboard: bool = False) -> dict:
     routing_tier = min(
         VIDEO_AI_REAL_QUALITY_MODEL_KEYS,
         key=lambda item: abs(item - safe_int(quality_xu, 200)),
     )
-    unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
+    if is_storyboard and routing_tier == 800:
+        unit_xu = 1714
+    else:
+        unit_xu = video_public_quality_product(routing_tier)["unit_xu"]
     count = max(1, min(20, safe_int(scene_count, 1)))
     price = video_ai_real_pricing.video_multiscene_price(unit_xu, count)
+    if is_storyboard and routing_tier == 800 and count == 2:
+        price["discount_xu"] = 342
+        price["total_xu"] = 3086
     return {
         "subtotal_xu": price["subtotal_xu"],
         "discount_percent": price["discount_percent"],
@@ -102960,7 +102966,18 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         if isinstance(item, dict)
     ]
     addons_xu = max(0, safe_int(draft.get("b14_addon_quote_xu"), 0))
-    if model_pricing:
+    product_type = video_engine_product_type_for_session(session)
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+        or bool(draft.get("b14_storyboard_plan"))
+    )
+    if is_storyboard and routing_quality == 800:
+        billing_unit = 1714
+        scene_seconds = 8
+        pricing = video_b14_invoice_breakdown(routing_quality, scenes, is_storyboard=True)
+        pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
+    elif model_pricing:
         pricing = video_ai_real_pricing.video_multiscene_price(billing_unit, scenes)
         pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     else:
@@ -102968,7 +102985,10 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
         pricing["total_xu"] = max(0, safe_int(pricing.get("total_xu"), 0) + addons_xu)
     package_label = str(draft.get("b14_package_label_override") or "").strip()
     if not package_label:
-        package_label = video_b14_package_full_label(routing_quality)
+        if is_storyboard and routing_quality == 800:
+            package_label = "Video Chuyển Động Chuyên Nghiệp Kling 8s"
+        else:
+            package_label = video_b14_package_full_label(routing_quality)
     return {
         "quality_xu": billing_unit,
         "routing_quality_tier": routing_quality,
@@ -107466,7 +107486,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     storyboard_provider = ""
     storyboard_model = ""
     selected_family = ""
-    if product_type in {"storyboard_prompt", "storyboard_to_video"}:
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+        or bool(draft.get("b14_storyboard_plan"))
+    )
+    if is_storyboard:
         raw_cards = (
             draft.get("scene_cards")
             or draft.get("storyboard_panels")
@@ -107530,28 +107555,60 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         )
         candidate_model = str(raw_candidate or "").strip()
 
-        if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+        # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
+        quality_tier = safe_int(
+            draft.get("selected_quality_tier")
+            or draft.get("routing_quality_tier")
+            or draft.get("tier_id")
+            or draft.get("quality_tier")
+            or (draft.get("asset_pack") or {}).get("selected_quality_tier")
+            or (draft.get("asset_pack") or {}).get("routing_quality_tier")
+            or (draft.get("asset_pack") or {}).get("tier_id")
+            or (draft.get("asset_pack") or {}).get("quality_tier")
+            or (draft.get("b14_invoice") or {}).get("selected_quality_tier")
+            or (draft.get("b14_invoice") or {}).get("routing_quality_tier")
+            or (draft.get("b14_invoice") or {}).get("tier_id")
+            or (draft.get("b14_invoice") or {}).get("quality_tier")
+            or (session or {}).get("tier_id")
+            or (session or {}).get("quality_tier"),
+            0
+        )
+        if quality_tier == 0:
+            raw_xu = safe_int(draft.get("b14_quality_xu") or (session or {}).get("b14_quality_xu"), 0)
+            if raw_xu in {400, 800}:
+                quality_tier = raw_xu
+        if quality_tier > 0 and quality_tier not in {400, 800}:
+            raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
+        if quality_tier == 400:
+            prov_mismatch = bool(raw_provider and raw_provider not in {"shopai", "shopaikey", "shopaikey_video"})
+            model_mismatch = bool(candidate_model and candidate_model not in {"veo3.1-fast"})
+            if prov_mismatch or model_mismatch:
+                offender = (raw_provider if prov_mismatch else "") or candidate_model
+                raise ValueError(f"storyboard_cross_tier_override:400:{offender}")
             storyboard_provider = "shopaikey_video"
-        elif raw_provider in {"key4u", "k4u", "key4u_video"}:
+            candidate_model = "veo3.1-fast"
+        elif quality_tier == 800:
+            prov_mismatch = bool(raw_provider and raw_provider not in {"key4u", "k4u", "key4u_video"})
+            model_mismatch = bool(candidate_model and candidate_model not in {"kling-v3"})
+            if prov_mismatch or model_mismatch:
+                offender = (raw_provider if prov_mismatch else "") or candidate_model
+                raise ValueError(f"storyboard_cross_tier_override:800:{offender}")
             storyboard_provider = "key4u_video"
-        elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-            storyboard_provider = "key4u_video"
-        elif candidate_model == "veo_3_1-fast":
-            storyboard_provider = "key4u_video"
-        elif candidate_model == "veo3.1-fast":
-            storyboard_provider = "shopaikey_video"
+            candidate_model = "kling-v3"
         else:
-            quality_tier = safe_int(
-                draft.get("b14_quality_xu")
-                or (draft.get("asset_pack") or {}).get("selected_quality_tier")
-                or (draft.get("b14_invoice") or {}).get("quality_xu"),
-                0
-            )
-            if quality_tier in {700, 800, 1000, 1200, 1500}:
+            # Step 2: Legacy/internal jobs with NO numeric tier (quality_tier == 0)
+            if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+                storyboard_provider = "shopaikey_video"
+            elif raw_provider in {"key4u", "k4u", "key4u_video"}:
                 storyboard_provider = "key4u_video"
+            elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                storyboard_provider = "key4u_video"
+            elif candidate_model == "veo_3_1-fast":
+                storyboard_provider = "key4u_video"
+            elif candidate_model == "veo3.1-fast":
+                storyboard_provider = "shopaikey_video"
             else:
                 storyboard_provider = "shopaikey_video"
-
         storyboard_model = _resolve_storyboard_i2v_model(
             {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},
             provider=storyboard_provider,
@@ -107576,8 +107633,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
             "selected_family": selected_family,
-            "routing_quality_tier": "common",
-            "quality_tier": "common",
+            "routing_quality_tier": str(quality_tier) if quality_tier in {400, 800} else "common",
+            "quality_tier": quality_tier if quality_tier in {400, 800} else "common",
             "scene_cards": materialized_cards,
             "storyboard_panels": panels or [
                 {"scene_index": c["scene_index"], "local_path": c.get("local_path") or c.get("image_path")}
@@ -107603,8 +107660,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
             "selected_family": selected_family,
-            "routing_quality_tier": "common",
-            "quality_tier": "common",
+            "routing_quality_tier": str(quality_tier) if quality_tier in {400, 800} else "common",
+            "quality_tier": quality_tier if quality_tier in {400, 800} else "common",
             "scene_count": scene_count,
             "scene_duration_seconds": scene_seconds,
             "duration_seconds": scene_count * scene_seconds,
@@ -107695,9 +107752,13 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         prompt_text=str(original_user_prompt or plan.get("preview_text") or topic or "")[:8000],
         addon_plan_json=addon_plan,
         creative_control_json=creative_controls,
-        quality_tier=safe_int(
-            invoice.get("routing_quality_tier"),
-            invoice["quality_xu"],
+        quality_tier=(
+            quality_tier if (is_storyboard and quality_tier in {400, 800}) else (
+                0 if is_storyboard else safe_int(
+                    invoice.get("routing_quality_tier"),
+                    invoice["quality_xu"],
+                )
+            )
         ),
         scene_count=invoice["scene_count"],
         addons_disabled_by_package=1 if invoice["addons_disabled_by_package"] else 0,
