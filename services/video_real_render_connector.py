@@ -914,6 +914,34 @@ def _contains_raw_prompt_marker(text: Any) -> bool:
     return any(marker in value for marker in RAW_PROMPT_FRAME_MARKERS)
 
 
+def _storyboard_accepted_runtime_models(tier: int) -> set[str]:
+    try:
+        from services.provider_spend_guard import _load_product_video_route_map
+        route_map = _load_product_video_route_map()
+        sb_routes = route_map.get("storyboard_tier_routes", {})
+        tier_cfg = sb_routes.get(str(tier), {})
+        configured = [str(m).strip().lower() for m in tier_cfg.get("accepted_runtime_models", []) if str(m).strip()]
+        if configured:
+            return set(configured)
+        cfg_raw = str(tier_cfg.get("raw_model") or "").strip().lower()
+        if cfg_raw:
+            return {cfg_raw}
+    except Exception:
+        pass
+    if tier == 400:
+        return {"veo3.1-fast"}
+    elif tier == 800:
+        return {"kling-v3"}
+    return set()
+
+
+def _storyboard_accepted_providers(tier: int) -> set[str]:
+    if tier == 400:
+        return {"shopai", "shopaikey", "shopaikey_video"}
+    elif tier == 800:
+        return {"key4u", "k4u", "key4u_video"}
+    return set()
+
 def _provider_order(job: dict | None = None) -> list[str]:
     job = dict(job or {})
     asset_pack = _json_loads(job.get("asset_pack"), {})
@@ -932,6 +960,23 @@ def _provider_order(job: dict | None = None) -> list[str]:
         or bool(job.get("storyboard"))
     )
     if is_storyboard:
+        # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
+        tier_val = 0
+        for src in (job, asset_pack, invoice):
+            if isinstance(src, dict):
+                for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
+                    t = src.get(k)
+                    if t is not None:
+                        try:
+                            iv = int(t)
+                            if iv > 0:
+                                tier_val = iv
+                                break
+                        except (ValueError, TypeError):
+                            pass
+                if tier_val > 0:
+                    break
+
         selected_provider = str(
             job.get("selected_provider")
             or asset_pack.get("selected_provider")
@@ -945,9 +990,62 @@ def _provider_order(job: dict | None = None) -> list[str]:
             or invoice.get("selected_model")
             or ""
         ).strip()
+
+        # Step 2: Strict tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+        if tier_val > 0 and tier_val not in {400, 800}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        if tier_val == 400:
+            prov_mismatch = bool(selected_provider and selected_provider.lower() not in _storyboard_accepted_providers(400))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(400))
+            if prov_mismatch or model_mismatch:
+                offender = (selected_provider if prov_mismatch else "") or model_req
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:400:{offender}",
+                    diagnostics={
+                        "ok": False,
+                        "error": f"storyboard_cross_tier_override:400:{offender}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            return ["shopaikey_video"]
+        elif tier_val == 800:
+            prov_mismatch = bool(selected_provider and selected_provider.lower() not in _storyboard_accepted_providers(800))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(800))
+            if prov_mismatch or model_mismatch:
+                offender = (selected_provider if prov_mismatch else "") or model_req
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:800:{offender}",
+                    diagnostics={
+                        "ok": False,
+                        "error": f"storyboard_cross_tier_override:800:{offender}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            return ["key4u_video"]
+
+        # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
         if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
             return ["key4u_video"]
-        if model_req == "veo3.1-fast":
+        if model_req in {"veo3.1-fast", "veo-3.1-fast"}:
             return ["shopaikey_video"]
         if model_req == "veo_3_1-fast":
             if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
@@ -958,16 +1056,6 @@ def _provider_order(job: dict | None = None) -> list[str]:
         if selected_provider in {"key4u", "k4u", "key4u_video"}:
             return ["key4u_video"]
 
-        tier_val = 0
-        for src in (job, asset_pack, invoice):
-            if isinstance(src, dict):
-                t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
-                if t:
-                    try:
-                        tier_val = int(t)
-                        break
-                    except (ValueError, TypeError):
-                        pass
         tier_str = str(
             job.get("selected_tier")
             or job.get("quality_tier")
@@ -978,9 +1066,9 @@ def _provider_order(job: dict | None = None) -> list[str]:
             or invoice.get("quality_tier")
             or ""
         ).strip().lower()
-        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+        if any(k in tier_str for k in ("pro", "premium", "kling")):
             return ["key4u_video"]
-        if tier_val in {200, 300, 400} or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+        if any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
             return ["shopaikey_video"]
         return ["shopaikey_video"]
     raw = (
@@ -3941,6 +4029,23 @@ def _resolve_storyboard_i2v_model(
     scene_index: int = 1,
     request_job_id: str = "",
 ) -> str:
+    # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
+    tier_val = 0
+    for src in (job, asset_pack, invoice):
+        if isinstance(src, dict):
+            for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
+                t = src.get(k)
+                if t is not None:
+                    try:
+                        iv = int(t)
+                        if iv > 0:
+                            tier_val = iv
+                            break
+                    except (ValueError, TypeError):
+                        pass
+            if tier_val > 0:
+                break
+
     target_provider = str(
         provider
         or (job or {}).get("selected_provider")
@@ -3970,6 +4075,69 @@ def _resolve_storyboard_i2v_model(
         or ""
     ).strip()
 
+    # Step 2: Tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+    if tier_val > 0 and tier_val not in {400, 800}:
+        raise RealVideoRenderError(
+            f"storyboard_unsupported_tier:{tier_val}",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "error": f"storyboard_unsupported_tier:{tier_val}",
+                "blocker": "storyboard_unsupported_tier",
+                "allowed_tiers": [400, 800],
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+            },
+        )
+    if tier_val == 400:
+        prov_mismatch = bool(target_provider and target_provider.lower() not in _storyboard_accepted_providers(400))
+        model_mismatch = bool(candidate and candidate.lower() not in _storyboard_accepted_runtime_models(400))
+        if prov_mismatch or model_mismatch:
+            offender = (target_provider if prov_mismatch else "") or candidate
+            raise RealVideoRenderError(
+                f"storyboard_cross_tier_override:400:{offender}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_cross_tier_override:400:{offender}",
+                    "blocker": "storyboard_cross_tier_override",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        target_provider = "shopaikey_video"
+        return "veo3.1-fast"
+    elif tier_val == 800:
+        prov_mismatch = bool(target_provider and target_provider.lower() not in _storyboard_accepted_providers(800))
+        model_mismatch = bool(candidate and candidate.lower() not in _storyboard_accepted_runtime_models(800))
+        if prov_mismatch or model_mismatch:
+            offender = (target_provider if prov_mismatch else "") or candidate
+            raise RealVideoRenderError(
+                f"storyboard_cross_tier_override:800:{offender}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_cross_tier_override:800:{offender}",
+                    "blocker": "storyboard_cross_tier_override",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        target_provider = "key4u_video"
+        return "kling-v3"
+
+    # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
     if candidate and not target_provider:
         if candidate in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
             target_provider = "shopaikey_video"
@@ -3977,16 +4145,6 @@ def _resolve_storyboard_i2v_model(
             target_provider = "key4u_video"
 
     if not target_provider:
-        tier_val = 0
-        for src in (job, asset_pack, invoice):
-            if isinstance(src, dict):
-                t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
-                if t:
-                    try:
-                        tier_val = int(t)
-                        break
-                    except (ValueError, TypeError):
-                        pass
         tier_str = str(
             (job or {}).get("selected_tier")
             or (job or {}).get("quality_tier")
@@ -3997,11 +4155,12 @@ def _resolve_storyboard_i2v_model(
             or (invoice or {}).get("quality_tier")
             or ""
         ).strip().lower()
-        if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
+        if any(k in tier_str for k in ("pro", "premium", "kling")):
             target_provider = "key4u_video"
+        elif any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+            target_provider = "shopaikey_video"
         else:
             target_provider = "shopaikey_video"
-
     if target_provider not in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER:
         raise RealVideoRenderError(
             STORYBOARD_I2V_MODEL_NOT_PROVEN_BLOCKER,
@@ -6275,6 +6434,23 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         or str((job or {}).get("engine_route") or "").strip().lower() == "storyboard_to_video"
     )
     if is_storyboard:
+        # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
+        tier_val = 0
+        for src in (job, asset_pack, invoice):
+            if isinstance(src, dict):
+                for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
+                    t = src.get(k)
+                    if t is not None:
+                        try:
+                            iv = int(t)
+                            if iv > 0:
+                                tier_val = iv
+                                break
+                        except (ValueError, TypeError):
+                            pass
+                if tier_val > 0:
+                    break
+
         storyboard_provider = str(
             model_context.get("selected_provider")
             or (job or {}).get("selected_provider")
@@ -6282,6 +6458,11 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             or (invoice or {}).get("selected_provider")
             or ""
         ).strip().lower()
+        if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+            storyboard_provider = "shopaikey_video"
+        elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
+            storyboard_provider = "key4u_video"
+
         model_req = str(
             (job or {}).get("selected_model")
             or (job or {}).get("model")
@@ -6289,43 +6470,92 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             or (invoice or {}).get("selected_model")
             or ""
         ).strip()
-        if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"}:
-            storyboard_provider = "shopaikey_video"
-        elif storyboard_provider in {"key4u", "k4u", "key4u_video"}:
-            storyboard_provider = "key4u_video"
-        elif not storyboard_provider:
-            if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                storyboard_provider = "key4u_video"
-            elif model_req == "veo_3_1-fast":
-                storyboard_provider = "key4u_video"
-            elif model_req in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
-                storyboard_provider = "shopaikey_video"
-            else:
-                tier_val = 0
-                for src in (job, asset_pack, invoice):
-                    if isinstance(src, dict):
-                        t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
-                        if t:
-                            try:
-                                tier_val = int(t)
-                                break
-                            except (ValueError, TypeError):
-                                pass
-                tier_str = str(
-                    (job or {}).get("selected_tier")
-                    or (job or {}).get("quality_tier")
-                    or (job or {}).get("routing_quality_tier")
-                    or (asset_pack or {}).get("selected_tier")
-                    or (asset_pack or {}).get("quality_tier")
-                    or (invoice or {}).get("selected_tier")
-                    or (invoice or {}).get("quality_tier")
-                    or ""
-                ).strip().lower()
-                if tier_val in {700, 800, 1000, 1200, 1500} or any(k in tier_str for k in ("pro", "premium", "kling")):
-                    storyboard_provider = "key4u_video"
-                else:
-                    storyboard_provider = "shopaikey_video"
 
+        # Step 2: Tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+        if tier_val > 0 and tier_val not in {400, 800}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        if tier_val == 400:
+            prov_mismatch = bool(storyboard_provider and storyboard_provider.lower() not in _storyboard_accepted_providers(400))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(400))
+            if prov_mismatch or model_mismatch:
+                offender = (storyboard_provider if prov_mismatch else "") or model_req
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:400:{offender}",
+                    diagnostics={
+                        "ok": False,
+                        "scene_index": scene_index,
+                        "scene_id": scene_index,
+                        "request_job_id": request_job_id,
+                        "error": f"storyboard_cross_tier_override:400:{offender}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            storyboard_provider = "shopaikey_video"
+        elif tier_val == 800:
+            prov_mismatch = bool(storyboard_provider and storyboard_provider.lower() not in _storyboard_accepted_providers(800))
+            model_mismatch = bool(model_req and model_req.lower() not in _storyboard_accepted_runtime_models(800))
+            if prov_mismatch or model_mismatch:
+                offender = (storyboard_provider if prov_mismatch else "") or model_req
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:800:{offender}",
+                    diagnostics={
+                        "ok": False,
+                        "scene_index": scene_index,
+                        "scene_id": scene_index,
+                        "request_job_id": request_job_id,
+                        "error": f"storyboard_cross_tier_override:800:{offender}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            storyboard_provider = "key4u_video"
+        else:
+            # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
+            if not storyboard_provider:
+                if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                    storyboard_provider = "key4u_video"
+                elif model_req == "veo_3_1-fast":
+                    storyboard_provider = "key4u_video"
+                elif model_req in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER.get("shopaikey_video", set()):
+                    storyboard_provider = "shopaikey_video"
+                else:
+                    tier_str = str(
+                        (job or {}).get("selected_tier")
+                        or (job or {}).get("quality_tier")
+                        or (job or {}).get("routing_quality_tier")
+                        or (asset_pack or {}).get("selected_tier")
+                        or (asset_pack or {}).get("quality_tier")
+                        or (invoice or {}).get("selected_tier")
+                        or (invoice or {}).get("quality_tier")
+                        or ""
+                    ).strip().lower()
+                    if any(k in tier_str for k in ("pro", "premium", "kling")):
+                        storyboard_provider = "key4u_video"
+                    elif any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
+                        storyboard_provider = "shopaikey_video"
+                    else:
+                        storyboard_provider = "shopaikey_video"
         storyboard_model = _resolve_storyboard_i2v_model(
             job,
             asset_pack,
