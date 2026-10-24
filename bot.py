@@ -107557,27 +107557,38 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
 
         # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
         quality_tier = safe_int(
-            draft.get("b14_quality_xu")
-            or (draft.get("asset_pack") or {}).get("selected_quality_tier")
-            or (draft.get("b14_invoice") or {}).get("quality_xu")
+            draft.get("selected_quality_tier")
+            or draft.get("routing_quality_tier")
             or draft.get("tier_id")
+            or draft.get("quality_tier")
+            or (draft.get("asset_pack") or {}).get("selected_quality_tier")
+            or (draft.get("asset_pack") or {}).get("routing_quality_tier")
             or (draft.get("asset_pack") or {}).get("tier_id")
-            or (draft.get("b14_invoice") or {}).get("tier_id"),
+            or (draft.get("asset_pack") or {}).get("quality_tier")
+            or (draft.get("b14_invoice") or {}).get("selected_quality_tier")
+            or (draft.get("b14_invoice") or {}).get("routing_quality_tier")
+            or (draft.get("b14_invoice") or {}).get("tier_id")
+            or (draft.get("b14_invoice") or {}).get("quality_tier")
+            or (session or {}).get("tier_id")
+            or (session or {}).get("quality_tier"),
             0
         )
-        if quality_tier in {200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500}:
-            if quality_tier not in {400, 800}:
-                raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
-            if quality_tier == 400:
-                if raw_provider in {"key4u", "k4u", "key4u_video"} or candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                    raise ValueError(f"storyboard_cross_tier_override:400:{raw_provider or candidate_model}")
-                storyboard_provider = "shopaikey_video"
-                candidate_model = "veo3.1-fast"
-            elif quality_tier == 800:
-                if raw_provider in {"shopai", "shopaikey", "shopaikey_video"} or candidate_model in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
-                    raise ValueError(f"storyboard_cross_tier_override:800:{raw_provider or candidate_model}")
-                storyboard_provider = "key4u_video"
-                candidate_model = "kling-v3"
+        if quality_tier == 0:
+            raw_xu = safe_int(draft.get("b14_quality_xu") or (session or {}).get("b14_quality_xu"), 0)
+            if raw_xu in {400, 800}:
+                quality_tier = raw_xu
+        if quality_tier > 0 and quality_tier not in {400, 800}:
+            raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
+        if quality_tier == 400:
+            if raw_provider in {"key4u", "k4u", "key4u_video"} or candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                raise ValueError(f"storyboard_cross_tier_override:400:{raw_provider or candidate_model}")
+            storyboard_provider = "shopaikey_video"
+            candidate_model = "veo3.1-fast"
+        elif quality_tier == 800:
+            if raw_provider in {"shopai", "shopaikey", "shopaikey_video"} or candidate_model in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+                raise ValueError(f"storyboard_cross_tier_override:800:{raw_provider or candidate_model}")
+            storyboard_provider = "key4u_video"
+            candidate_model = "kling-v3"
         else:
             # Step 2: Legacy/internal jobs with NO numeric tier (quality_tier == 0)
             if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
@@ -107616,8 +107627,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
             "selected_family": selected_family,
-            "routing_quality_tier": "common",
-            "quality_tier": "common",
+            "routing_quality_tier": str(quality_tier) if quality_tier in {400, 800} else "common",
+            "quality_tier": quality_tier if quality_tier in {400, 800} else "common",
             "scene_cards": materialized_cards,
             "storyboard_panels": panels or [
                 {"scene_index": c["scene_index"], "local_path": c.get("local_path") or c.get("image_path")}
@@ -107643,8 +107654,8 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
             "selected_model": storyboard_model,
             "pinned_wire_model": storyboard_model,
             "selected_family": selected_family,
-            "routing_quality_tier": "common",
-            "quality_tier": "common",
+            "routing_quality_tier": str(quality_tier) if quality_tier in {400, 800} else "common",
+            "quality_tier": quality_tier if quality_tier in {400, 800} else "common",
             "scene_count": scene_count,
             "scene_duration_seconds": scene_seconds,
             "duration_seconds": scene_count * scene_seconds,
@@ -107735,9 +107746,13 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         prompt_text=str(original_user_prompt or plan.get("preview_text") or topic or "")[:8000],
         addon_plan_json=addon_plan,
         creative_control_json=creative_controls,
-        quality_tier=safe_int(
-            invoice.get("routing_quality_tier"),
-            invoice["quality_xu"],
+        quality_tier=(
+            quality_tier if (is_storyboard and quality_tier in {400, 800}) else (
+                0 if is_storyboard else safe_int(
+                    invoice.get("routing_quality_tier"),
+                    invoice["quality_xu"],
+                )
+            )
         ),
         scene_count=invoice["scene_count"],
         addons_disabled_by_package=1 if invoice["addons_disabled_by_package"] else 0,

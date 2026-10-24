@@ -936,7 +936,7 @@ def _provider_order(job: dict | None = None) -> list[str]:
         tier_val = 0
         for src in (job, asset_pack, invoice):
             if isinstance(src, dict):
-                for k in ("tier_id", "quality_xu", "b14_quality_xu", "selected_quality_tier", "routing_quality_tier"):
+                for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
                     t = src.get(k)
                     if t is not None:
                         try:
@@ -963,51 +963,50 @@ def _provider_order(job: dict | None = None) -> list[str]:
             or ""
         ).strip()
 
-        # Step 2: Tier validation takes precedence over overrides
-        if tier_val in {200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500}:
-            if tier_val not in {400, 800}:
+        # Step 2: Strict tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+        if tier_val > 0 and tier_val not in {400, 800}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        if tier_val == 400:
+            if selected_provider in {"key4u", "k4u", "key4u_video"} or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
                 raise RealVideoRenderError(
-                    f"storyboard_unsupported_tier:{tier_val}",
+                    f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
                     diagnostics={
                         "ok": False,
-                        "error": f"storyboard_unsupported_tier:{tier_val}",
-                        "blocker": "storyboard_unsupported_tier",
+                        "error": f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
+                        "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,
                         "provider_submit_called": False,
                         "no_charge": True,
                     },
                 )
-            if tier_val == 400:
-                if selected_provider in {"key4u", "k4u", "key4u_video"} or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                    raise RealVideoRenderError(
-                        f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
-                        diagnostics={
-                            "ok": False,
-                            "error": f"storyboard_cross_tier_override:400:{selected_provider or model_req}",
-                            "blocker": "storyboard_cross_tier_override",
-                            "allowed_tiers": [400, 800],
-                            "provider_attempted": False,
-                            "provider_submit_called": False,
-                            "no_charge": True,
-                        },
-                    )
-                return ["shopaikey_video"]
-            elif tier_val == 800:
-                if selected_provider in {"shopai", "shopaikey", "shopaikey_video"} or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
-                    raise RealVideoRenderError(
-                        f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
-                        diagnostics={
-                            "ok": False,
-                            "error": f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
-                            "blocker": "storyboard_cross_tier_override",
-                            "allowed_tiers": [400, 800],
-                            "provider_attempted": False,
-                            "provider_submit_called": False,
-                            "no_charge": True,
-                        },
-                    )
-                return ["key4u_video"]
+            return ["shopaikey_video"]
+        elif tier_val == 800:
+            if selected_provider in {"shopai", "shopaikey", "shopaikey_video"} or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
+                    diagnostics={
+                        "ok": False,
+                        "error": f"storyboard_cross_tier_override:800:{selected_provider or model_req}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            return ["key4u_video"]
 
         # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
         if model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
@@ -1037,53 +1036,6 @@ def _provider_order(job: dict | None = None) -> list[str]:
             return ["key4u_video"]
         if any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
             return ["shopaikey_video"]
-        return ["shopaikey_video"]
-        if model_req == "veo_3_1-fast":
-            if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
-                return ["shopaikey_video"]
-            return ["key4u_video"]
-        if selected_provider in {"shopai", "shopaikey", "shopaikey_video"}:
-            return ["shopaikey_video"]
-        if selected_provider in {"key4u", "k4u", "key4u_video"}:
-            return ["key4u_video"]
-
-        tier_val = 0
-        for src in (job, asset_pack, invoice):
-            if isinstance(src, dict):
-                t = src.get("tier_id") or src.get("quality_xu") or src.get("b14_quality_xu")
-                if t:
-                    try:
-                        tier_val = int(t)
-                        break
-                    except (ValueError, TypeError):
-                        pass
-        tier_str = str(
-            job.get("selected_tier")
-            or job.get("quality_tier")
-            or job.get("routing_quality_tier")
-            or asset_pack.get("selected_tier")
-            or asset_pack.get("quality_tier")
-            or invoice.get("selected_tier")
-            or invoice.get("quality_tier")
-            or ""
-        ).strip().lower()
-        if tier_val == 800 or any(k in tier_str for k in ("pro", "premium", "kling")):
-            return ["key4u_video"]
-        if tier_val == 400 or any(k in tier_str for k in ("budget", "standard", "fast", "veo", "basic")):
-            return ["shopaikey_video"]
-        if tier_val in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
-            raise RealVideoRenderError(
-                f"storyboard_unsupported_tier:{tier_val}",
-                diagnostics={
-                    "ok": False,
-                    "error": f"storyboard_unsupported_tier:{tier_val}",
-                    "blocker": "storyboard_unsupported_tier",
-                    "allowed_tiers": [400, 800],
-                    "provider_attempted": False,
-                    "provider_submit_called": False,
-                    "no_charge": True,
-                },
-            )
         return ["shopaikey_video"]
     raw = (
         job.get("provider_order")
@@ -4047,7 +3999,7 @@ def _resolve_storyboard_i2v_model(
     tier_val = 0
     for src in (job, asset_pack, invoice):
         if isinstance(src, dict):
-            for k in ("tier_id", "quality_xu", "b14_quality_xu", "selected_quality_tier", "routing_quality_tier"):
+            for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
                 t = src.get(k)
                 if t is not None:
                     try:
@@ -4089,62 +4041,61 @@ def _resolve_storyboard_i2v_model(
         or ""
     ).strip()
 
-    # Step 2: Tier validation takes precedence over overrides
-    if tier_val in {200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500}:
-        if tier_val not in {400, 800}:
+    # Step 2: Tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+    if tier_val > 0 and tier_val not in {400, 800}:
+        raise RealVideoRenderError(
+            f"storyboard_unsupported_tier:{tier_val}",
+            diagnostics={
+                "ok": False,
+                "scene_index": scene_index,
+                "scene_id": scene_index,
+                "request_job_id": request_job_id,
+                "error": f"storyboard_unsupported_tier:{tier_val}",
+                "blocker": "storyboard_unsupported_tier",
+                "allowed_tiers": [400, 800],
+                "provider_attempted": False,
+                "provider_submit_called": False,
+                "no_charge": True,
+            },
+        )
+    if tier_val == 400:
+        if target_provider == "key4u_video" or candidate in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
             raise RealVideoRenderError(
-                f"storyboard_unsupported_tier:{tier_val}",
+                f"storyboard_cross_tier_override:400:{target_provider or candidate}",
                 diagnostics={
                     "ok": False,
                     "scene_index": scene_index,
                     "scene_id": scene_index,
                     "request_job_id": request_job_id,
-                    "error": f"storyboard_unsupported_tier:{tier_val}",
-                    "blocker": "storyboard_unsupported_tier",
+                    "error": f"storyboard_cross_tier_override:400:{target_provider or candidate}",
+                    "blocker": "storyboard_cross_tier_override",
                     "allowed_tiers": [400, 800],
                     "provider_attempted": False,
                     "provider_submit_called": False,
                     "no_charge": True,
                 },
             )
-        if tier_val == 400:
-            if target_provider == "key4u_video" or candidate in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:400:{target_provider or candidate}",
-                    diagnostics={
-                        "ok": False,
-                        "scene_index": scene_index,
-                        "scene_id": scene_index,
-                        "request_job_id": request_job_id,
-                        "error": f"storyboard_cross_tier_override:400:{target_provider or candidate}",
-                        "blocker": "storyboard_cross_tier_override",
-                        "allowed_tiers": [400, 800],
-                        "provider_attempted": False,
-                        "provider_submit_called": False,
-                        "no_charge": True,
-                    },
-                )
-            target_provider = "shopaikey_video"
-            return "veo3.1-fast"
-        elif tier_val == 800:
-            if target_provider == "shopaikey_video" or candidate in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
-                raise RealVideoRenderError(
-                    f"storyboard_cross_tier_override:800:{target_provider or candidate}",
-                    diagnostics={
-                        "ok": False,
-                        "scene_index": scene_index,
-                        "scene_id": scene_index,
-                        "request_job_id": request_job_id,
-                        "error": f"storyboard_cross_tier_override:800:{target_provider or candidate}",
-                        "blocker": "storyboard_cross_tier_override",
-                        "allowed_tiers": [400, 800],
-                        "provider_attempted": False,
-                        "provider_submit_called": False,
-                        "no_charge": True,
-                    },
-                )
-            target_provider = "key4u_video"
-            return "kling-v3"
+        target_provider = "shopaikey_video"
+        return "veo3.1-fast"
+    elif tier_val == 800:
+        if target_provider == "shopaikey_video" or candidate in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+            raise RealVideoRenderError(
+                f"storyboard_cross_tier_override:800:{target_provider or candidate}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_cross_tier_override:800:{target_provider or candidate}",
+                    "blocker": "storyboard_cross_tier_override",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        target_provider = "key4u_video"
+        return "kling-v3"
 
     # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
     if candidate and not target_provider:
@@ -6447,7 +6398,7 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
         tier_val = 0
         for src in (job, asset_pack, invoice):
             if isinstance(src, dict):
-                for k in ("tier_id", "quality_xu", "b14_quality_xu", "selected_quality_tier", "routing_quality_tier"):
+                for k in ("tier_id", "selected_quality_tier", "routing_quality_tier", "quality_tier", "selected_tier"):
                     t = src.get(k)
                     if t is not None:
                         try:
@@ -6480,60 +6431,59 @@ async def _render_scene_async(scene, raw_path: str, provider_order: list[str]) -
             or ""
         ).strip()
 
-        # Step 2: Tier validation takes precedence over overrides
-        if tier_val in {200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500}:
-            if tier_val not in {400, 800}:
+        # Step 2: Tier validation takes precedence over overrides: ANY positive numeric tier not in {400, 800} -> FAIL CLOSED
+        if tier_val > 0 and tier_val not in {400, 800}:
+            raise RealVideoRenderError(
+                f"storyboard_unsupported_tier:{tier_val}",
+                diagnostics={
+                    "ok": False,
+                    "scene_index": scene_index,
+                    "scene_id": scene_index,
+                    "request_job_id": request_job_id,
+                    "error": f"storyboard_unsupported_tier:{tier_val}",
+                    "blocker": "storyboard_unsupported_tier",
+                    "allowed_tiers": [400, 800],
+                    "provider_attempted": False,
+                    "provider_submit_called": False,
+                    "no_charge": True,
+                },
+            )
+        if tier_val == 400:
+            if storyboard_provider == "key4u_video" or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
                 raise RealVideoRenderError(
-                    f"storyboard_unsupported_tier:{tier_val}",
+                    f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
                     diagnostics={
                         "ok": False,
                         "scene_index": scene_index,
                         "scene_id": scene_index,
                         "request_job_id": request_job_id,
-                        "error": f"storyboard_unsupported_tier:{tier_val}",
-                        "blocker": "storyboard_unsupported_tier",
+                        "error": f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
+                        "blocker": "storyboard_cross_tier_override",
                         "allowed_tiers": [400, 800],
                         "provider_attempted": False,
                         "provider_submit_called": False,
                         "no_charge": True,
                     },
                 )
-            if tier_val == 400:
-                if storyboard_provider == "key4u_video" or model_req in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-                    raise RealVideoRenderError(
-                        f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
-                        diagnostics={
-                            "ok": False,
-                            "scene_index": scene_index,
-                            "scene_id": scene_index,
-                            "request_job_id": request_job_id,
-                            "error": f"storyboard_cross_tier_override:400:{storyboard_provider or model_req}",
-                            "blocker": "storyboard_cross_tier_override",
-                            "allowed_tiers": [400, 800],
-                            "provider_attempted": False,
-                            "provider_submit_called": False,
-                            "no_charge": True,
-                        },
-                    )
-                storyboard_provider = "shopaikey_video"
-            elif tier_val == 800:
-                if storyboard_provider == "shopaikey_video" or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
-                    raise RealVideoRenderError(
-                        f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
-                        diagnostics={
-                            "ok": False,
-                            "scene_index": scene_index,
-                            "scene_id": scene_index,
-                            "request_job_id": request_job_id,
-                            "error": f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
-                            "blocker": "storyboard_cross_tier_override",
-                            "allowed_tiers": [400, 800],
-                            "provider_attempted": False,
-                            "provider_submit_called": False,
-                            "no_charge": True,
-                        },
-                    )
-                storyboard_provider = "key4u_video"
+            storyboard_provider = "shopaikey_video"
+        elif tier_val == 800:
+            if storyboard_provider in {"shopai", "shopaikey", "shopaikey_video"} or model_req in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+                raise RealVideoRenderError(
+                    f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
+                    diagnostics={
+                        "ok": False,
+                        "scene_index": scene_index,
+                        "scene_id": scene_index,
+                        "request_job_id": request_job_id,
+                        "error": f"storyboard_cross_tier_override:800:{storyboard_provider or model_req}",
+                        "blocker": "storyboard_cross_tier_override",
+                        "allowed_tiers": [400, 800],
+                        "provider_attempted": False,
+                        "provider_submit_called": False,
+                        "no_charge": True,
+                    },
+                )
+            storyboard_provider = "key4u_video"
         else:
             # Step 3: Legacy/internal jobs with NO numeric tier (tier_val == 0)
             if not storyboard_provider:

@@ -66,6 +66,13 @@ import pytest
 
 import bot
 from services import provider_spend_guard as psg
+from tests.test_p0_paid_spend_guard_and_bot_origin import (
+    _create_owner_live_authorization_test_fixture,
+    create_test_mint_authority,
+    create_bot_confirmation,
+    PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+    BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED,
+)
 from services import video_tail9
 from services import video_uifreeze1
 from services import video_real_render_connector
@@ -185,7 +192,7 @@ class TestStoryboardTierEligibilityAndFailClosed:
         assert prices == [400, 800]
 
     def test_unsupported_tier_no_override_blocks(self):
-        unsupported = [200, 300, 500, 600, 700, 1000, 1200, 1500]
+        unsupported = [200, 300, 401, 500, 600, 700, 799, 801, 999, 1000, 1200, 1500]
         for tid in unsupported:
             job = {
                 "product_type": "storyboard_to_video",
@@ -201,7 +208,7 @@ class TestStoryboardTierEligibilityAndFailClosed:
 
     def test_unsupported_tier_provider_override_blocks(self):
         """Unsupported tier must block even if valid provider is explicitly requested."""
-        for tid in [500, 700]:
+        for tid in [401, 500, 700, 799, 801, 999]:
             job_key4u = {
                 "product_type": "storyboard_to_video",
                 "tier_id": tid,
@@ -222,7 +229,7 @@ class TestStoryboardTierEligibilityAndFailClosed:
 
     def test_unsupported_tier_model_override_blocks(self):
         """Unsupported tier must block even if valid model is explicitly requested."""
-        for tid in [500, 700]:
+        for tid in [401, 500, 700, 799, 801, 999]:
             job_kling = {
                 "product_type": "storyboard_to_video",
                 "tier_id": tid,
@@ -250,30 +257,31 @@ class TestStoryboardTierEligibilityAndFailClosed:
             assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
 
     def test_unsupported_tier_asset_pack_and_invoice_overrides_block(self):
-        """Unsupported tier inside asset_pack or invoice must fail closed."""
-        job_asset = {
-            "product_type": "storyboard_to_video",
-            "asset_pack": {
-                "tier_id": 700,
-                "selected_provider": "key4u_video",
-                "selected_model": "kling-v3",
-            },
-        }
-        with pytest.raises(RealVideoRenderError) as exc:
-            _provider_order(job_asset)
-        assert "storyboard_unsupported_tier:700" in str(exc.value)
+        """Unsupported tier inside asset_pack or invoice must fail closed for any unsupported tier."""
+        for tid in [401, 500, 700, 799, 801, 999]:
+            job_asset = {
+                "product_type": "storyboard_to_video",
+                "asset_pack": {
+                    "tier_id": tid,
+                    "selected_provider": "key4u_video",
+                    "selected_model": "kling-v3",
+                },
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_asset)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
 
-        job_inv = {
-            "product_type": "storyboard_to_video",
-            "invoice": {
-                "tier_id": 500,
-                "selected_provider": "shopaikey_video",
-                "selected_model": "veo3.1-fast",
-            },
-        }
-        with pytest.raises(RealVideoRenderError) as exc:
-            _provider_order(job_inv)
-        assert "storyboard_unsupported_tier:500" in str(exc.value)
+            job_inv = {
+                "product_type": "storyboard_to_video",
+                "invoice": {
+                    "tier_id": tid,
+                    "selected_provider": "shopaikey_video",
+                    "selected_model": "veo3.1-fast",
+                },
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_inv)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
 
     def test_cross_tier_overrides_block(self):
         """Cross-tier provider or model overrides must be strictly blocked."""
@@ -325,17 +333,18 @@ class TestStoryboardTierEligibilityAndFailClosed:
 
     def test_bot_prepare_project_for_invoice_fail_closed_and_cross_tier(self):
         """Verifies bot invoice preparation enforces fail-closed and blocks cross-tier overrides."""
-        # Unsupported tier 700 fails closed
-        session_unsupported = {
-            "flow_kind": "storyboard",
-            "draft": {
-                "b14_quality_xu": 700,
-                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
-            },
-        }
-        with pytest.raises(ValueError) as exc:
-            bot.video_b14_prepare_project_for_invoice(12345, session_unsupported)
-        assert "storyboard_unsupported_tier:700" in str(exc.value)
+        # Unsupported tiers fail closed (including 401, 700, 799, 801, 999)
+        for tid in [401, 700, 799, 801, 999]:
+            session_unsupported = {
+                "flow_kind": "storyboard",
+                "draft": {
+                    "quality_tier": tid,
+                    "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+                },
+            }
+            with pytest.raises(ValueError) as exc:
+                bot.video_b14_prepare_project_for_invoice(12345, session_unsupported)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
 
         # Cross-tier override on Tier 400 with Kling
         session_cross_400 = {
@@ -460,6 +469,666 @@ class TestStoryboardDualTierRoutingResolution:
 
 class TestStoryboardSpendAuthority:
     """Proves Storyboard spend authority via services/provider_spend_guard.py."""
+    def test_storyboard_tier400_production_reservation_exact_and_bound_minus_1(self, tmp_path):
+        """Proves Storyboard Tier 400 2 scenes exact reservation and bound-minus-1 enforcement."""
+        db_path = str(tmp_path / "spend_t400.db")
+        env = {
+            "SPEND_GUARD_DB_PATH": db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "UNIT_TEST_ENV": "true",
+        }
+        psg.init_spend_guard_db(db_path=db_path, env=env)
+
+        # Canonical Tier 400 2 scenes = 1,400,000 micro-USD (700,000 micro-USD per scene)
+        # 1. BOUND EXACT (1,400,000 micro-USD cumulative for job)
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t400_exact",
+            product_family="Product Video",
+            provider="shopaikey_video",
+            tier="veo3.1-fast",
+            user_id="user_400",
+            job_id="job_t400_exact",
+            request_id="req_t400_exact",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=1400000,
+            db_path=db_path,
+            env=env,
+        )
+        conf_s1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400",
+                user_id="user_400",
+                job_id="job_t400_exact",
+                request_id="req_t400_exact",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t400_exact",
+                expected_max_provider_spend_usd=Decimal("1.40"),
+            ),
+            chat_id="chat_400",
+            user_id="user_400",
+            job_id="job_t400_exact",
+            request_id="req_t400_exact",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t400_exact",
+            expected_max_cost_usd=Decimal("1.40"),
+            db_path=db_path,
+            env=env,
+        )
+        ctx_s1 = psg.SpendGuardContext(
+            job_id="job_t400_exact",
+            request_id="req_t400_exact",
+            trace_id="tr_t400_s1",
+            chat_id="chat_400",
+            user_id="user_400",
+            scene_index=1,
+            product_family="Product Video",
+            provider="shopaikey_video",
+            operation="image_to_video",
+            model="veo3.1-fast",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_s1,
+            owner_receipt="rcpt_t400_exact",
+            metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_s1 = psg.reserve_provider_spend(ctx_s1, db_path=db_path, env=env)
+        assert res_s1.allowed is True
+        assert res_s1.cost_micro_usd == 700000
+
+        conf_s2 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400",
+                user_id="user_400",
+                job_id="job_t400_exact",
+                request_id="req_t400_exact",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t400_exact",
+                expected_max_provider_spend_usd=Decimal("1.40"),
+            ),
+            chat_id="chat_400",
+            user_id="user_400",
+            job_id="job_t400_exact",
+            request_id="req_t400_exact",
+            operation="image_to_video",
+            scene_index=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t400_exact",
+            expected_max_cost_usd=Decimal("1.40"),
+            db_path=db_path,
+            env=env,
+        )
+        ctx_s2 = psg.SpendGuardContext(
+            job_id="job_t400_exact",
+            request_id="req_t400_exact",
+            trace_id="tr_t400_s2",
+            chat_id="chat_400",
+            user_id="user_400",
+            scene_index=2,
+            product_family="Product Video",
+            provider="shopaikey_video",
+            operation="image_to_video",
+            model="veo3.1-fast",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_s2,
+            owner_receipt="rcpt_t400_exact",
+            metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_s2 = psg.reserve_provider_spend(ctx_s2, db_path=db_path, env=env)
+        assert res_s2.allowed is True
+        assert res_s2.cost_micro_usd == 700000
+        assert res_s1.cost_micro_usd + res_s2.cost_micro_usd == 1400000
+
+        # 2. BOUND - 1 MICRO: Child allocation 699,999 micro vs 700,000 canonical -> BLOCK
+        conf_child_m1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400",
+                user_id="user_400",
+                job_id="job_t400_minus1",
+                request_id="req_t400_minus1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t400_minus1",
+                expected_max_provider_spend_usd=Decimal("0.699999"),
+            ),
+            chat_id="chat_400",
+            user_id="user_400",
+            job_id="job_t400_minus1",
+            request_id="req_t400_minus1",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t400_minus1",
+            expected_max_cost_usd=Decimal("0.699999"),
+            db_path=db_path,
+            env=env,
+        )
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t400_minus1",
+            product_family="Product Video",
+            provider="shopaikey_video",
+            tier="veo3.1-fast",
+            user_id="user_400",
+            job_id="job_t400_minus1",
+            request_id="req_t400_minus1",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=1400000,
+            db_path=db_path,
+            env=env,
+        )
+        ctx_child_m1 = psg.SpendGuardContext(
+            job_id="job_t400_minus1",
+            request_id="req_t400_minus1",
+            trace_id="tr_t400_m1",
+            chat_id="chat_400",
+            user_id="user_400",
+            scene_index=1,
+            product_family="Product Video",
+            provider="shopaikey_video",
+            operation="image_to_video",
+            model="veo3.1-fast",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_child_m1,
+            owner_receipt="rcpt_t400_minus1",
+            metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_child_m1 = psg.reserve_provider_spend(ctx_child_m1, db_path=db_path, env=env)
+        assert res_child_m1.allowed is False
+        assert res_child_m1.blocker == BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED
+
+        # 3. BOUND - 1 MICRO: Cumulative Job budget 1,399,999 micro-USD (second scene exceeds) -> BLOCK
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t400_job_m1",
+            product_family="Product Video",
+            provider="shopaikey_video",
+            tier="veo3.1-fast",
+            user_id="user_400",
+            job_id="job_t400_job_m1",
+            request_id="req_t400_job_m1",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=1399999,
+            db_path=db_path,
+            env=env,
+        )
+        conf_jm1_s1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400",
+                user_id="user_400",
+                job_id="job_t400_job_m1",
+                request_id="req_t400_job_m1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t400_job_m1",
+                expected_max_provider_spend_usd=Decimal("1.399999"),
+            ),
+            chat_id="chat_400",
+            user_id="user_400",
+            job_id="job_t400_job_m1",
+            request_id="req_t400_job_m1",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t400_job_m1",
+            expected_max_cost_usd=Decimal("1.399999"),
+            db_path=db_path,
+            env=env,
+        )
+        res_jm1_s1 = psg.reserve_provider_spend(
+            psg.SpendGuardContext(
+                job_id="job_t400_job_m1", request_id="req_t400_job_m1", trace_id="tr_jm1_1",
+                chat_id="chat_400", user_id="user_400", scene_index=1, product_family="Product Video",
+                provider="shopaikey_video", operation="image_to_video", model="veo3.1-fast",
+                entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+                is_paid_live_attempt=False, bot_confirm_authority=conf_jm1_s1, owner_receipt="rcpt_t400_job_m1",
+                metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+            ),
+            db_path=db_path, env=env,
+        )
+        assert res_jm1_s1.allowed is True
+        assert res_jm1_s1.cost_micro_usd == 700000
+
+        conf_jm1_s2 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_400",
+                user_id="user_400",
+                job_id="job_t400_job_m1",
+                request_id="req_t400_job_m1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t400_job_m1",
+                expected_max_provider_spend_usd=Decimal("1.399999"),
+            ),
+            chat_id="chat_400",
+            user_id="user_400",
+            job_id="job_t400_job_m1",
+            request_id="req_t400_job_m1",
+            operation="image_to_video",
+            scene_index=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t400_job_m1",
+            expected_max_cost_usd=Decimal("1.399999"),
+            db_path=db_path,
+            env=env,
+        )
+        res_jm1_s2 = psg.reserve_provider_spend(
+            psg.SpendGuardContext(
+                job_id="job_t400_job_m1", request_id="req_t400_job_m1", trace_id="tr_jm1_2",
+                chat_id="chat_400", user_id="user_400", scene_index=2, product_family="Product Video",
+                provider="shopaikey_video", operation="image_to_video", model="veo3.1-fast",
+                entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+                is_paid_live_attempt=False, bot_confirm_authority=conf_jm1_s2, owner_receipt="rcpt_t400_job_m1",
+                metadata={"quality_tier": 400, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+            ),
+            db_path=db_path, env=env,
+        )
+        assert res_jm1_s2.allowed is False
+        assert res_jm1_s2.blocker == BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED
+
+    def test_storyboard_tier800_production_reservation_exact_and_bound_minus_1(self, tmp_path):
+        """Proves Storyboard Tier 800 2 scenes exact reservation and bound-minus-1 enforcement."""
+        db_path = str(tmp_path / "spend_t800.db")
+        env = {
+            "SPEND_GUARD_DB_PATH": db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "UNIT_TEST_ENV": "true",
+        }
+        psg.init_spend_guard_db(db_path=db_path, env=env)
+
+        # Canonical Tier 800 2 scenes = 24,480,196 micro-USD (12,240,098 micro-USD per scene)
+        # 1. BOUND EXACT (24,480,196 micro-USD cumulative for job)
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t800_exact",
+            product_family="Product Video",
+            provider="key4u_video",
+            tier="kling-v3",
+            user_id="user_800",
+            job_id="job_t800_exact",
+            request_id="req_t800_exact",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=24480196,
+            db_path=db_path,
+            env=env,
+        )
+        conf_s1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_800",
+                user_id="user_800",
+                job_id="job_t800_exact",
+                request_id="req_t800_exact",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t800_exact",
+                expected_max_provider_spend_usd=Decimal("24.480196"),
+            ),
+            chat_id="chat_800",
+            user_id="user_800",
+            job_id="job_t800_exact",
+            request_id="req_t800_exact",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t800_exact",
+            expected_max_cost_usd=Decimal("24.480196"),
+            db_path=db_path,
+            env=env,
+        )
+        ctx_s1 = psg.SpendGuardContext(
+            job_id="job_t800_exact",
+            request_id="req_t800_exact",
+            trace_id="tr_t800_s1",
+            chat_id="chat_800",
+            user_id="user_800",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            operation="image_to_video",
+            model="kling-v3",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_s1,
+            owner_receipt="rcpt_t800_exact",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_s1 = psg.reserve_provider_spend(ctx_s1, db_path=db_path, env=env)
+        assert res_s1.allowed is True
+        assert res_s1.cost_micro_usd == 12240098
+
+        conf_s2 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_800",
+                user_id="user_800",
+                job_id="job_t800_exact",
+                request_id="req_t800_exact",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t800_exact",
+                expected_max_provider_spend_usd=Decimal("24.480196"),
+            ),
+            chat_id="chat_800",
+            user_id="user_800",
+            job_id="job_t800_exact",
+            request_id="req_t800_exact",
+            operation="image_to_video",
+            scene_index=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t800_exact",
+            expected_max_cost_usd=Decimal("24.480196"),
+            db_path=db_path,
+            env=env,
+        )
+        ctx_s2 = psg.SpendGuardContext(
+            job_id="job_t800_exact",
+            request_id="req_t800_exact",
+            trace_id="tr_t800_s2",
+            chat_id="chat_800",
+            user_id="user_800",
+            scene_index=2,
+            product_family="Product Video",
+            provider="key4u_video",
+            operation="image_to_video",
+            model="kling-v3",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_s2,
+            owner_receipt="rcpt_t800_exact",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_s2 = psg.reserve_provider_spend(ctx_s2, db_path=db_path, env=env)
+        assert res_s2.allowed is True
+        assert res_s2.cost_micro_usd == 12240098
+        assert res_s1.cost_micro_usd + res_s2.cost_micro_usd == 24480196
+
+        # 2. BOUND - 1 MICRO: Child allocation 12,240,097 micro vs 12,240,098 canonical -> BLOCK
+        conf_child_m1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_800",
+                user_id="user_800",
+                job_id="job_t800_minus1",
+                request_id="req_t800_minus1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t800_minus1",
+                expected_max_provider_spend_usd=Decimal("12.240097"),
+            ),
+            chat_id="chat_800",
+            user_id="user_800",
+            job_id="job_t800_minus1",
+            request_id="req_t800_minus1",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t800_minus1",
+            expected_max_cost_usd=Decimal("12.240097"),
+            db_path=db_path,
+            env=env,
+        )
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t800_minus1",
+            product_family="Product Video",
+            provider="key4u_video",
+            tier="kling-v3",
+            user_id="user_800",
+            job_id="job_t800_minus1",
+            request_id="req_t800_minus1",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=24480196,
+            db_path=db_path,
+            env=env,
+        )
+        ctx_child_m1 = psg.SpendGuardContext(
+            job_id="job_t800_minus1",
+            request_id="req_t800_minus1",
+            trace_id="tr_t800_m1",
+            chat_id="chat_800",
+            user_id="user_800",
+            scene_index=1,
+            product_family="Product Video",
+            provider="key4u_video",
+            operation="image_to_video",
+            model="kling-v3",
+            entrypoint="bot",
+            user_flow="product_video_bot",
+            bot_originated_action=True,
+            is_paid_live_attempt=False,
+            bot_confirm_authority=conf_child_m1,
+            owner_receipt="rcpt_t800_minus1",
+            metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+        )
+        res_child_m1 = psg.reserve_provider_spend(ctx_child_m1, db_path=db_path, env=env)
+        assert res_child_m1.allowed is False
+        assert res_child_m1.blocker == BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED
+
+        # 3. BOUND - 1 MICRO: Cumulative Job budget 24,480,195 micro-USD (second scene exceeds) -> BLOCK
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_t800_job_m1",
+            product_family="Product Video",
+            provider="key4u_video",
+            tier="kling-v3",
+            user_id="user_800",
+            job_id="job_t800_job_m1",
+            request_id="req_t800_job_m1",
+            operation="image_to_video",
+            allowed_scene_slots="1,2",
+            expected_max_provider_spend_micro_usd=24480195,
+            db_path=db_path,
+            env=env,
+        )
+        conf_jm1_s1 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_800",
+                user_id="user_800",
+                job_id="job_t800_job_m1",
+                request_id="req_t800_job_m1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t800_job_m1",
+                expected_max_provider_spend_usd=Decimal("24.480195"),
+            ),
+            chat_id="chat_800",
+            user_id="user_800",
+            job_id="job_t800_job_m1",
+            request_id="req_t800_job_m1",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t800_job_m1",
+            expected_max_cost_usd=Decimal("24.480195"),
+            db_path=db_path,
+            env=env,
+        )
+        res_jm1_s1 = psg.reserve_provider_spend(
+            psg.SpendGuardContext(
+                job_id="job_t800_job_m1", request_id="req_t800_job_m1", trace_id="tr_jm1_1",
+                chat_id="chat_800", user_id="user_800", scene_index=1, product_family="Product Video",
+                provider="key4u_video", operation="image_to_video", model="kling-v3",
+                entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+                is_paid_live_attempt=False, bot_confirm_authority=conf_jm1_s1, owner_receipt="rcpt_t800_job_m1",
+                metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+            ),
+            db_path=db_path, env=env,
+        )
+        assert res_jm1_s1.allowed is True
+        assert res_jm1_s1.cost_micro_usd == 12240098
+
+        conf_jm1_s2 = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_800",
+                user_id="user_800",
+                job_id="job_t800_job_m1",
+                request_id="req_t800_job_m1",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_t800_job_m1",
+                expected_max_provider_spend_usd=Decimal("24.480195"),
+            ),
+            chat_id="chat_800",
+            user_id="user_800",
+            job_id="job_t800_job_m1",
+            request_id="req_t800_job_m1",
+            operation="image_to_video",
+            scene_index=2,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_t800_job_m1",
+            expected_max_cost_usd=Decimal("24.480195"),
+            db_path=db_path,
+            env=env,
+        )
+        res_jm1_s2 = psg.reserve_provider_spend(
+            psg.SpendGuardContext(
+                job_id="job_t800_job_m1", request_id="req_t800_job_m1", trace_id="tr_jm1_2",
+                chat_id="chat_800", user_id="user_800", scene_index=2, product_family="Product Video",
+                provider="key4u_video", operation="image_to_video", model="kling-v3",
+                entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+                is_paid_live_attempt=False, bot_confirm_authority=conf_jm1_s2, owner_receipt="rcpt_t800_job_m1",
+                metadata={"quality_tier": 800, "product_type": "storyboard_prompt", "scene_count": 2, "duration_seconds": 8},
+            ),
+            db_path=db_path, env=env,
+        )
+        assert res_jm1_s2.allowed is False
+        assert res_jm1_s2.blocker == BLOCKER_OWNER_AUTHORIZED_MAX_SPEND_EXCEEDED
+
+    def test_storyboard_production_reservation_boundaries_and_fail_closed(self, tmp_path):
+        """Proves WRONG_PROVIDER, WRONG_MODEL, WRONG_TIER, WRONG_DURATION block before provider."""
+        db_path = str(tmp_path / "spend_mismatch.db")
+        env = {
+            "SPEND_GUARD_DB_PATH": db_path,
+            "WEEKLY_PROVIDER_SPEND_CAP_RESET_RULE": "MONDAY_0000_UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_TIMEZONE": "UTC",
+            "WEEKLY_PROVIDER_SPEND_CAP_USD": "200.000",
+            "UNIT_TEST_ENV": "true",
+        }
+        psg.init_spend_guard_db(db_path=db_path, env=env)
+
+        _create_owner_live_authorization_test_fixture(
+            authorization_id="rcpt_mismatch",
+            product_family="Product Video",
+            provider="shopaikey_video",
+            tier="veo3.1-fast",
+            user_id="user_mis",
+            job_id="job_mis",
+            request_id="req_mis",
+            operation="image_to_video",
+            allowed_scene_slots="*",
+            expected_max_provider_spend_micro_usd=1400000,
+            db_path=db_path,
+            env=env,
+        )
+        conf_mis = create_bot_confirmation(
+            mint_authority=create_test_mint_authority(
+                chat_id="chat_mis",
+                user_id="user_mis",
+                job_id="job_mis",
+                request_id="req_mis",
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_mismatch",
+                expected_max_provider_spend_usd=Decimal("1.40"),
+            ),
+            chat_id="chat_mis",
+            user_id="user_mis",
+            job_id="job_mis",
+            request_id="req_mis",
+            operation="image_to_video",
+            scene_index=1,
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_mismatch",
+            expected_max_cost_usd=Decimal("1.40"),
+            db_path=db_path,
+            env=env,
+        )
+
+        # 1. WRONG_PROVIDER = BLOCK
+        ctx_wp = psg.SpendGuardContext(
+            job_id="job_mis", request_id="req_mis", trace_id="tr_wp",
+            chat_id="chat_mis", user_id="user_mis", scene_index=1, product_family="Product Video",
+            provider="unregistered_provider", operation="image_to_video", model="veo3.1-fast",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_mis, owner_receipt="rcpt_mismatch",
+            metadata={"quality_tier": 400},
+        )
+        res_wp = psg.reserve_provider_spend(ctx_wp, db_path=db_path, env=env)
+        assert res_wp.allowed is False
+        assert res_wp.blocker == "paid_transport_authority_unregistered"
+
+        # 2. WRONG_MODEL = BLOCK
+        ctx_wm = psg.SpendGuardContext(
+            job_id="job_mis", request_id="req_mis", trace_id="tr_wm",
+            chat_id="chat_mis", user_id="user_mis", scene_index=1, product_family="Product Video",
+            provider="shopaikey_video", operation="image_to_video", model="unregistered_model",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_mis, owner_receipt="rcpt_mismatch",
+            metadata={"quality_tier": 400},
+        )
+        res_wm = psg.reserve_provider_spend(ctx_wm, db_path=db_path, env=env)
+        assert res_wm.allowed is False
+        assert res_wm.blocker == "provider_max_cost_authority_missing"
+
+        # 3. WRONG_TIER = BLOCK (tier=999)
+        ctx_wt = psg.SpendGuardContext(
+            job_id="job_mis", request_id="req_mis", trace_id="tr_wt",
+            chat_id="chat_mis", user_id="user_mis", scene_index=1, product_family="Product Video",
+            provider="shopaikey_video", operation="image_to_video", model="veo3.1-fast",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_mis, owner_receipt="rcpt_mismatch",
+            metadata={"quality_tier": 999},
+        )
+        res_wt = psg.reserve_provider_spend(ctx_wt, db_path=db_path, env=env)
+        assert res_wt.allowed is False
+        assert res_wt.blocker == "provider_max_cost_authority_missing"
+
+        # 4. WRONG_DURATION = BLOCK (duration_seconds=999 in Storyboard 8s contract)
+        ctx_wd = psg.SpendGuardContext(
+            job_id="job_mis", request_id="req_mis", trace_id="tr_wd",
+            chat_id="chat_mis", user_id="user_mis", scene_index=1, product_family="Product Video",
+            provider="shopaikey_video", operation="image_to_video", model="veo3.1-fast",
+            entrypoint="bot", user_flow="product_video_bot", bot_originated_action=True,
+            is_paid_live_attempt=False, bot_confirm_authority=conf_mis, owner_receipt="rcpt_mismatch",
+            metadata={"quality_tier": 400, "duration_seconds": 999, "product_type": "storyboard_prompt"},
+        )
+        res_wd = psg.reserve_provider_spend(ctx_wd, db_path=db_path, env=env)
+        assert res_wd.allowed is False
+        assert res_wd.blocker == "provider_max_cost_authority_missing"
+
+    def test_caller_metadata_cannot_raise_canonical_bound(self, tmp_path):
+        """Proves CALLER_METADATA_CANNOT_RAISE_CANONICAL_BOUND=PASS."""
+        mint = create_test_mint_authority(
+            chat_id="chat_inf",
+            user_id="user_inf",
+            job_id="job_inf",
+            request_id="req_inf",
+            purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+            owner_receipt="rcpt_inf",
+            expected_max_provider_spend_usd=Decimal("1.40"),
+        )
+        # Attempting to forge an inflated expected_max_cost_usd raises PermissionError unconditionally
+        with pytest.raises(PermissionError) as exc_info:
+            create_bot_confirmation(
+                mint_authority=mint,
+                chat_id="chat_inf",
+                user_id="user_inf",
+                job_id="job_inf",
+                request_id="req_inf",
+                operation="image_to_video",
+                scene_index=1,
+                purpose=PURPOSE_OWNER_AUTHORIZED_PAID_LIVE_TEST,
+                owner_receipt="rcpt_inf",
+                expected_max_cost_usd=Decimal("999.00"),
+            )
+        assert "CALLER_CAN_OVERRIDE_EXPECTED_MAX_SPEND=NO" in str(exc_info.value)
+
 
     def test_storyboard_tier400_spend_authority(self):
         auth = psg.resolve_paid_transport_authority("Product Video", "shopaikey_video", "create_video_task")

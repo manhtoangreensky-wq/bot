@@ -1670,6 +1670,16 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     asset_pack = strip_secret_fields(_json_loads(project.get("asset_pack_json"), {}))
     invoice = strip_secret_fields(_json_loads(project.get("invoice_json"), {}))
     addon_plan = strip_secret_fields(_json_loads(project.get("addon_plan_json"), {}))
+    product_type = str(
+        hydrated_job.get("product_type")
+        or persisted_result.get("product_type")
+        or asset_pack.get("product_type")
+        or asset_pack.get("video_product_type")
+        or invoice.get("product_type")
+        or project.get("product_type")
+        or project.get("profile_id")
+        or ""
+    ).strip().lower()
     scene_cards = (
         _scene_cards_from_project(project, scenes)
         or list(hydrated_job.get("scene_cards") or [])
@@ -1677,10 +1687,44 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
         or list(asset_pack.get("scene_cards") or [])
         or list(invoice.get("scene_cards") or [])
     )
-    quality_source = project.get("quality_tier")
-    if quality_source in (None, ""):
-        quality_source = hydrated_job.get("quality_tier")
-    quality_tier = _safe_int(quality_source, 200)
+    is_storyboard_route = (
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str(hydrated_job.get("engine_adapter") or persisted_result.get("engine_adapter") or asset_pack.get("engine_adapter") or "").strip().lower() == "storyboard_scene_image_video_engine"
+    )
+    explicit_job_tier = (
+        hydrated_job.get("selected_quality_tier")
+        or hydrated_job.get("routing_quality_tier")
+        or hydrated_job.get("tier_id")
+        or hydrated_job.get("quality_tier")
+        or persisted_result.get("selected_quality_tier")
+        or persisted_result.get("routing_quality_tier")
+        or persisted_result.get("tier_id")
+        or persisted_result.get("quality_tier")
+        or asset_pack.get("selected_quality_tier")
+        or asset_pack.get("routing_quality_tier")
+        or asset_pack.get("tier_id")
+        or asset_pack.get("quality_tier")
+        or invoice.get("selected_quality_tier")
+        or invoice.get("routing_quality_tier")
+        or invoice.get("tier_id")
+        or invoice.get("quality_tier")
+        or project.get("tier_id")
+    )
+    if is_storyboard_route:
+        if explicit_job_tier not in (None, ""):
+            quality_tier = _safe_int(explicit_job_tier, 0)
+        else:
+            proj_tier = _safe_int(project.get("quality_tier"), 0)
+            if proj_tier in {400, 800}:
+                quality_tier = proj_tier
+            else:
+                quality_tier = 0
+    else:
+        quality_source = explicit_job_tier or project.get("quality_tier")
+        if quality_source not in (None, ""):
+            quality_tier = _safe_int(quality_source, 0)
+        else:
+            quality_tier = 200
     scene_count = max(1, _safe_int(project.get("scene_count") or hydrated_job.get("scene_count") or len(scene_cards) or 1, 1))
     ratio = str(project.get("ratio") or hydrated_job.get("aspect_ratio") or hydrated_job.get("ratio") or "9:16")
     render_mode = str(asset_pack.get("render_mode") or invoice.get("render_mode") or hydrated_job.get("render_mode") or RENDER_MODE_REAL).strip().lower().replace("-", "_")
@@ -1698,15 +1742,7 @@ def build_worker_job_payload(hydrated_job: dict) -> dict:
     cleaned_user_prompt = re.sub(r"\s+", " ", str(asset_pack.get("cleaned_user_prompt") or original_user_prompt or "")).strip()[:8000]
     provider_order = asset_pack.get("provider_order") or invoice.get("provider_order") or hydrated_job.get("provider_order") or "shopaikey,key4u"
     source = str(asset_pack.get("source") or invoice.get("source") or hydrated_job.get("source") or REMOTE_WORKER_PRODUCT_VIDEO_SOURCE)
-    product_type = str(
-        hydrated_job.get("product_type")
-        or asset_pack.get("product_type")
-        or asset_pack.get("video_product_type")
-        or invoice.get("product_type")
-        or project.get("product_type")
-        or project.get("profile_id")
-        or ""
-    )
+    # product_type resolved above
     is_storyboard = product_type in {"storyboard_prompt", "storyboard_to_video"}
     engine_adapter = str(
         hydrated_job.get("engine_adapter")
