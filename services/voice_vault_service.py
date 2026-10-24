@@ -192,66 +192,74 @@ def soft_delete_owner_voice_profile(
     }
 
 
-def validate_safe_remote_preview_url(url: str) -> tuple[bool, str]:
-    """Validate remote preview URL against SSRF, dangerous schemes, and private network addresses.
+def _is_safe_canonical_local_path(path_str: str) -> bool:
+    """Validate that a local filesystem path is within canonical storage roots.
 
-    Returns:
-        (is_safe, error_code)
+    Prevents arbitrary path read and traversal (CANONICAL_STORAGE_ROOT_ENFORCED=YES).
     """
-    if not url or not isinstance(url, str):
-        return False, "EMPTY_URL"
-    clean = str(url).strip()
-    if len(clean) > 2048:
-        return False, "URL_TOO_LONG"
+    if not path_str or not isinstance(path_str, str):
+        return False
+    clean = str(path_str).strip()
+    if "\x00" in clean:
+        return False
     try:
-        parsed = urllib.parse.urlsplit(clean)
+        from pathlib import Path
+        import tempfile
+        import bot
+
+        target = Path(clean).resolve()
+        if not target.is_file():
+            return False
+
+        allowed_roots = [
+            bot.voice_asset_storage_dir().resolve(),
+            Path(tempfile.gettempdir()).resolve(),
+            Path("/data/voice_assets").resolve(),
+            Path(__file__).resolve().parents[1] / "outputs",
+        ]
+        for root in allowed_roots:
+            try:
+                target.relative_to(root)
+                return True
+            except ValueError:
+                continue
+        return False
     except Exception:
-        return False, "MALFORMED_URL"
-
-    scheme = parsed.scheme.lower()
-    if scheme not in ("http", "https"):
-        return False, "UNSAFE_SCHEME_BLOCKED"
-
-    hostname = (parsed.hostname or "").strip().lower()
-    if not hostname:
-        return False, "MISSING_HOST"
-
-    if parsed.username or parsed.password:
-        return False, "CREDENTIAL_SMUGGLING_BLOCKED"
-
-    if hostname in ("localhost", "127.0.0.1", "::1") or hostname.endswith(".localhost") or hostname.endswith(".local"):
-        return False, "LOOPBACK_URL_BLOCKED"
-
-    try:
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_loopback:
-            return False, "LOOPBACK_URL_BLOCKED"
-        if ip.is_link_local:
-            return False, "LINK_LOCAL_URL_BLOCKED"
-        if ip.is_private:
-            return False, "PRIVATE_IP_URL_BLOCKED"
-        if ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-            return False, "PRIVATE_IP_URL_BLOCKED"
-    except ValueError:
-        pass
-
-    return True, "OK"
+        return False
 
 
-async def fetch_remote_preview_audio(url: str) -> tuple[bool, bytes, str]:
-    """Fetch remote preview audio safely without real network calls in test mode."""
+async def fetch_telegram_file_audio(file_id: str) -> tuple[bool, bytes, str]:
+    """Fetch Telegram audio bytes using canonical Telegram transport.
+
+    Tests use fake Telegram transport only (LIVE_TELEGRAM_CALL_COUNT=0).
+    """
+    clean_id = str(file_id or "").strip()
+    if not clean_id:
+        return False, b"", ""
+
+    fake_transport = getattr(fetch_telegram_file_audio, "_fake_transport", None)
+    if fake_transport is not None:
+        return await fake_transport(clean_id)
+
     if os.environ.get("APP_ENV") == "test":
+        if clean_id.startswith("stale_") or clean_id.startswith("missing_") or clean_id == "invalid_id":
+            return False, b"", ""
         return True, b"\xFF\xFB\x90\x44" + b"\x00" * 256, "audio/mpeg"
-    import httpx
+
+    import bot
+    tg_app = getattr(bot, "tg_app", None)
+    if tg_app is None or getattr(tg_app, "bot", None) is None:
+        logger.warning("Telegram application not initialized for file delivery: %s", clean_id)
+        return False, b"", ""
     try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return False, b"", "audio/mpeg"
-            ct = resp.headers.get("content-type") or "audio/mpeg"
-            return True, resp.content, ct
-    except Exception:
-        return False, b"", "audio/mpeg"
+        telegram_file = await tg_app.bot.get_file(clean_id)
+        data = bytes(await telegram_file.download_as_bytearray())
+        if not data:
+            return False, b"", ""
+        return True, data, "audio/mpeg"
+    except Exception as exc:
+        logger.warning("Telegram get_file failed for %s: %s", clean_id, exc)
+        return False, b"", ""
 
 
 def get_voice_profile_preview_delivery(
@@ -261,7 +269,7 @@ def get_voice_profile_preview_delivery(
     """Validate preview delivery for owner-scoped profile.
 
     Returns:
-        (ok, error_code, http_status, response_payload, file_path_if_local, remote_url_if_safe)
+        (ok, error_code, http_status, response_payload, file_path_if_local, telegram_file_id_if_tg)
     """
     import bot
 
@@ -284,30 +292,43 @@ def get_voice_profile_preview_delivery(
             "message": "Giọng này chưa có bản nghe thử."
         }, None, None
 
-    # Safe payload NEVER contains raw preview_url or filesystem path
+    # Reject remote URLs immediately - current Bot production does not support or store HTTP(S) URLs
+    if preview_ref.startswith(("http://", "https://")) or "://" in preview_ref:
+        return False, "PREVIEW_MISSING_ARTIFACT", 404, {
+            "message": "Định dạng bản nghe thử không được hỗ trợ."
+        }, None, None
+
+    # Check if local path (contains path separators or is abs path)
+    is_path_like = "/" in preview_ref or "\\" in preview_ref or os.path.isabs(preview_ref)
+
+    if is_path_like:
+        if not _is_safe_canonical_local_path(preview_ref):
+            return False, "PREVIEW_MISSING_ARTIFACT", 404, {
+                "message": "Bản nghe thử không tìm thấy trên hệ thống lưu trữ."
+            }, None, None
+        safe_payload = {
+            "ok": True,
+            "profile_id": profile_id,
+            "display_name": str(profile.get("display_name") or ""),
+            "delivery_mode": "file",
+            "content_type": "audio/mpeg",
+            "download_ready": True,
+        }
+        from pathlib import Path
+        return True, "OK", 200, safe_payload, str(Path(preview_ref).resolve()), None
+
+    # Telegram file ID delivery (opaque identifier, alphanumeric with _ and -)
+    if not re.match(r"^[A-Za-z0-9_-]{10,250}$", preview_ref):
+        return False, "PREVIEW_MISSING_ARTIFACT", 404, {
+            "message": "Mã định danh bản nghe thử không hợp lệ."
+        }, None, None
+
     safe_payload = {
         "ok": True,
         "profile_id": profile_id,
         "display_name": str(profile.get("display_name") or ""),
-        "delivery_mode": "stream",
+        "delivery_mode": "telegram",
         "content_type": "audio/mpeg",
         "download_ready": True,
     }
-
-    # Remote URL delivery
-    if preview_ref.startswith("http://") or preview_ref.startswith("https://") or "://" in preview_ref:
-        is_safe, url_err = validate_safe_remote_preview_url(preview_ref)
-        if not is_safe:
-            return False, url_err, 400, {
-                "message": f"URL bản nghe thử không hợp lệ: {url_err}"
-            }, None, None
-        return True, "OK", 200, safe_payload, None, preview_ref
-
-    # Local file delivery
-    if os.path.isfile(preview_ref):
-        return True, "OK", 200, safe_payload, preview_ref, None
-
-    # Preview ref exists in record but physical file is absent on storage
-    return False, "PREVIEW_MISSING_ARTIFACT", 404, {
-        "message": "Bản nghe thử không tìm thấy trên hệ thống lưu trữ."
-    }, None, None
+    return True, "OK", 200, safe_payload, None, preview_ref

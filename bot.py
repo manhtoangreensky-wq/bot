@@ -284602,7 +284602,7 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
             content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
         )
 
-    ok, err_code, status_code, result, file_path, remote_url = get_voice_profile_preview_delivery(clean_actor, profile_id)
+    ok, err_code, status_code, result, file_path, telegram_file_id = get_voice_profile_preview_delivery(clean_actor, profile_id)
     if not ok:
         return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
 
@@ -284622,14 +284622,14 @@ async def api_internal_voice_profile_preview(profile_id: int, request: Request):
             headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
         )
 
-    if remote_url:
-        from services.voice_vault_service import fetch_remote_preview_audio
-        ok_fetch, audio_bytes, media_type = await fetch_remote_preview_audio(remote_url)
-        if not ok_fetch:
-            return JSONResponse(status_code=502, content={"ok": False, "error_code": "PREVIEW_FETCH_FAILED", "message": "Không thể tải tệp âm thanh"})
+    if telegram_file_id:
+        from services.voice_vault_service import fetch_telegram_file_audio
+        ok_fetch, audio_bytes, media_type = await fetch_telegram_file_audio(telegram_file_id)
+        if not ok_fetch or not audio_bytes:
+            return JSONResponse(status_code=404, content={"ok": False, "error_code": "PREVIEW_MISSING_ARTIFACT", "message": "Không thể tải bản nghe thử từ Telegram"})
         return Response(
             content=audio_bytes,
-            media_type=media_type,
+            media_type=media_type or "audio/mpeg",
             headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
         )
 
