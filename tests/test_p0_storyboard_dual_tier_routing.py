@@ -9,10 +9,16 @@ Verifies the Owner-approved dual-tier routing architecture for Storyboard (Direc
    - Routes to key4u_video with kling-v3 ($12.24009792/scene, $24.48019584 for 2 scenes).
    - Customer unit: 1,714 Xu/scene, 2-scene quote: 3,086 Xu.
    - Scene duration: 8 seconds per scene.
-3. Strict Tier Eligibility:
+3. Strict Tier Eligibility & Supreme Precedence:
    - Storyboard public catalog and package resolutions strictly restricted to [400, 800].
-   - All other tiers (200, 300, 500, 600, 700, 1000, 1200, 1500) FAIL CLOSED before provider.
-4. Explicit overrides preserved and cannot bypass spend guard.
+   - All other tiers (200, 300, 500, 600, 700, 1000, 1200, 1500) FAIL CLOSED before provider,
+     even when selected_provider, selected_model, asset_pack, or invoice overrides are supplied.
+   - Cross-tier overrides (e.g. Tier 400 with Kling or Key4U; Tier 800 with Veo or ShopAIKey) are BLOCKED.
+4. Production Spend Authority (services/provider_spend_guard.py):
+   - Tier 400 2 scenes: 1,400,000 micro-USD ($1.40).
+   - Tier 800 2 scenes: 24,480,196 micro-USD ($24.48019584).
+   - Strict validation: wrong provider, model, tier, duration fail-closed.
+   - Caller metadata cannot elevate canonical spend bounds.
 5. Zero real external provider calls; all provider I/O mocked and test-isolated.
 """
 
@@ -145,7 +151,7 @@ class TestStoryboardTierEligibilityAndFailClosed:
         prices = [p["price"] for p in packages]
         assert prices == [400, 800]
 
-    def test_unsupported_tiers_fail_closed_before_provider(self):
+    def test_unsupported_tier_no_override_blocks(self):
         unsupported = [200, 300, 500, 600, 700, 1000, 1200, 1500]
         for tid in unsupported:
             job = {
@@ -159,6 +165,170 @@ class TestStoryboardTierEligibilityAndFailClosed:
             with pytest.raises(RealVideoRenderError) as exc_info2:
                 _resolve_storyboard_i2v_model(job)
             assert f"storyboard_unsupported_tier:{tid}" in str(exc_info2.value)
+
+    def test_unsupported_tier_provider_override_blocks(self):
+        """Unsupported tier must block even if valid provider is explicitly requested."""
+        for tid in [500, 700]:
+            job_key4u = {
+                "product_type": "storyboard_to_video",
+                "tier_id": tid,
+                "selected_provider": "key4u_video",
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_key4u)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+            job_shopai = {
+                "product_type": "storyboard_to_video",
+                "tier_id": tid,
+                "selected_provider": "shopaikey_video",
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_shopai)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+    def test_unsupported_tier_model_override_blocks(self):
+        """Unsupported tier must block even if valid model is explicitly requested."""
+        for tid in [500, 700]:
+            job_kling = {
+                "product_type": "storyboard_to_video",
+                "tier_id": tid,
+                "selected_model": "kling-v3",
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_kling)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+            with pytest.raises(RealVideoRenderError) as exc:
+                _resolve_storyboard_i2v_model(job_kling)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+            job_veo = {
+                "product_type": "storyboard_to_video",
+                "tier_id": tid,
+                "selected_model": "veo3.1-fast",
+            }
+            with pytest.raises(RealVideoRenderError) as exc:
+                _provider_order(job_veo)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+            with pytest.raises(RealVideoRenderError) as exc:
+                _resolve_storyboard_i2v_model(job_veo)
+            assert f"storyboard_unsupported_tier:{tid}" in str(exc.value)
+
+    def test_unsupported_tier_asset_pack_and_invoice_overrides_block(self):
+        """Unsupported tier inside asset_pack or invoice must fail closed."""
+        job_asset = {
+            "product_type": "storyboard_to_video",
+            "asset_pack": {
+                "tier_id": 700,
+                "selected_provider": "key4u_video",
+                "selected_model": "kling-v3",
+            },
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_asset)
+        assert "storyboard_unsupported_tier:700" in str(exc.value)
+
+        job_inv = {
+            "product_type": "storyboard_to_video",
+            "invoice": {
+                "tier_id": 500,
+                "selected_provider": "shopaikey_video",
+                "selected_model": "veo3.1-fast",
+            },
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_inv)
+        assert "storyboard_unsupported_tier:500" in str(exc.value)
+
+    def test_cross_tier_overrides_block(self):
+        """Cross-tier provider or model overrides must be strictly blocked."""
+        # Tier 400 with Key4U or Kling -> BLOCK
+        job_t400_k4u = {
+            "product_type": "storyboard_to_video",
+            "tier_id": 400,
+            "selected_provider": "key4u_video",
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_t400_k4u)
+        assert "storyboard_cross_tier_override:400:key4u_video" in str(exc.value)
+
+        job_t400_kling = {
+            "product_type": "storyboard_to_video",
+            "tier_id": 400,
+            "selected_model": "kling-v3",
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_t400_kling)
+        assert "storyboard_cross_tier_override:400:kling-v3" in str(exc.value)
+
+        with pytest.raises(RealVideoRenderError) as exc:
+            _resolve_storyboard_i2v_model(job_t400_kling)
+        assert "storyboard_cross_tier_override:400:kling-v3" in str(exc.value)
+
+        # Tier 800 with ShopAIKey or Veo -> BLOCK
+        job_t800_sak = {
+            "product_type": "storyboard_to_video",
+            "tier_id": 800,
+            "selected_provider": "shopaikey_video",
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_t800_sak)
+        assert "storyboard_cross_tier_override:800:shopaikey_video" in str(exc.value)
+
+        job_t800_veo = {
+            "product_type": "storyboard_to_video",
+            "tier_id": 800,
+            "selected_model": "veo3.1-fast",
+        }
+        with pytest.raises(RealVideoRenderError) as exc:
+            _provider_order(job_t800_veo)
+        assert "storyboard_cross_tier_override:800:veo3.1-fast" in str(exc.value)
+
+        with pytest.raises(RealVideoRenderError) as exc:
+            _resolve_storyboard_i2v_model(job_t800_veo)
+        assert "storyboard_cross_tier_override:800:veo3.1-fast" in str(exc.value)
+
+    def test_bot_prepare_project_for_invoice_fail_closed_and_cross_tier(self):
+        """Verifies bot invoice preparation enforces fail-closed and blocks cross-tier overrides."""
+        # Unsupported tier 700 fails closed
+        session_unsupported = {
+            "flow_kind": "storyboard",
+            "draft": {
+                "b14_quality_xu": 700,
+                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+            },
+        }
+        with pytest.raises(ValueError) as exc:
+            bot.video_b14_prepare_project_for_invoice(12345, session_unsupported)
+        assert "storyboard_unsupported_tier:700" in str(exc.value)
+
+        # Cross-tier override on Tier 400 with Kling
+        session_cross_400 = {
+            "flow_kind": "storyboard",
+            "draft": {
+                "b14_quality_xu": 400,
+                "selected_model": "kling-v3",
+                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+            },
+        }
+        with pytest.raises(ValueError) as exc:
+            bot.video_b14_prepare_project_for_invoice(12345, session_cross_400)
+        assert "storyboard_cross_tier_override:400:kling-v3" in str(exc.value)
+
+        # Cross-tier override on Tier 800 with Veo
+        session_cross_800 = {
+            "flow_kind": "storyboard",
+            "draft": {
+                "b14_quality_xu": 800,
+                "selected_model": "veo3.1-fast",
+                "b14_storyboard_plan": {"scenes": [{"scene_id": 1}]},
+            },
+        }
+        with pytest.raises(ValueError) as exc:
+            bot.video_b14_prepare_project_for_invoice(12345, session_cross_800)
+        assert "storyboard_cross_tier_override:800:veo3.1-fast" in str(exc.value)
 
 
 class TestStoryboardDualTierEconomics:
@@ -223,7 +393,8 @@ class TestStoryboardDualTierRoutingResolution:
         assert model == "kling-v3", f"Expected 'kling-v3', got {model}"
         assert model in STORYBOARD_PROVEN_I2V_MODELS_BY_PROVIDER["key4u_video"]
 
-    def test_explicit_model_overrides_work_for_both_tiers(self):
+    def test_legacy_internal_jobs_without_numeric_tier_use_model_override(self):
+        """Legacy jobs without numeric tier retain model/provider resolution."""
         job_kling = {
             "product_type": "storyboard_prompt",
             "selected_model": "kling-v3",
@@ -238,7 +409,7 @@ class TestStoryboardDualTierRoutingResolution:
         assert _provider_order(job_veo) == ["shopaikey_video"]
         assert _resolve_storyboard_i2v_model(job_veo, provider="shopaikey_video") == "veo3.1-fast"
 
-    def test_explicit_provider_overrides(self):
+    def test_legacy_internal_jobs_without_numeric_tier_use_provider_override(self):
         job_shopai = {
             "product_type": "storyboard_prompt",
             "selected_provider": "shopaikey_video",
@@ -252,6 +423,123 @@ class TestStoryboardDualTierRoutingResolution:
         }
         assert _provider_order(job_k4u) == ["key4u_video"]
         assert _resolve_storyboard_i2v_model(job_k4u, provider="key4u_video") == "kling-v3"
+
+
+class TestStoryboardSpendAuthority:
+    """Proves Storyboard spend authority via services/provider_spend_guard.py."""
+
+    def test_storyboard_tier400_spend_authority(self):
+        auth = psg.resolve_paid_transport_authority("Product Video", "shopaikey_video", "create_video_task")
+        assert auth is not None
+
+        ctx = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="shopaikey_video",
+            model="veo3.1-fast",
+            operation="create_video_task",
+            metadata={
+                "product_type": "storyboard_prompt",
+                "tier_id": 400,
+                "duration_seconds": 8,
+                "scene_count": 2,
+            },
+        )
+        cost_micro, proven, source = psg.resolve_canonical_cost_micro_usd(ctx, auth)
+        assert proven is True
+        assert cost_micro == 1_400_000  # $1.40 for 2 scenes
+        assert "veo3.1-fast:8s" in source
+
+    def test_storyboard_tier800_spend_authority(self):
+        auth = psg.resolve_paid_transport_authority("Product Video", "key4u_video", "create_video_task")
+        assert auth is not None
+
+        ctx = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            metadata={
+                "product_type": "storyboard_prompt",
+                "tier_id": 800,
+                "duration_seconds": 8,
+                "scene_count": 2,
+            },
+        )
+        cost_micro, proven, source = psg.resolve_canonical_cost_micro_usd(ctx, auth)
+        assert proven is True
+        assert cost_micro == 24_480_196  # $24.48019584 for 2 scenes
+        assert "kling-v3:8s" in source
+
+    def test_storyboard_spend_authority_boundaries_and_fail_closed(self):
+        auth_k4u = psg.resolve_paid_transport_authority("Product Video", "key4u_video", "create_video_task")
+        auth_sak = psg.resolve_paid_transport_authority("Product Video", "shopaikey_video", "create_video_task")
+
+        # WRONG_PROVIDER = BLOCK
+        ctx_wrong_prov = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="key4u_video",
+            model="veo3.1-fast",
+            operation="create_video_task",
+            metadata={"product_type": "storyboard_prompt", "tier_id": 400, "duration_seconds": 8, "scene_count": 2},
+        )
+        cost, proven, source = psg.resolve_canonical_cost_micro_usd(ctx_wrong_prov, auth_k4u)
+        assert proven is False
+        assert "storyboard_tier_provider_mismatch:400" in source
+
+        # WRONG_MODEL = BLOCK
+        ctx_wrong_model = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="key4u_video",
+            model="veo3.1-fast",
+            operation="create_video_task",
+            metadata={"product_type": "storyboard_prompt", "tier_id": 800, "duration_seconds": 8, "scene_count": 2},
+        )
+        cost, proven, source = psg.resolve_canonical_cost_micro_usd(ctx_wrong_model, auth_k4u)
+        assert proven is False
+        assert "storyboard_tier_model_mismatch:800" in source
+
+        # WRONG_TIER = BLOCK
+        ctx_wrong_tier = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            metadata={"product_type": "storyboard_prompt", "tier_id": 700, "duration_seconds": 8, "scene_count": 2},
+        )
+        cost, proven, source = psg.resolve_canonical_cost_micro_usd(ctx_wrong_tier, auth_k4u)
+        assert proven is False
+        assert "storyboard_unsupported_tier:700" in source
+
+        # WRONG_DURATION = BLOCK (e.g. 10s on Storyboard 8s contract)
+        ctx_wrong_dur = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="key4u_video",
+            model="kling-v3",
+            operation="create_video_task",
+            metadata={"product_type": "storyboard_prompt", "tier_id": 800, "duration_seconds": 10, "scene_count": 2},
+        )
+        cost, proven, source = psg.resolve_canonical_cost_micro_usd(ctx_wrong_dur, auth_k4u)
+        assert proven is False
+        assert "storyboard_tier_duration_mismatch:800" in source
+
+        # CALLER_METADATA_CANNOT_RAISE_BOUND = PASS
+        ctx_caller_inflation = psg.SpendGuardContext(
+            product_family="Product Video",
+            provider="shopaikey_video",
+            model="veo3.1-fast",
+            operation="create_video_task",
+            estimated_max_cost_usd=999.0,
+            metadata={
+                "product_type": "storyboard_prompt",
+                "tier_id": 400,
+                "duration_seconds": 8,
+                "scene_count": 2,
+                "cost_usd": 999.0,
+            },
+        )
+        cost, proven, _ = psg.resolve_canonical_cost_micro_usd(ctx_caller_inflation, auth_sak)
+        assert proven is True
+        assert cost == 1_400_000  # Stays strictly 1,400,000 micro-USD despite caller metadata
 
 
 class TestStoryboardDualTierRenderProgression:

@@ -522,5 +522,42 @@
         "total_vnd": 578500
       }
     }
-  ]
+  ],
+  "storyboard_tier_routes": {
+    "400": {
+      "product": "storyboard",
+      "tier_id": 400,
+      "quality_key": "storyboard_veo31_fast_8s",
+      "provider": "shopaikey",
+      "model": "veo3.1-fast",
+      "raw_model": "veo3.1-fast",
+      "seconds_per_scene": 8,
+      "usd_per_scene": 0.7,
+      "cost_basis": "0.70 USD/scene x 8s",
+      "customer_unit_xu": 371,
+      "two_scene_quote": {
+        "subtotal_xu": 742,
+        "discount_xu": 74,
+        "total_xu": 668
+      }
+    },
+    "800": {
+      "product": "storyboard",
+      "tier_id": 800,
+      "quality_key": "storyboard_kling_pro_audio_8s",
+      "provider": "key4u",
+      "model": "kling-video",
+      "raw_model": "kling-v3",
+      "seconds_per_scene": 8,
+      "usd_per_second": 1.53001224,
+      "usd_per_scene": 12.24009792,
+      "cost_basis": "1.53001224 USD/s x 8s",
+      "customer_unit_xu": 1714,
+      "two_scene_quote": {
+        "subtotal_xu": 3428,
+        "discount_xu": 342,
+        "total_xu": 3086
+      }
+    }
+  }
 }

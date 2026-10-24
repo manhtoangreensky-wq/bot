@@ -107486,7 +107486,12 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     storyboard_provider = ""
     storyboard_model = ""
     selected_family = ""
-    if product_type in {"storyboard_prompt", "storyboard_to_video"}:
+    is_storyboard = bool(
+        product_type in {"storyboard_prompt", "storyboard_to_video"}
+        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+        or bool(draft.get("b14_storyboard_plan"))
+    )
+    if is_storyboard:
         raw_cards = (
             draft.get("scene_cards")
             or draft.get("storyboard_panels")
@@ -107550,32 +107555,43 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
         )
         candidate_model = str(raw_candidate or "").strip()
 
-        if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
-            storyboard_provider = "shopaikey_video"
-        elif raw_provider in {"key4u", "k4u", "key4u_video"}:
-            storyboard_provider = "key4u_video"
-        elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
-            storyboard_provider = "key4u_video"
-        elif candidate_model == "veo_3_1-fast":
-            storyboard_provider = "key4u_video"
-        elif candidate_model == "veo3.1-fast":
-            storyboard_provider = "shopaikey_video"
-        else:
-            quality_tier = safe_int(
-                draft.get("b14_quality_xu")
-                or (draft.get("asset_pack") or {}).get("selected_quality_tier")
-                or (draft.get("b14_invoice") or {}).get("quality_xu"),
-                0
-            )
-            if quality_tier == 800:
-                storyboard_provider = "key4u_video"
-            elif quality_tier == 400:
-                storyboard_provider = "shopaikey_video"
-            elif quality_tier in {200, 300, 500, 600, 700, 1000, 1200, 1500}:
+        # Step 1: Resolve numeric Storyboard tier first (Supreme Authority)
+        quality_tier = safe_int(
+            draft.get("b14_quality_xu")
+            or (draft.get("asset_pack") or {}).get("selected_quality_tier")
+            or (draft.get("b14_invoice") or {}).get("quality_xu")
+            or draft.get("tier_id")
+            or (draft.get("asset_pack") or {}).get("tier_id")
+            or (draft.get("b14_invoice") or {}).get("tier_id"),
+            0
+        )
+        if quality_tier in {200, 300, 400, 500, 600, 700, 800, 1000, 1200, 1500}:
+            if quality_tier not in {400, 800}:
                 raise ValueError(f"storyboard_unsupported_tier:{quality_tier}")
+            if quality_tier == 400:
+                if raw_provider in {"key4u", "k4u", "key4u_video"} or candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                    raise ValueError(f"storyboard_cross_tier_override:400:{raw_provider or candidate_model}")
+                storyboard_provider = "shopaikey_video"
+                candidate_model = "veo3.1-fast"
+            elif quality_tier == 800:
+                if raw_provider in {"shopai", "shopaikey", "shopaikey_video"} or candidate_model in {"veo3.1-fast", "veo-3.1-fast", "veo_3_1-fast"}:
+                    raise ValueError(f"storyboard_cross_tier_override:800:{raw_provider or candidate_model}")
+                storyboard_provider = "key4u_video"
+                candidate_model = "kling-v3"
+        else:
+            # Step 2: Legacy/internal jobs with NO numeric tier (quality_tier == 0)
+            if raw_provider in {"shopai", "shopaikey", "shopaikey_video"}:
+                storyboard_provider = "shopaikey_video"
+            elif raw_provider in {"key4u", "k4u", "key4u_video"}:
+                storyboard_provider = "key4u_video"
+            elif candidate_model in {"kling-v3", "kling-3.0-turbo", "kling-video"}:
+                storyboard_provider = "key4u_video"
+            elif candidate_model == "veo_3_1-fast":
+                storyboard_provider = "key4u_video"
+            elif candidate_model == "veo3.1-fast":
+                storyboard_provider = "shopaikey_video"
             else:
                 storyboard_provider = "shopaikey_video"
-
         storyboard_model = _resolve_storyboard_i2v_model(
             {"selected_provider": storyboard_provider, "selected_model": candidate_model, "model": candidate_model},
             provider=storyboard_provider,

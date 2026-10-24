@@ -2595,9 +2595,11 @@ def resolve_canonical_cost_micro_usd(
         target_model = PRODUCT_VIDEO_MODEL_ALIAS_MAP.get((prov_key, raw_model), raw_model)
 
         target_tier = str(
-            context.metadata.get("quality_key")
+            context.metadata.get("tier_id")
+            or context.metadata.get("quality_key")
             or context.metadata.get("tier")
             or context.metadata.get("b14_quality")
+            or context.metadata.get("quality_xu")
             or ""
         ).strip().lower()
 
@@ -2609,6 +2611,97 @@ def resolve_canonical_cost_micro_usd(
             or context.metadata.get("scene_duration_seconds")
             or (context.metadata.get("selected_request_defaults") or {}).get("duration")
         )
+
+        product_type = str(
+            context.metadata.get("product_type")
+            or context.metadata.get("product")
+            or context.metadata.get("flow_kind")
+            or context.metadata.get("engine_route")
+            or ""
+        ).strip().lower()
+        is_storyboard = bool(
+            "storyboard" in product_type
+            or context.metadata.get("is_storyboard")
+            or context.metadata.get("storyboard")
+            or str(context.user_flow or "").strip().lower() == "storyboard"
+        )
+        if is_storyboard:
+            # Storyboard-specific pricing authority (Direction A: 8s per scene contract)
+            if target_tier in {"400", "veo31_fast_8", "storyboard_veo31_fast_8s"}:
+                if prov_key != "shopaikey":
+                    return 0, False, f"storyboard_tier_provider_mismatch:400:{prov_key}"
+                if target_model not in {"veo3.1-fast", "veo-3.1-fast"} and raw_model not in {"veo3.1-fast", "veo-3.1-fast"}:
+                    return 0, False, f"storyboard_tier_model_mismatch:400:{raw_model}"
+                if duration_param and int(float(duration_param)) != 8:
+                    return 0, False, f"storyboard_tier_duration_mismatch:400:{duration_param}"
+                unit_cost = Decimal("0.70")
+                scene_idx = 0
+                try:
+                    scene_idx = int(context.scene_index or 0)
+                except Exception:
+                    pass
+                if scene_idx >= 1:
+                    total_usd = unit_cost
+                else:
+                    scene_count = int(context.metadata.get("scene_count", 1) or 1)
+                    total_usd = unit_cost * Decimal(max(1, scene_count))
+                source_id = "config/product_video_price_route_map_20260827.json:storyboard:shopaikey:veo3.1-fast:8s"
+                return to_micro_usd(total_usd), True, source_id
+
+            if target_tier in {"800", "motion_pro_audio_10", "storyboard_kling_pro_audio_8s"}:
+                if prov_key != "key4u":
+                    return 0, False, f"storyboard_tier_provider_mismatch:800:{prov_key}"
+                if target_model not in {"kling-video", "kling-v3", "kling-3.0-turbo"} and raw_model not in {"kling-video", "kling-v3", "kling-3.0-turbo"}:
+                    return 0, False, f"storyboard_tier_model_mismatch:800:{raw_model}"
+                if duration_param and int(float(duration_param)) != 8:
+                    return 0, False, f"storyboard_tier_duration_mismatch:800:{duration_param}"
+                unit_cost = Decimal("12.24009792")
+                scene_idx = 0
+                try:
+                    scene_idx = int(context.scene_index or 0)
+                except Exception:
+                    pass
+                if scene_idx >= 1:
+                    total_usd = unit_cost
+                else:
+                    scene_count = int(context.metadata.get("scene_count", 1) or 1)
+                    total_usd = unit_cost * Decimal(max(1, scene_count))
+                source_id = "config/product_video_price_route_map_20260827.json:storyboard:key4u:kling-v3:8s"
+                return to_micro_usd(total_usd), True, source_id
+
+            if target_tier in {"200", "300", "500", "600", "700", "1000", "1200", "1500"}:
+                return 0, False, f"storyboard_unsupported_tier:{target_tier}"
+
+            if not target_tier:
+                if duration_param and int(float(duration_param)) != 8:
+                    return 0, False, f"storyboard_unsupported_duration:{duration_param}"
+                if prov_key == "shopaikey" and (target_model in {"veo3.1-fast", "veo-3.1-fast"} or raw_model in {"veo3.1-fast", "veo-3.1-fast"}):
+                    unit_cost = Decimal("0.70")
+                    scene_idx = 0
+                    try:
+                        scene_idx = int(context.scene_index or 0)
+                    except Exception:
+                        pass
+                    if scene_idx >= 1:
+                        total_usd = unit_cost
+                    else:
+                        scene_count = int(context.metadata.get("scene_count", 1) or 1)
+                        total_usd = unit_cost * Decimal(max(1, scene_count))
+                    return to_micro_usd(total_usd), True, "config/product_video_price_route_map_20260827.json:storyboard:shopaikey:veo3.1-fast:8s"
+                if prov_key == "key4u" and (target_model in {"kling-video", "kling-v3", "kling-3.0-turbo"} or raw_model in {"kling-video", "kling-v3", "kling-3.0-turbo"}):
+                    unit_cost = Decimal("12.24009792")
+                    scene_idx = 0
+                    try:
+                        scene_idx = int(context.scene_index or 0)
+                    except Exception:
+                        pass
+                    if scene_idx >= 1:
+                        total_usd = unit_cost
+                    else:
+                        scene_count = int(context.metadata.get("scene_count", 1) or 1)
+                        total_usd = unit_cost * Decimal(max(1, scene_count))
+                    return to_micro_usd(total_usd), True, "config/product_video_price_route_map_20260827.json:storyboard:key4u:kling-v3:8s"
+                return 0, False, f"ambiguous_storyboard_route_pricing:{prov_key}:{raw_model}" 
 
         filtered_tiers = tiers
         if target_tier:
