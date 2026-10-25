@@ -287586,6 +287586,65 @@ async def api_internal_free_tools_downloader_download(request: Request):
     return JSONResponse(status_code=status_code, content=result)
 
 
+
+@fastapi_app.get("/internal/v1/free-tools/downloader/delivery/{job_id}")
+async def api_internal_free_tools_downloader_delivery(job_id: str, request: Request):
+    """Deliver verified downloaded artifact safely without private filesystem path leakage."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.free_tools_service import handle_downloader_delivery
+    from fastapi.responses import FileResponse
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+
+    path = f"/internal/v1/free-tools/downloader/delivery/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    mode = str(request.query_params.get("mode") or "stream").strip().lower()
+    kind = str(request.query_params.get("kind") or "video").strip().lower()
+    download = str(request.query_params.get("download") or "").strip().lower() in ("1", "true", "yes")
+
+    ok, result, status_code = handle_downloader_delivery(
+        job_id=job_id,
+        actor_id=clean_actor,
+        kind=kind,
+        mode=mode,
+    )
+    if not ok:
+        return JSONResponse(status_code=status_code, content=result)
+
+    if mode == "meta":
+        return JSONResponse(status_code=status_code, content=result)
+
+    file_path, content_type, filename = result
+    content_disposition_type = "attachment" if download else "inline"
+    return FileResponse(
+        str(file_path),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'{content_disposition_type}; filename="{filename}"',
+            "X-Filename": filename,
+        },
+    )
+
+
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run(

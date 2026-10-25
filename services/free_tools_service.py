@@ -9,6 +9,7 @@ from __future__ import annotations
 import html
 import ipaddress
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,21 @@ from services.public_video_link_downloader import (
 logger = logging.getLogger(__name__)
 
 DANGEROUS_SCHEMES = ("javascript:", "data:", "file:", "vbscript:", "blob:")
+
+
+def is_downloader_public_enabled() -> bool:
+    """Canonical Bot authority for video downloader public readiness."""
+    try:
+        import bot
+        if hasattr(bot, "VIDEO_DOWNLOADER_PUBLIC_ENABLED"):
+            return bool(bot.VIDEO_DOWNLOADER_PUBLIC_ENABLED)
+    except Exception:
+        pass
+    val = os.getenv("VIDEO_DOWNLOADER_PUBLIC_ENABLED")
+    if val is not None:
+        return val.strip().lower() in {"1", "true", "yes", "on"}
+    linkdl_val = os.getenv("LINKDL_PUBLIC_ENABLED", "true")
+    return linkdl_val.strip().lower() in {"1", "true", "yes", "on"}
 
 
 # ─── 1. EXCHANGE RATE ─────────────────────────────────────────────────────────
@@ -134,88 +150,70 @@ def handle_avatar(
             "message": "Bạn cần xác nhận có quyền sử dụng hình ảnh và mô tả này.",
         }, 400
 
-    s = str(seed or "").strip()
-    if not s:
-        s = "toanaas_user"
+    clean_seed = str(seed or "").strip()
+    if not clean_seed:
+        clean_seed = "toanaas_user"
 
-    s_lower = s.lower()
+    # Enforce safe URL and anti-XSS constraints
+    s_lower = clean_seed.lower()
     if any(s_lower.startswith(sch) for sch in DANGEROUS_SCHEMES) or "<script" in s_lower or "javascript:" in s_lower:
         return False, {
             "ok": False,
             "error_code": "AVATAR_UNSAFE_URL_BLOCKED",
-            "message": "Mô tả hoặc seed avatar chứa ký tự không an toàn.",
+            "message": "Mô tả hoặc seed avatar chứa ký tự hoặc giao thức không an toàn.",
         }, 400
 
-    style_set_map = {
-        "realistic": 1,
-        "robot": 1,
-        "illustration": 2,
-        "monster": 2,
-        "creator": 4,
-        "cat": 4,
-        "business": 5,
-        "human": 5,
-    }
-    set_id = style_set_map.get(str(style or "").lower(), int(avatar_set or 1))
-    set_id = max(1, min(5, set_id))
-
-    try:
-        avatar_url = opt.generate_avatar_ai_url(s, set_id)
-    except Exception as exc:
-        logger.warning("Avatar generation error: %s", exc)
-        return False, {
-            "ok": False,
-            "error_code": "AVATAR_SOURCE_ERROR",
-            "message": "Lỗi sinh URL ảnh đại diện AI.",
-        }, 503
+    set_id = max(1, min(5, int(avatar_set or 1)))
+    avatar_url = opt.generate_avatar_ai_url(clean_seed, avatar_set=set_id)
 
     return True, {
         "ok": True,
         "avatar_url": avatar_url,
-        "seed": s,
+        "seed": clean_seed,
         "avatar_set": set_id,
-        "style": style,
+        "style": style or "realistic",
+        "rights_notice": "Người dùng đã xác nhận quyền sở hữu/sử dụng ảnh.",
     }, 200
 
 
 # ─── 4. VIDEO DOWNLOADER ──────────────────────────────────────────────────────
 
-def _get_downloader() -> PublicVideoLinkDownloader:
-    # Use existing singleton/factory from bot if present
-    return PublicVideoLinkDownloader()
+def _validate_downloader_url(url: str) -> tuple[bool, str, dict[str, Any]]:
+    clean = str(url or "").strip()
+    if not clean:
+        return False, "Liên kết không được để trống.", {"error_code": "DOWNLOADER_INVALID_URL"}
 
-def handle_downloader_inspect(url: str, requested_asset: str = "video") -> tuple[bool, dict[str, Any], int]:
-    clean_url = str(url or "").strip()
-    if not clean_url:
-        return False, {
-            "ok": False,
-            "error_code": "DOWNLOADER_INVALID_URL",
-            "message": "Liên kết không được để trống.",
-        }, 400
+    if len(clean) > 2000:
+        return False, "Liên kết vượt quá độ dài tối đa 2000 ký tự.", {"error_code": "DOWNLOADER_INVALID_URL"}
 
     try:
-        parsed = urlparse(clean_url)
+        parsed = urlparse(clean)
     except Exception:
-        parsed = None
+        return False, "Định dạng URL không hợp lệ.", {"error_code": "DOWNLOADER_INVALID_URL"}
 
-    if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"}:
+        return False, "Chỉ hỗ trợ giao thức HTTP/HTTPS.", {"error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED"}
+
+    host = (parsed.hostname or "").lower().strip()
+    if not host or _is_private_host(host):
+        return False, "Địa chỉ mạng nội bộ hoặc máy chủ cục bộ bị chặn vì lý do an toàn.", {
+            "error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED",
+            "blocked_host": host,
+        }
+
+    return True, clean, {"host": host}
+
+
+def handle_downloader_inspect(url: str, requested_asset: str = "video") -> tuple[bool, dict[str, Any], int]:
+    valid, clean_url, info = _validate_downloader_url(url)
+    if not valid:
         return False, {
             "ok": False,
-            "error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED",
-            "reason": "private_or_invalid",
-            "message": "Liên kết không hợp lệ hoặc thiếu giao thức http/https.",
+            "error_code": info.get("error_code", "DOWNLOADER_INVALID_URL"),
+            "message": clean_url,
         }, 400
 
-    host = (parsed.hostname or "").lower()
-    if parsed.username or parsed.password or _is_private_host(host):
-        return False, {
-            "ok": False,
-            "error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED",
-            "reason": "private_or_invalid",
-            "message": "Liên kết nội bộ, IP riêng tư hoặc loopback đã bị chặn.",
-        }, 400
-
-    downloader = _get_downloader()
+    downloader = PublicVideoLinkDownloader()
     detection = downloader.detect_link(clean_url)
     if not detection.get("ok"):
         reason = detection.get("reason") or "unsupported_platform"
@@ -227,8 +225,7 @@ def handle_downloader_inspect(url: str, requested_asset: str = "video") -> tuple
         }, 400
 
     # Public enabled guard
-    public_enabled = bool(globals().get("VIDEO_DOWNLOADER_PUBLIC_ENABLED", True))
-    if not public_enabled:
+    if not is_downloader_public_enabled():
         return False, {
             "ok": False,
             "error_code": "DOWNLOADER_PROVIDER_DISABLED_FAIL_CLOSED",
@@ -257,6 +254,7 @@ def handle_downloader_inspect(url: str, requested_asset: str = "video") -> tuple
         "rights_notice": VIDEO_DOWNLOADER_RIGHTS_COPY,
     }, 200
 
+
 def handle_downloader_download(
     url: str,
     requested_asset: str = "video",
@@ -279,29 +277,15 @@ def handle_downloader_download(
             "message": "Liên kết không được để trống.",
         }, 400
 
-    try:
-        parsed = urlparse(clean_url)
-    except Exception:
-        parsed = None
-
-    if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    valid, clean_url, info = _validate_downloader_url(clean_url)
+    if not valid:
         return False, {
             "ok": False,
-            "error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED",
-            "reason": "private_or_invalid",
-            "message": "Liên kết không hợp lệ.",
+            "error_code": info.get("error_code", "DOWNLOADER_INVALID_URL"),
+            "message": clean_url,
         }, 400
 
-    host = (parsed.hostname or "").lower()
-    if parsed.username or parsed.password or _is_private_host(host):
-        return False, {
-            "ok": False,
-            "error_code": "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED",
-            "reason": "private_or_invalid",
-            "message": "Liên kết nội bộ, IP riêng tư hoặc loopback đã bị chặn.",
-        }, 400
-
-    downloader = _get_downloader()
+    downloader = PublicVideoLinkDownloader()
     detection = downloader.detect_link(clean_url)
     if not detection.get("ok"):
         return False, {
@@ -311,8 +295,7 @@ def handle_downloader_download(
             "message": "Nền tảng chưa được hỗ trợ.",
         }, 400
 
-    public_enabled = bool(globals().get("VIDEO_DOWNLOADER_PUBLIC_ENABLED", True))
-    if not public_enabled:
+    if not is_downloader_public_enabled():
         return False, {
             "ok": False,
             "error_code": "DOWNLOADER_PROVIDER_DISABLED_FAIL_CLOSED",
@@ -351,11 +334,13 @@ def handle_downloader_download(
             "message": result.get("public_message") or "Tải video không thành công. TOAN AAS không trừ Xu.",
         }, 400
 
+    job_id = str(result.get("job_id", "")).strip()
+
     # Ensure Safe Delivery:
     # Do NOT leak server-private filesystem paths
     return True, {
         "ok": True,
-        "job_id": result.get("job_id", ""),
+        "job_id": job_id,
         "platform": result.get("platform") or detection.get("platform", ""),
         "kind": kind,
         "title": result.get("title", ""),
@@ -364,4 +349,96 @@ def handle_downloader_download(
         "status": "ready",
         "charged_xu": 0,
         "rights_notice": VIDEO_DOWNLOADER_RIGHTS_COPY,
+        "delivery_ready": True,
+        "delivery_url": f"/api/v1/tools/downloader/delivery/{job_id}?kind={kind}",
     }, 200
+
+
+def handle_downloader_delivery(
+    job_id: str,
+    actor_id: str,
+    kind: str = "video",
+    mode: str = "stream",
+) -> tuple[bool, Any, int]:
+    """Retrieve verified downloaded artifact without leaking private filesystem paths."""
+    clean_id = str(job_id or "").strip()
+    if not clean_id:
+        return False, {
+            "ok": False,
+            "error_code": "DOWNLOADER_JOB_NOT_FOUND",
+            "message": "Mã tải không được để trống.",
+        }, 404
+
+    downloader = PublicVideoLinkDownloader()
+    job = downloader.get_job(clean_id)
+    if not job:
+        return False, {
+            "ok": False,
+            "error_code": "DOWNLOADER_JOB_NOT_FOUND",
+            "message": "Không tìm thấy yêu cầu tải.",
+        }, 404
+
+    # Owner check: if job has user_id and actor_id is present, they must match
+    job_user = str(job.get("user_id") or "").strip()
+    clean_actor = str(actor_id or "").strip()
+    if job_user and clean_actor and job_user != clean_actor:
+        return False, {
+            "ok": False,
+            "error_code": "DOWNLOADER_FOREIGN_OWNER_BLOCKED",
+            "message": "Bạn không có quyền truy cập tệp tải này.",
+        }, 403
+
+    asset_kind = str(kind or job.get("requested_asset") or "video").lower().strip()
+    if asset_kind == "thumbnail":
+        asset_kind = "cover"
+    if asset_kind not in {"video", "audio", "cover"}:
+        asset_kind = "video"
+
+    asset_key = "cover_path" if asset_kind == "cover" else f"{asset_kind}_path"
+    cached_path = str(job.get(asset_key) or "").strip()
+    file_path = Path(cached_path) if cached_path else None
+
+    if not file_path or not file_path.is_file() or file_path.stat().st_size == 0:
+        # Attempt lookup in job directory
+        job_dir = downloader._job_dir(clean_id)
+        if job_dir.is_dir():
+            file_path = downloader._latest_file(job_dir, asset=asset_kind)
+
+    if not file_path or not file_path.is_file() or file_path.stat().st_size == 0:
+        return False, {
+            "ok": False,
+            "error_code": "DOWNLOADER_STALE_ARTIFACT_TRUTH",
+            "message": "Tệp tải không còn tồn tại trên hệ thống lưu trữ.",
+        }, 404
+
+    suffix = file_path.suffix.lower()
+    content_type_map = {
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".wav": "audio/wav",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/opus",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }
+    content_type = content_type_map.get(suffix, "application/octet-stream")
+
+    if str(mode or "").strip().lower() == "meta":
+        return True, {
+            "ok": True,
+            "job_id": clean_id,
+            "kind": asset_kind,
+            "content_type": content_type,
+            "bytes": file_path.stat().st_size,
+            "delivery_ready": True,
+            "status": "ready",
+        }, 200
+
+    safe_filename = f"toanaas_{clean_id}_{asset_kind}{suffix}"
+    return True, (file_path, content_type, safe_filename), 200

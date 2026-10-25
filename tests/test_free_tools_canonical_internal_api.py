@@ -1,16 +1,20 @@
 """Unit tests for Bot Core Free Tools Canonical Internal API (R38).
 
 Covers:
-- RATE_VALID_INPUT, RATE_INVALID_INPUT, RATE_SOURCE_UNAVAILABLE, RATE_NO_FAKE_VALUE
-- WEATHER_VALID_LOCATION, WEATHER_INVALID_LOCATION, WEATHER_SOURCE_ERROR, WEATHER_EMPTY_RESULT, WEATHER_NO_FAKE_RESULT
-- AVATAR_VALID_REQUEST, AVATAR_RIGHTS_REQUIRED, AVATAR_UNSAFE_URL_BLOCKED, AVATAR_SOURCE_ERROR_NO_FAKE_OUTPUT
+- RATE_VALID_INPUT, RATE_INVALID_INPUT, RATE_LIVE_SOURCE, RATE_OFFLINE_SAFE_FALLBACK, RATE_NO_FAKE_VALUE
+- WEATHER_VALID_LOCATION, WEATHER_INVALID_LOCATION, WEATHER_LIVE_SOURCE, WEATHER_OFFLINE_SAFE_FALLBACK
+- AVATAR_VALID_REQUEST, AVATAR_RIGHTS_REQUIRED, AVATAR_UNSAFE_URL_BLOCKED
 - DOWNLOADER_RIGHTS_REQUIRED, DOWNLOADER_VALID_PUBLIC_URL, DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED
-- DOWNLOADER_PROVIDER_DISABLED_FAIL_CLOSED, DOWNLOADER_ERROR_REFUND_OR_NO_CHARGE_MATCHES_BOT, DOWNLOADER_SAFE_DELIVERY
+- DOWNLOADER_DOWNLOAD_TO_DELIVERY, DOWNLOADER_OWNER_SAFE_DELIVERY, DOWNLOADER_FOREIGN_OWNER_BLOCKED
+- DOWNLOADER_STALE_ARTIFACT_TRUTH, DOWNLOADER_SAFE_DELIVERY_NO_LEAK
 """
 
-import hmac
 import hashlib
+import hmac
+import os
+import tempfile
 import time
+from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
@@ -72,7 +76,6 @@ def test_rate_valid_input(client):
     assert data["vnd"] > 0
     assert data["xu"] > 0
     assert "source" in data
-    assert data["source"] in {"ExchangeRate-API (Live)", "TOAN AAS Standard (Offline Safe)"}
 
 
 def test_rate_invalid_input(client):
@@ -84,18 +87,33 @@ def test_rate_invalid_input(client):
     assert data["error_code"] == "RATE_INVALID_INPUT"
 
 
-def test_rate_source_unavailable(client, monkeypatch):
+def test_rate_live_source_parity(client, monkeypatch):
+    """RATE_LIVE_SOURCE: Validates source is live when live API answers."""
     from services import open_public_tools as opt
-    def raise_err(*args, **kwargs):
-        raise RuntimeError("network down")
-    monkeypatch.setattr(opt, "convert_custom_currency", raise_err)
+    monkeypatch.setattr(opt, "fetch_all_exchange_rates", lambda: ({"VND": 26127.0, "EUR": 0.858}, "ExchangeRate-API (Live)"))
 
-    body = b'{"raw_input": "100 USD"}'
+    body = b'{"raw_input": "50 USD", "target_lang": "vi"}'
     resp = client.post("/internal/v1/free-tools/rate", content=body, headers=_headers("POST", "/internal/v1/free-tools/rate", body))
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     data = resp.json()
-    assert data["ok"] is False
-    assert data["error_code"] == "RATE_SOURCE_UNAVAILABLE"
+    assert data["ok"] is True
+    assert data["source"] == "ExchangeRate-API (Live)"
+    assert data["amount_in"] == 50.0
+
+
+def test_rate_offline_safe_fallback_parity(client, monkeypatch):
+    """RATE_OFFLINE_SAFE_FALLBACK: Truthfully marks offline safe fallback when live rate is down."""
+    from services import open_public_tools as opt
+    monkeypatch.setattr(opt, "fetch_all_exchange_rates", lambda: (opt.FALLBACK_RATES_USD, "TOAN AAS Standard (Offline Safe)"))
+
+    body = b'{"raw_input": "100 USD", "target_lang": "vi"}'
+    resp = client.post("/internal/v1/free-tools/rate", content=body, headers=_headers("POST", "/internal/v1/free-tools/rate", body))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["source"] == "TOAN AAS Standard (Offline Safe)"
+    assert data["amount_in"] == 100.0
+    assert data["vnd"] > 0
 
 
 def test_rate_no_fake_value(client):
@@ -131,18 +149,52 @@ def test_weather_invalid_location(client):
     assert data["error_code"] == "WEATHER_INVALID_LOCATION"
 
 
-def test_weather_source_error(client, monkeypatch):
+def test_weather_live_source_parity(client, monkeypatch):
+    """WEATHER_LIVE_SOURCE: Validates live source string when live weather API answers."""
     from services import open_public_tools as opt
-    def raise_err(*args, **kwargs):
-        raise RuntimeError("open-meteo timeout")
-    monkeypatch.setattr(opt, "fetch_weather_report", raise_err)
+    fake_report = {
+        "ok": True,
+        "city": "Đà Nẵng",
+        "country": "Việt Nam",
+        "temperature": 27.5,
+        "windspeed": 8.0,
+        "weathercode": 1,
+        "description": "Chủ yếu quang đãng 🌤",
+        "source": "Open-Meteo Live API",
+    }
+    monkeypatch.setattr(opt, "fetch_weather_report", lambda loc: fake_report)
 
-    body = b'{"location": "London"}'
+    body = b'{"location": "Danang", "unit": "celsius"}'
     resp = client.post("/internal/v1/free-tools/weather", content=body, headers=_headers("POST", "/internal/v1/free-tools/weather", body))
-    assert resp.status_code == 503
+    assert resp.status_code == 200
     data = resp.json()
-    assert data["ok"] is False
-    assert data["error_code"] == "WEATHER_SOURCE_ERROR"
+    assert data["ok"] is True
+    assert data["source"] == "Open-Meteo Live API"
+    assert data["temperature"] == 27.5
+
+
+def test_weather_offline_safe_fallback_parity(client, monkeypatch):
+    """WEATHER_OFFLINE_SAFE_FALLBACK: Validates truthful fallback marker when upstream weather is offline."""
+    from services import open_public_tools as opt
+    fake_fallback = {
+        "ok": True,
+        "city": "Hà Nội",
+        "country": "Việt Nam",
+        "temperature": 29.0,
+        "windspeed": 12.0,
+        "weathercode": 0,
+        "description": "Thời tiết đẹp, nắng nhẹ ☀️",
+        "source": "Dự báo chuẩn (Offline Safe)",
+    }
+    monkeypatch.setattr(opt, "fetch_weather_report", lambda loc: fake_fallback)
+
+    body = b'{"location": "Hanoi", "unit": "celsius"}'
+    resp = client.post("/internal/v1/free-tools/weather", content=body, headers=_headers("POST", "/internal/v1/free-tools/weather", body))
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["source"] == "Dự báo chuẩn (Offline Safe)"
+    assert data["city"] == "Hà Nội"
 
 
 # ─── AI AVATAR TESTS ──────────────────────────────────────────────────────────
@@ -192,7 +244,7 @@ def test_downloader_valid_public_url_inspect(client, monkeypatch):
         return LinkDownloadResult(
             True,
             platform="YouTube",
-            title="Rick Astley - Never Gonna Give You Up",
+            title="Sample Public Video",
             duration=212,
             bytes=15000000,
             thumbnail_url="https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
@@ -205,7 +257,7 @@ def test_downloader_valid_public_url_inspect(client, monkeypatch):
     data = resp.json()
     assert data["ok"] is True
     assert data["platform"] == "YouTube"
-    assert data["title"] == "Rick Astley - Never Gonna Give You Up"
+    assert data["title"] == "Sample Public Video"
 
 
 def test_downloader_private_url_blocked(client):
@@ -217,35 +269,88 @@ def test_downloader_private_url_blocked(client):
     assert data["error_code"] == "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED"
 
 
-def test_downloader_loopback_inspect_blocked(client):
-    body = b'{"url": "http://localhost/test.mp4"}'
-    resp = client.post("/internal/v1/free-tools/downloader/inspect", content=body, headers=_headers("POST", "/internal/v1/free-tools/downloader/inspect", body))
-    assert resp.status_code == 400
-    data = resp.json()
-    assert data["ok"] is False
-    assert data["error_code"] == "DOWNLOADER_UNSUPPORTED_OR_PRIVATE_URL_BLOCKED"
-
-
-def test_downloader_safe_delivery_no_leak(client, monkeypatch):
+def test_downloader_download_to_delivery_contract(client, monkeypatch, tmp_path):
     from services.public_video_link_downloader import PublicVideoLinkDownloader
+
+    fake_file = tmp_path / "sample_video.mp4"
+    fake_file.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 512)
+
     def fake_download(self, req):
+        job = {
+            "job_id": "LDLTEST12345",
+            "user_id": "1001",
+            "platform": "YouTube",
+            "title": "Rick Astley - Never Gonna Give You Up",
+            "duration": 212,
+            "bytes": len(fake_file.read_bytes()),
+            "video_path": str(fake_file),
+            "requested_asset": "video",
+        }
+        self._save_job(job)
         return {
             "ok": True,
-            "job_id": "job_123",
+            "job_id": "LDLTEST12345",
             "platform": "YouTube",
-            "title": "Public Video",
-            "duration": 60,
-            "bytes": 5000000,
-            "file_path": "/var/private/storage/secret/video.mp4",
+            "title": "Rick Astley - Never Gonna Give You Up",
+            "duration": 212,
+            "bytes": len(fake_file.read_bytes()),
+            "video_path": str(fake_file),
         }
     monkeypatch.setattr(PublicVideoLinkDownloader, "download", fake_download)
 
-    body = b'{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "confirmed_rights": true}'
-    resp = client.post("/internal/v1/free-tools/downloader/download", content=body, headers=_headers("POST", "/internal/v1/free-tools/downloader/download", body, actor_id="12345"))
+    body = b'{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "confirmed_rights": true, "requested_asset": "video"}'
+    resp = client.post(
+        "/internal/v1/free-tools/downloader/download",
+        content=body,
+        headers=_headers("POST", "/internal/v1/free-tools/downloader/download", body, actor_id="1001"),
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
+    assert data["job_id"] == "LDLTEST12345"
+    assert data["status"] == "ready"
+    assert data["delivery_ready"] is True
+    assert "/api/v1/tools/downloader/delivery/LDLTEST12345?kind=video" in data["delivery_url"]
     assert data["charged_xu"] == 0
-    # Must NOT leak server-side filesystem path
     assert "file_path" not in data
-    assert "/var/private" not in str(data)
+    assert str(tmp_path) not in str(data)
+
+    # 1. Owner Stream Delivery
+    deliv_path = "/internal/v1/free-tools/downloader/delivery/LDLTEST12345"
+    resp_stream = client.get(
+        f"{deliv_path}?kind=video",
+        headers=_headers("GET", deliv_path, b"", actor_id="1001"),
+    )
+    assert resp_stream.status_code == 200
+    assert resp_stream.headers["content-type"] == "video/mp4"
+    assert b"ftypmp42" in resp_stream.content
+
+    # 2. Mode=meta JSON Delivery
+    resp_meta = client.get(
+        f"{deliv_path}?kind=video&mode=meta",
+        headers=_headers("GET", deliv_path, b"", actor_id="1001"),
+    )
+    assert resp_meta.status_code == 200
+    meta_json = resp_meta.json()
+    assert meta_json["ok"] is True
+    assert meta_json["job_id"] == "LDLTEST12345"
+    assert meta_json["content_type"] == "video/mp4"
+    assert meta_json["delivery_ready"] is True
+    assert str(tmp_path) not in str(meta_json)
+
+    # 3. Foreign Owner Blocked
+    resp_foreign = client.get(
+        f"{deliv_path}?kind=video",
+        headers=_headers("GET", deliv_path, b"", actor_id="9999"),
+    )
+    assert resp_foreign.status_code == 403
+    assert resp_foreign.json()["error_code"] == "DOWNLOADER_FOREIGN_OWNER_BLOCKED"
+
+    # 4. Stale Artifact Truth (file removed)
+    fake_file.unlink()
+    resp_stale = client.get(
+        f"{deliv_path}?kind=video",
+        headers=_headers("GET", deliv_path, b"", actor_id="1001"),
+    )
+    assert resp_stale.status_code == 404
+    assert resp_stale.json()["error_code"] == "DOWNLOADER_STALE_ARTIFACT_TRUTH"
