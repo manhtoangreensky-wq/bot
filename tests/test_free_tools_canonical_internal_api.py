@@ -338,7 +338,23 @@ def test_downloader_download_to_delivery_contract(client, monkeypatch, tmp_path)
     assert meta_json["delivery_ready"] is True
     assert str(tmp_path) not in str(meta_json)
 
-    # 3. Foreign Owner Blocked
+    # 3. Missing Actor Stream Blocked (DELIVERY_ACTOR_REQUIRED)
+    resp_missing_stream = client.get(
+        f"{deliv_path}?kind=video",
+        headers=_headers("GET", deliv_path, b"", actor_id=""),
+    )
+    assert resp_missing_stream.status_code == 401
+    assert resp_missing_stream.json()["error_code"] == "DELIVERY_ACTOR_REQUIRED"
+
+    # 4. Missing Actor Meta Blocked (DELIVERY_ACTOR_REQUIRED)
+    resp_missing_meta = client.get(
+        f"{deliv_path}?kind=video&mode=meta",
+        headers=_headers("GET", deliv_path, b"", actor_id=""),
+    )
+    assert resp_missing_meta.status_code == 401
+    assert resp_missing_meta.json()["error_code"] == "DELIVERY_ACTOR_REQUIRED"
+
+    # 5. Foreign Owner Blocked
     resp_foreign = client.get(
         f"{deliv_path}?kind=video",
         headers=_headers("GET", deliv_path, b"", actor_id="9999"),
@@ -346,7 +362,7 @@ def test_downloader_download_to_delivery_contract(client, monkeypatch, tmp_path)
     assert resp_foreign.status_code == 403
     assert resp_foreign.json()["error_code"] == "DOWNLOADER_FOREIGN_OWNER_BLOCKED"
 
-    # 4. Stale Artifact Truth (file removed)
+    # 6. Stale Artifact Truth (file removed)
     fake_file.unlink()
     resp_stale = client.get(
         f"{deliv_path}?kind=video",
@@ -354,3 +370,79 @@ def test_downloader_download_to_delivery_contract(client, monkeypatch, tmp_path)
     )
     assert resp_stale.status_code == 404
     assert resp_stale.json()["error_code"] == "DOWNLOADER_STALE_ARTIFACT_TRUTH"
+
+
+def test_downloader_delivery_missing_actor_stream_blocked(client, tmp_path):
+    from services.public_video_link_downloader import PublicVideoLinkDownloader
+    fake_file = tmp_path / "stream_actorless.mp4"
+    fake_file.write_bytes(b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    downloader = PublicVideoLinkDownloader()
+    downloader._save_job({
+        "job_id": "LDLACTORLESS01",
+        "user_id": "valid_user_42",
+        "video_path": str(fake_file),
+        "requested_asset": "video",
+    })
+
+    deliv_path = "/internal/v1/free-tools/downloader/delivery/LDLACTORLESS01"
+    # Calling with valid HMAC secret but NO actor header/param
+    resp = client.get(deliv_path, headers=_headers("GET", deliv_path, b"", actor_id=""))
+    assert resp.status_code == 401
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["error_code"] == "DELIVERY_ACTOR_REQUIRED"
+
+
+def test_downloader_delivery_missing_actor_meta_blocked(client, tmp_path):
+    from services.public_video_link_downloader import PublicVideoLinkDownloader
+    fake_file = tmp_path / "meta_actorless.mp4"
+    fake_file.write_bytes(b"\x00\x00\x00ftypmp42" + b"\x00" * 64)
+    downloader = PublicVideoLinkDownloader()
+    downloader._save_job({
+        "job_id": "LDLACTORLESS02",
+        "user_id": "valid_user_42",
+        "video_path": str(fake_file),
+        "requested_asset": "video",
+    })
+
+    deliv_path = "/internal/v1/free-tools/downloader/delivery/LDLACTORLESS02"
+    # Calling mode=meta with valid HMAC secret but NO actor header/param
+    resp = client.get(f"{deliv_path}?mode=meta", headers=_headers("GET", deliv_path, b"", actor_id=""))
+    assert resp.status_code == 401
+    payload = resp.json()
+    assert payload["ok"] is False
+    assert payload["error_code"] == "DELIVERY_ACTOR_REQUIRED"
+
+
+def test_downloader_handle_delivery_service_isolation(tmp_path):
+    from services.free_tools_service import handle_downloader_delivery
+    from services.public_video_link_downloader import PublicVideoLinkDownloader
+
+    fake_file = tmp_path / "service_isolation.mp4"
+    fake_file.write_bytes(b"content")
+    downloader = PublicVideoLinkDownloader()
+    job = {
+        "job_id": "TEST_ISOLATION_SVC",
+        "user_id": "owner_123",
+        "video_path": str(fake_file),
+        "requested_asset": "video",
+    }
+    downloader._save_job(job)
+
+    # Missing actor -> 401 DELIVERY_ACTOR_REQUIRED
+    ok, res, code = handle_downloader_delivery("TEST_ISOLATION_SVC", actor_id="")
+    assert not ok
+    assert code == 401
+    assert res["error_code"] == "DELIVERY_ACTOR_REQUIRED"
+
+    # Foreign actor -> 403 DOWNLOADER_FOREIGN_OWNER_BLOCKED
+    ok, res, code = handle_downloader_delivery("TEST_ISOLATION_SVC", actor_id="foreign_456")
+    assert not ok
+    assert code == 403
+    assert res["error_code"] == "DOWNLOADER_FOREIGN_OWNER_BLOCKED"
+
+    # Matching owner -> 200 meta
+    ok, res, code = handle_downloader_delivery("TEST_ISOLATION_SVC", actor_id="owner_123", mode="meta")
+    assert ok
+    assert code == 200
+    assert res["job_id"] == "TEST_ISOLATION_SVC"

@@ -378,10 +378,17 @@ def handle_downloader_delivery(
             "message": "Không tìm thấy yêu cầu tải.",
         }, 404
 
-    # Owner check: if job has user_id and actor_id is present, they must match
-    job_user = str(job.get("user_id") or "").strip()
+    # Actor / Owner verification (DELIVERY_ACTOR_REQUIRED & FOREIGN_OWNER_BLOCKED)
     clean_actor = str(actor_id or "").strip()
-    if job_user and clean_actor and job_user != clean_actor:
+    if not clean_actor:
+        return False, {
+            "ok": False,
+            "error_code": "DELIVERY_ACTOR_REQUIRED",
+            "message": "Yêu cầu định danh người dùng (actor_id / user_id) để truy cập tệp tải về.",
+        }, 401
+
+    job_user = str(job.get("user_id") or "").strip()
+    if job_user and clean_actor != job_user:
         return False, {
             "ok": False,
             "error_code": "DOWNLOADER_FOREIGN_OWNER_BLOCKED",

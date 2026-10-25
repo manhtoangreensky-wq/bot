@@ -287599,6 +287599,11 @@ async def api_internal_free_tools_downloader_delivery(job_id: str, request: Requ
     query_actor = str(request.query_params.get("user_id") or "").strip()
     actor_candidate = header_actor or query_actor
     clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "DELIVERY_ACTOR_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
 
     path = f"/internal/v1/free-tools/downloader/delivery/{job_id}"
     auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
