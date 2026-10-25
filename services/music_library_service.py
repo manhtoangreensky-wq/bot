@@ -91,7 +91,6 @@ async def handle_music_library_search(
     query: str,
     actor_id: str,
     limit: int = 8,
-    mock_results: list[dict] | None = None,
 ) -> tuple[bool, dict[str, Any], int]:
     """Execute canonical Jamendo search and register 1-based preview session for actor."""
     clean_actor = str(actor_id or "").strip()
@@ -115,7 +114,7 @@ async def handle_music_library_search(
 
     # Pre-network credential check: fail closed if Jamendo client ID not configured
     jamendo_client_id = getattr(bot, "JAMENDO_CLIENT_ID", None)
-    if not jamendo_client_id and mock_results is None:
+    if not jamendo_client_id:
         return False, {
             "ok": False,
             "error_code": "JAMENDO_CREDENTIALS_MISSING",
@@ -123,22 +122,18 @@ async def handle_music_library_search(
             "charged_xu": 0,
         }, 503
 
-    raw_results = []
-    if mock_results is not None:
-        raw_results = mock_results
-    else:
-        try:
-            clamped_limit = max(1, min(int(limit or 8), 10))
-            raw_results = await bot.fetch_jamendo_tracks(clean_query, limit=clamped_limit)
-        except Exception as e:
-            logger.warning("Jamendo provider search error: %s", e)
-            return False, {
-                "ok": False,
-                "error_code": "PROVIDER_ERROR",
-                "message": "Lỗi kết nối dịch vụ âm thanh ngoài. Bot chưa trừ Xu.",
-                "detail": str(e),
-                "charged_xu": 0,
-            }, 502
+    try:
+        clamped_limit = max(1, min(int(limit or 8), 10))
+        raw_results = await bot.fetch_jamendo_tracks(clean_query, limit=clamped_limit)
+    except Exception as e:
+        logger.warning("Jamendo provider search error: %s", e)
+        return False, {
+            "ok": False,
+            "error_code": "JAMENDO_FETCH_FAILED",
+            "message": "Lỗi kết nối dịch vụ âm thanh ngoài. Bot chưa trừ Xu.",
+            "detail": str(e),
+            "charged_xu": 0,
+        }, 502
 
     normalized_items = [bot.jamendo_preview_item(item) for item in (raw_results or [])]
     # Filter to items with preview_url
@@ -147,6 +142,7 @@ async def handle_music_library_search(
     if not valid_items:
         return True, {
             "ok": True,
+            "results": [],
             "items": [],
             "count": 0,
             "query": clean_query,
@@ -158,6 +154,7 @@ async def handle_music_library_search(
     token = bot.save_media_preview_results("music", clean_actor, clean_query, valid_items)
     return True, {
         "ok": True,
+        "results": valid_items,
         "items": valid_items,
         "count": len(valid_items),
         "query": clean_query,

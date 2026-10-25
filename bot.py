@@ -176792,6 +176792,7 @@ def build_image_to_video_public_package(user_id, job_id: int = 0, index: int = 1
 
 def jamendo_preview_item(item: dict) -> dict:
     return {
+        "id": str(item.get("id") or "").strip(),
         "provider": "Jamendo",
         "title": str(item.get("name") or "Untitled")[:120],
         "author": str(item.get("artist_name") or "Unknown")[:100],
@@ -287733,13 +287734,11 @@ async def api_internal_music_library_search(request: Request):
 
     query = str(data.get("query") or "").strip()
     limit = int(data.get("limit") or 8)
-    mock_results = data.get("mock_results") if isinstance(data.get("mock_results"), list) else None
 
     ok, result, status_code = await handle_music_library_search(
         query=query,
         actor_id=header_actor,
         limit=limit,
-        mock_results=mock_results,
     )
     return JSONResponse(status_code=status_code, content=result)
 

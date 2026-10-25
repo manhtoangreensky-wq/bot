@@ -1,35 +1,34 @@
-"""P0 Unit & Contract Test Suite for Bot Core Canonical Music Library (Jamendo) Parity (R40).
+"""P0 Unit & Contract Test Suite for Bot Core Canonical Music Library (Jamendo) Parity (R40 FIX1).
 
-SPEC_ID: BOT-P0-MUSIC-LIBRARY-JAMENDO-CANONICAL-PARITY-R1
+SPEC_ID: BOT-P0-MUSIC-LIBRARY-JAMENDO-CANONICAL-PARITY-FIX1
 Verifies:
-- SEARCH_VALID
-- SEARCH_EMPTY
-- SEARCH_MISSING_CREDENTIAL_PRENETWORK_FAIL
-- SEARCH_401_403
-- SEARCH_429
-- SEARCH_5XX
-- SEARCH_TIMEOUT
-- SEARCH_MALFORMED_RESPONSE
-- SEARCH_NO_SYNTHETIC_FALLBACK
-- SEARCH_OWNER_ISOLATION
-- SELECT_VALID
-- SELECT_INVALID_INDEX
-- SELECT_FOREIGN_OWNER_BLOCKED
-- SELECT_STALE_SESSION_BLOCKED
-- SELECTED_TRACK_READBACK
-- PREVIEW_SAFE_SUCCESS
-- PREVIEW_UNSAFE_URL_BLOCKED
-- LICENSE_METADATA_PRESERVED
-- PRICING_PARITY
-- DOWNSTREAM_HANDOFF_IF_PUBLIC
+- SEARCH_VALID: Canonical key `results`, normalized tracks, 0 Xu charged immediately.
+- SEARCH_EMPTY: Returns empty list `results: []` without synthetic fallback.
+- SEARCH_MISSING_CREDENTIAL_PRENETWORK_FAIL: Fails closed 503 before network call.
+- SEARCH_PROVIDER_ERRORS_FAIL_CLOSED: 401, 403, 429, 5XX, timeout, malformed -> JAMENDO_FETCH_FAILED (502).
+- SEARCH_OWNER_ISOLATION: Scoped strictly to authenticated actor_id.
+- SELECT_VALID: 1-based index selection stores track into SELECTED_MUSIC.
+- SELECT_INVALID_INDEX: Index < 1 or out of range fails closed with 422.
+- SELECT_FOREIGN_OWNER_BLOCKED: Cross-actor selection fails closed.
+- SELECT_STALE_SESSION_BLOCKED: Expired session (>600s) fails with 410.
+- SELECTED_TRACK_READBACK: GET /internal/v1/music/library/selected returns active selection.
+- PREVIEW_SAFE_SUCCESS: Safe Jamendo CDN URL returned.
+- PREVIEW_UNSAFE_URL_BLOCKED: Unsafe schemes, private IPs, untrusted domains blocked.
+- LICENSE_METADATA_PRESERVED: CC license and source_url preserved end-to-end.
+- PRICING_PARITY: 0 Xu search, 0 Xu select, 0 Xu downstream stock library usage.
+- REAL_DOWNSTREAM_HANDOFF: Web select -> Bot SELECTED_MUSIC -> resolve_audio_source -> source=selected_music.
+- FOREIGN_ACTOR_HANDOFF_BLOCKED: Foreign actor resolve_audio_source does not receive track.
+- EXPIRED_SELECTION_HANDOFF_BLOCKED: Expired selection (>600s) resolve_audio_source returns fallback.
+- NO_SYNTHETIC_SUCCESS: Error paths never return fake success.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,12 +113,13 @@ SAMPLE_JAMENDO_TRACKS = [
 ]
 
 
-def test_search_valid():
-    """Verify SEARCH_VALID returns normalized items, 1-based session, and callback token."""
+def test_search_valid(monkeypatch):
+    """Verify SEARCH_VALID returns canonical `results` key, normalized items, and callback token."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    payload = {"query": "chill acoustic", "mock_results": SAMPLE_JAMENDO_TRACKS}
+    payload = {"query": "chill acoustic"}
     body = json.dumps(payload).encode("utf-8")
     headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=body, actor_id=owner_id)
     resp = client.post("/internal/v1/music/library/search", content=body, headers=headers)
@@ -128,23 +128,29 @@ def test_search_valid():
     data = resp.json()
     assert data["ok"] is True
     assert data["count"] == 2
-    assert len(data["items"]) == 2
+    # Verify CANONICAL_SEARCH_RESULT_KEY=results
+    assert "results" in data
+    assert len(data["results"]) == 2
     assert data["callback_token"] != ""
 
-    first = data["items"][0]
+    first = data["results"][0]
+    assert first["id"] == "1001"
     assert first["title"] == "Summer Breeze"
     assert first["author"] == "Acoustic Band"
     assert first["duration"] == "3:05"
     assert first["provider"] == "Jamendo"
+    assert first["license"] == "https://creativecommons.org/licenses/by/4.0/"
+    assert first["source_url"] == "https://www.jamendo.com/track/1001/summer-breeze"
     assert "prod-1.storage.jamendo.com" in first["preview_url"]
 
 
-def test_search_empty():
-    """Verify SEARCH_EMPTY returns empty items list without synthetic fallback."""
+def test_search_empty(monkeypatch):
+    """Verify SEARCH_EMPTY returns empty results list without synthetic fallback."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=[]))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    payload = {"query": "nonexistent_track_xyz_9999", "mock_results": []}
+    payload = {"query": "nonexistent_track_xyz_9999"}
     body = json.dumps(payload).encode("utf-8")
     headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=body, actor_id=owner_id)
     resp = client.post("/internal/v1/music/library/search", content=body, headers=headers)
@@ -152,8 +158,9 @@ def test_search_empty():
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
-    assert data["items"] == []
+    assert data["results"] == []
     assert data["count"] == 0
+    assert data["charged_xu"] == 0
 
 
 def test_search_missing_credential_prenetwork_fail(monkeypatch):
@@ -172,10 +179,11 @@ def test_search_missing_credential_prenetwork_fail(monkeypatch):
     data = resp.json()
     assert data["ok"] is False
     assert data["error_code"] == "JAMENDO_CREDENTIALS_MISSING"
+    assert data["charged_xu"] == 0
 
 
 def test_search_provider_errors_fail_closed(monkeypatch):
-    """Verify provider HTTP 401, 403, 429, 5xx, timeout fail closed with 502 PROVIDER_ERROR."""
+    """Verify provider HTTP 401, 403, 429, 5xx, timeout fail closed with 502 JAMENDO_FETCH_FAILED."""
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
@@ -202,27 +210,27 @@ def test_search_provider_errors_fail_closed(monkeypatch):
         assert resp.status_code == 502, f"Failed for {err}"
         data = resp.json()
         assert data["ok"] is False
-        assert data["error_code"] == "PROVIDER_ERROR"
+        assert data["error_code"] == "JAMENDO_FETCH_FAILED"
+        assert data["charged_xu"] == 0
 
 
-def test_search_owner_isolation():
+def test_search_owner_isolation(monkeypatch):
     """Verify search sessions are strictly bound to actor_id and isolated across owners."""
     client = TestClient(bot.fastapi_app)
     user_a = "10001"
     user_b = "20002"
 
-    tracks_a = [SAMPLE_JAMENDO_TRACKS[0]]
-    tracks_b = [SAMPLE_JAMENDO_TRACKS[1]]
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(side_effect=[[SAMPLE_JAMENDO_TRACKS[0]], [SAMPLE_JAMENDO_TRACKS[1]]]))
 
     # User A searches
-    body_a = json.dumps({"query": "user a music", "mock_results": tracks_a}).encode("utf-8")
+    body_a = json.dumps({"query": "user a music"}).encode("utf-8")
     h_a = make_auth_headers("POST", "/internal/v1/music/library/search", body=body_a, actor_id=user_a)
     r_a = client.post("/internal/v1/music/library/search", content=body_a, headers=h_a)
     assert r_a.status_code == 200
     token_a = r_a.json()["callback_token"]
 
     # User B searches
-    body_b = json.dumps({"query": "user b music", "mock_results": tracks_b}).encode("utf-8")
+    body_b = json.dumps({"query": "user b music"}).encode("utf-8")
     h_b = make_auth_headers("POST", "/internal/v1/music/library/search", body=body_b, actor_id=user_b)
     r_b = client.post("/internal/v1/music/library/search", content=body_b, headers=h_b)
     assert r_b.status_code == 200
@@ -234,13 +242,14 @@ def test_search_owner_isolation():
     assert sel_resp.status_code in {410, 422}
 
 
-def test_select_valid():
+def test_select_valid(monkeypatch):
     """Verify 1-based index selection stores track into SELECTED_MUSIC."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
     # Search first
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     s_resp = client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
     token = s_resp.json()["callback_token"]
@@ -258,12 +267,13 @@ def test_select_valid():
     assert bot.SELECTED_MUSIC[int(owner_id)]["title"] == "Summer Breeze"
 
 
-def test_select_invalid_index():
+def test_select_invalid_index(monkeypatch):
     """Verify index 0, negative, or beyond count fails with 422 INVALID_INDEX."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
 
@@ -275,12 +285,13 @@ def test_select_invalid_index():
         assert resp.json()["error_code"] == "INVALID_INDEX"
 
 
-def test_select_stale_session_blocked():
+def test_select_stale_session_blocked(monkeypatch):
     """Verify expired search session (>600s) fails with 410 SEARCH_SESSION_EXPIRED."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
 
@@ -295,8 +306,9 @@ def test_select_stale_session_blocked():
     assert resp.json()["error_code"] == "SEARCH_SESSION_EXPIRED"
 
 
-def test_selected_track_readback():
+def test_selected_track_readback(monkeypatch):
     """Verify GET /internal/v1/music/library/selected returns selected track."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
@@ -307,7 +319,7 @@ def test_selected_track_readback():
     assert r_init.json()["selected"] is None
 
     # Search & Select
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
 
@@ -322,12 +334,13 @@ def test_selected_track_readback():
     assert r_read.json()["selected"]["title"] == "Corporate Tech"
 
 
-def test_preview_safe_success():
+def test_preview_safe_success(monkeypatch):
     """Verify GET /internal/v1/music/library/preview returns safe preview URL."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
 
@@ -355,18 +368,21 @@ def test_preview_unsafe_url_blocked():
         assert ok is False, f"Expected unsafe for {bad_url}, got safe ({reason})"
 
 
-def test_license_metadata_preserved():
-    """Verify license metadata is preserved in search results."""
+def test_license_metadata_preserved(monkeypatch):
+    """Verify license metadata and source_url are preserved in search results."""
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
     client = TestClient(bot.fastapi_app)
     owner_id = "10001"
 
-    s_body = json.dumps({"query": "beats", "mock_results": SAMPLE_JAMENDO_TRACKS}).encode("utf-8")
+    s_body = json.dumps({"query": "beats"}).encode("utf-8")
     s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
     resp = client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
 
-    items = resp.json()["items"]
-    assert items[0]["license"] == "https://creativecommons.org/licenses/by/4.0/"
-    assert items[1]["license"] == "https://creativecommons.org/licenses/by-nc/4.0/"
+    results = resp.json()["results"]
+    assert results[0]["license"] == "https://creativecommons.org/licenses/by/4.0/"
+    assert results[0]["source_url"] == "https://www.jamendo.com/track/1001/summer-breeze"
+    assert results[1]["license"] == "https://creativecommons.org/licenses/by-nc/4.0/"
+    assert results[1]["source_url"] == "https://www.jamendo.com/track/1002/corporate-tech"
 
 
 def test_pricing_parity():
@@ -376,24 +392,52 @@ def test_pricing_parity():
     assert BOT_DOWNSTREAM_USAGE_XU == 0
 
 
-def test_downstream_handoff():
-    """Verify selected music is accessible to downstream resolve_audio_source."""
-    import asyncio
-    owner_id = 99999
-    selected_item = {
-        "provider": "Jamendo",
-        "title": "Ambient Chill",
-        "preview_url": "https://storage.jamendo.com/ambient.mp3",
-        "created_at": time.time(),
-    }
-    bot.SELECTED_MUSIC[owner_id] = selected_item
+def test_downstream_handoff_and_isolation(monkeypatch):
+    """Verify real downstream handoff: select -> SELECTED_MUSIC -> resolve_audio_source.
 
+    Proves:
+    - WEB_SELECT_TO_BOT_DOWNSTREAM_HANDOFF=PASS
+    - FOREIGN_ACTOR_HANDOFF_BLOCKED=PASS
+    - EXPIRED_SELECTION_HANDOFF_BLOCKED=PASS
+    """
+    monkeypatch.setattr(bot, "fetch_jamendo_tracks", AsyncMock(return_value=SAMPLE_JAMENDO_TRACKS))
+    client = TestClient(bot.fastapi_app)
+    owner_id = "10001"
+    foreign_id = "20002"
+
+    # 1. Search
+    s_body = json.dumps({"query": "chill"}).encode("utf-8")
+    s_headers = make_auth_headers("POST", "/internal/v1/music/library/search", body=s_body, actor_id=owner_id)
+    s_resp = client.post("/internal/v1/music/library/search", content=s_body, headers=s_headers)
+    assert s_resp.status_code == 200
+    token = s_resp.json()["callback_token"]
+
+    # 2. Select track 1 via canonical internal endpoint
+    sel_body = json.dumps({"index": 1, "callback_token": token}).encode("utf-8")
+    sel_headers = make_auth_headers("POST", "/internal/v1/music/library/select", body=sel_body, actor_id=owner_id)
+    sel_resp = client.post("/internal/v1/music/library/select", content=sel_body, headers=sel_headers)
+    assert sel_resp.status_code == 200
+
+    # 3. Downstream handoff: resolve_audio_source retrieves SELECTED_MUSIC
     mock_update = AsyncMock()
     mock_update.message.reply_to_message = None
-    mock_update.effective_user.id = owner_id
+    mock_update.effective_user.id = int(owner_id)
     mock_context = AsyncMock()
 
     resolved = asyncio.run(bot.resolve_audio_source(mock_update, mock_context, prefer_selected=True))
     assert resolved["source"] == "selected_music"
-    assert resolved["title"] == "Ambient Chill"
-    assert resolved["preview_url"] == "https://storage.jamendo.com/ambient.mp3"
+    assert resolved["title"] == "Summer Breeze"
+    assert "prod-1.storage.jamendo.com" in resolved["preview_url"]
+
+    # 4. Foreign actor handoff is blocked
+    mock_foreign_update = AsyncMock()
+    mock_foreign_update.message.reply_to_message = None
+    mock_foreign_update.effective_user.id = int(foreign_id)
+
+    foreign_resolved = asyncio.run(bot.resolve_audio_source(mock_foreign_update, mock_context, prefer_selected=True))
+    assert foreign_resolved.get("source") != "selected_music"
+
+    # 5. Expired selection handoff is blocked
+    bot.SELECTED_MUSIC[int(owner_id)]["created_at"] = time.time() - 601
+    expired_resolved = asyncio.run(bot.resolve_audio_source(mock_update, mock_context, prefer_selected=True))
+    assert expired_resolved.get("source") != "selected_music"
