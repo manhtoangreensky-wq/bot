@@ -284741,7 +284741,56 @@ async def api_internal_subdub_jobs_enqueue(request: Request):
 
     mode = str(payload.get("mode") or "dub")
     job_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+    if not isinstance(job_payload, dict):
+        job_payload = {}
+    else:
+        job_payload = dict(job_payload)
     max_attempts = int(payload.get("max_attempts") or 3)
+
+    # 1. Reject client speaker count / mapping / provider forgery
+    forged_speaker_fields = {
+        "speaker_count",
+        "detected_speaker_count",
+        "speaker_mapping",
+        "speaker_casts",
+        "per_cue_voice_assignments",
+        "raw_worker_route",
+        "provider_model_id",
+        "provider_voice_id",
+    }
+    if any(k in job_payload for k in forged_speaker_fields):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "ok": False,
+                "error_code": "CLIENT_SPEAKER_COUNT_FORGE_BLOCKED",
+                "message": "Client cannot specify speaker detection, mapping internals, or provider IDs",
+            },
+        )
+
+    # 2. Server authority voice & auto-speaker lane resolution
+    from services.subdub_voice_resolution import resolve_subdub_voice_authority
+    vr_ok, vr_reason, vr_code, vr_data = resolve_subdub_voice_authority(
+        clean_actor,
+        {**job_payload, "mode": mode},
+    )
+    if not vr_ok:
+        return JSONResponse(
+            status_code=vr_code,
+            content={
+                "ok": False,
+                "error_code": vr_reason,
+                "message": vr_data.get("detail") or f"Validation failed: {vr_reason}",
+            },
+        )
+
+    # 3. If auto speaker, bind canonical lane fields into job_payload
+    if vr_data.get("voice_selection_mode") == "auto_speaker":
+        job_payload["voice_kind"] = vr_data["voice_kind"]
+        job_payload["voice_selection_mode"] = vr_data["voice_selection_mode"]
+        job_payload["auto_speaker_lane"] = vr_data["auto_speaker_lane"]
+        if vr_data.get("auto_smart_multivoice_opt_in"):
+            job_payload["auto_smart_multivoice_opt_in"] = True
 
     job = enqueue_subdub_job(clean_actor, mode=mode, payload=job_payload, max_attempts=max_attempts)
     return JSONResponse(status_code=200, content={"ok": True, "job": job})
