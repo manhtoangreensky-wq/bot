@@ -42413,12 +42413,13 @@ def get_recent_media_state(store: dict[int, dict], user_id) -> dict:
         return {}
     return dict(item)
 
-def get_selected_media_state(store: dict[int, dict], user_id) -> dict:
-    item = store.get(int(user_id or 0)) or {}
+def get_selected_media_state(store: dict[Any, dict], user_id) -> dict:
+    key = int(user_id) if str(user_id or "").isdigit() else str(user_id or "")
+    item = store.get(key) or {}
     if not item:
         return {}
     if time.time() - float(item.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
-        store.pop(int(user_id or 0), None)
+        store.pop(key, None)
         return {}
     return dict(item)
 
@@ -176817,7 +176818,8 @@ def save_media_preview_results(kind: str, user_id, query: str, items: list[dict]
         return ""
     cache = LAST_SFX_RESULTS if kind == "sfx" else LAST_MUSIC_RESULTS
     callback_token = uuid.uuid4().hex
-    cache[int(user_id)] = {
+    key = int(user_id) if str(user_id or "").isdigit() else str(user_id or "")
+    cache[key] = {
         "created_at": time.time(),
         "query": str(query or "")[:160],
         "results": [item for item in items if item.get("preview_url")],
@@ -176834,7 +176836,8 @@ def get_media_preview_item(kind: str, user_id, index_text: str, callback_token: 
     if idx < 1:
         return None, "invalid"
     cache = LAST_SFX_RESULTS if kind == "sfx" else LAST_MUSIC_RESULTS
-    data = cache.get(int(user_id or 0))
+    key = int(user_id) if str(user_id or "").isdigit() else str(user_id or "")
+    data = cache.get(key)
     if not data or time.time() - float(data.get("created_at") or 0) > MEDIA_PREVIEW_TTL_SECONDS:
         return None, "expired"
     if callback_token is not None:
@@ -287697,6 +287700,140 @@ async def api_internal_free_tools_downloader_delivery(job_id: str, request: Requ
             "X-Filename": filename,
         },
     )
+
+
+
+# ─── MUSIC LIBRARY (JAMENDO) CANONICAL INTERNAL APIS (R40) ───────────────────
+@fastapi_app.post("/internal/v1/music/library/search")
+async def api_internal_music_library_search(request: Request):
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.music_library_service import handle_music_library_search
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/music/library/search",
+        body_bytes=raw_body,
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    query = str(data.get("query") or "").strip()
+    limit = int(data.get("limit") or 8)
+    mock_results = data.get("mock_results") if isinstance(data.get("mock_results"), list) else None
+
+    ok, result, status_code = await handle_music_library_search(
+        query=query,
+        actor_id=header_actor,
+        limit=limit,
+        mock_results=mock_results,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/music/library/select")
+async def api_internal_music_library_select(request: Request):
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.music_library_service import handle_music_library_select
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/music/library/select",
+        body_bytes=raw_body,
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    index = int(data.get("index") or 0)
+    callback_token = data.get("callback_token")
+
+    ok, result, status_code = handle_music_library_select(
+        index=index,
+        actor_id=header_actor,
+        callback_token=callback_token,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/music/library/selected")
+async def api_internal_music_library_selected(request: Request):
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.music_library_service import handle_music_library_selected
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/music/library/selected",
+        body_bytes=b"",
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    ok, result, status_code = handle_music_library_selected(actor_id=header_actor)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/music/library/preview")
+async def api_internal_music_library_preview(request: Request):
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.music_library_service import handle_music_library_preview
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path="/internal/v1/music/library/preview",
+        body_bytes=b"",
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    index = int(request.query_params.get("index") or 0)
+    callback_token = request.query_params.get("callback_token")
+
+    ok, result, status_code = handle_music_library_preview(
+        index=index,
+        actor_id=header_actor,
+        callback_token=callback_token,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
