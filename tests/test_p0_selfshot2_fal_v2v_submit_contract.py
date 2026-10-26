@@ -20,6 +20,7 @@ import pytest
 from services import video_ai_edit_provider
 from services import video_real_render_connector
 from services.video_real_render_connector import RealVideoRenderError
+import services.video_selfshot_continuity_validator
 
 
 # ---------------------------------------------------------------------------

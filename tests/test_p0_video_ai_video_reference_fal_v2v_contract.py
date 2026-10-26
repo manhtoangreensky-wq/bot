@@ -59,13 +59,13 @@ def test_2_fal_provider_router_candidate_and_capabilities():
     assert adapter.provider_name == "fal_video"
     assert adapter.capabilities()["capabilities"] == ["video_to_video", "short_video"]
     assert adapter.env.get(adapter.model_env) == "fal-ai/wan/v2.2-a14b/video-to-video"
-    assert "fal_video" in video_provider_router.DEFAULT_VIDEO_PROVIDER_CHAIN
+    assert "fal_video" in video_provider_router.split_provider_chain(env["VIDEO_PROVIDER_CHAIN"])
 
 
 def test_3_video_ai_video_reference_routes_to_reference_guided_i2v_hybrid_in_routing_config():
     """config/product_video_model_routing.json registers video_ai_video_reference -> shopaikey_video hybrid."""
     routing = video_provider_catalog.load_product_video_model_routing()
-    assert "fal_video" in routing["default_provider_chain"]
+    assert "shopaikey_video" in routing["default_provider_chain"]
     assert "product_routes" in routing
     prod_route = routing["product_routes"].get("video_ai_video_reference")
     assert prod_route is not None
@@ -247,18 +247,23 @@ def test_6_fal_wan_v2v_submit_and_poll_contract():
         assert body["prompt"] == "enhance video quality"
         return mock_submit_resp
 
-    submit_res = video_ai_edit_provider.submit_video_edit(
-        cfg,
-        source_video_path="https://fal.media/files/source.mp4",
-        prompt="enhance video quality",
-        negative_prompt="",
-        aspect_ratio="9:16",
-        duration_seconds=5,
-        job_id="job_v2v_01",
-        submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
-        public_user_confirmed=True,
-        opener=mock_submit_opener,
-    )
+    mock_spend = MagicMock(allowed=True, blocker="", reservation_id="mock_spend_fal_1")
+    with patch("services.provider_spend_guard.reserve_provider_spend", return_value=mock_spend), \
+         patch("services.provider_spend_guard.mark_submitted_pending_settlement"):
+        submit_res = video_ai_edit_provider.submit_video_edit(
+            cfg,
+            source_video_path="https://fal.media/files/source.mp4",
+            prompt="enhance video quality",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=5,
+            job_id="job_v2v_01",
+            submit_source=video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            bot_confirm_authority="mock_bot_auth_fal",
+            bot_originated_action=True,
+            opener=mock_submit_opener,
+        )
     assert submit_res["provider_task_id"] == "fal_req_9988776655"
     assert submit_res["accepted"] is True
 
