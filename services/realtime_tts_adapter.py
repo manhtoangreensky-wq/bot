@@ -26,8 +26,10 @@ class RealtimeTTSResult:
     audio_base64: Optional[str]
     duration_ms: int
     format: str = "mp3"
+    sample_rate: int = 24000
     provider: str = "mock"
     error: Optional[str] = None
+    error_code: Optional[str] = None
 
 
 _TEST_MOCK_TTS_HANDLER: Optional[Callable[[str, ResolvedVoice], RealtimeTTSResult]] = None
@@ -84,6 +86,16 @@ class RealtimeTTSAdapter:
                 duration_ms=0,
                 format=self.default_format,
                 provider="noop",
+            )
+
+        if voice.validation_status != "valid" or not voice.voice_id:
+            return RealtimeTTSResult(
+                ok=False,
+                audio_base64=None,
+                duration_ms=0,
+                format=self.default_format,
+                provider=voice.provider or "unknown",
+                error_code=voice.error_code or "INVALID_VOICE",
             )
 
         # Check if test mock handler is active

@@ -103,31 +103,31 @@ class RealtimeVoiceResolver:
 
             if not profile:
                 return ResolvedVoice(
-                    voice_id=canonical_fallback_voice,
+                    voice_id="",
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,
                     validation_status="invalid",
-                    error_code="VOICE_PROFILE_NOT_FOUND",
+                    error_code="MISSING_PROFILE_BLOCKED",
                 )
 
             # 1. Foreign profile check (must match owner_id if owner specified)
             profile_owner = str(profile.get("owner_id") or profile.get("account_id") or "").strip()
             if owner_id and profile_owner and profile_owner != str(owner_id).strip():
                 return ResolvedVoice(
-                    voice_id=canonical_fallback_voice,
+                    voice_id="",
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,
                     validation_status="invalid",
-                    error_code="FOREIGN_VOICE_PROFILE_BLOCKED",
+                    error_code="FOREIGN_PROFILE_BLOCKED",
                 )
 
             # 2. Deleted / archived profile check
             state = str(profile.get("state") or "active").lower()
             if state in ("deleted", "archived"):
                 return ResolvedVoice(
-                    voice_id=canonical_fallback_voice,
+                    voice_id="",
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,
@@ -140,7 +140,7 @@ class RealtimeVoiceResolver:
             consent_status = str(profile.get("consent_status") or "active").lower()
             if status not in ("ready", "active") or consent_status == "revoked":
                 return ResolvedVoice(
-                    voice_id=canonical_fallback_voice,
+                    voice_id="",
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,

@@ -78,9 +78,12 @@ except ImportError:
     class _Status:
         HTTP_400_BAD_REQUEST = 400
         HTTP_401_UNAUTHORIZED = 401
+        HTTP_402_PAYMENT_REQUIRED = 402
         HTTP_403_FORBIDDEN = 403
         HTTP_404_NOT_FOUND = 404
+        HTTP_422_UNPROCESSABLE_ENTITY = 422
         HTTP_500_INTERNAL_SERVER_ERROR = 500
+        HTTP_503_SERVICE_UNAVAILABLE = 503
     status = _Status()
 
 try:
@@ -188,6 +191,7 @@ class CreateSessionRequest(BaseModel):
     voice_profile_id: Optional[str] = Field(default=None, description="Optional Voice Vault profile ID")
     gender_preference: Optional[str] = Field(default="male", description="male or female")
     device_id: Optional[str] = Field(default=None, description="Client device identifier")
+    test_bypass_pricing: Optional[bool] = Field(default=False, description="Explicit test bypass for provider-free CI only")
 
 
 class SessionResponse(BaseModel):
@@ -210,13 +214,25 @@ async def create_live_translate_session(
     if not owner_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="CREATE_OWNER_AUTH: Invalid account identity")
 
-    session_id = f"rts_{uuid.uuid4().hex[:12]}"
-    device_id = req.device_id or f"dev_{uuid.uuid4().hex[:8]}"
     mode_enum = (
         RealtimeTranslateMode(req.mode)
         if req.mode in RealtimeTranslateMode._value2member_map_
         else RealtimeTranslateMode.LIVE_DUB_BILINGUAL
     )
+
+    # PRICING ADMISSION CHECK (Owner decision unresolved -> fail closed on production)
+    is_test_bypass = bool(
+        getattr(req, "test_bypass_pricing", False)
+        or os.environ.get("REALTIME_ALLOW_UNPRICED_TEST_SESSION") == "1"
+    )
+    if PRODUCTION_PAID_ADMISSION == "FAIL_CLOSED" and not is_test_bypass:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"PRICING_NOT_CONFIGURED: Production paid admission for mode '{mode_enum.value}' is blocked until Owner pricing decision.",
+        )
+
+    session_id = f"rts_{uuid.uuid4().hex[:12]}"
+    device_id = req.device_id or f"dev_{uuid.uuid4().hex[:8]}"
 
     config = RealtimeSessionConfig(
         owner_id=owner_id,
@@ -429,11 +445,7 @@ async def websocket_live_stream(websocket: WebSocket, session_id: str, token: st
 
                 new_blocks = session.compute_pending_metering_blocks()
                 if new_blocks > 0:
-                    settlement = session.settle_blocks(new_blocks, xu_per_block=0)
-                    await websocket.send_json({
-                        "type": "usage.updated",
-                        **settlement,
-                    })
+                    await websocket.send_json(session.get_telemetry_usage())
 
             elif "text" in message and message["text"]:
                 try:
@@ -466,3 +478,260 @@ async def websocket_live_stream(websocket: WebSocket, session_id: str, token: st
     finally:
         session.end()
         _ACTIVE_INGRESS_BUFFERS.pop(session_id, None)
+
+
+# ==============================================================================
+# INTERNAL REALTIME EXECUTION SURFACE (BOT-OWNED ASR, TRANSLATE, TTS, VAULT)
+# ==============================================================================
+
+internal_router = APIRouter(prefix="/internal/v1/realtime", tags=["Realtime Internal"])
+
+
+def verify_internal_realtime_bridge_auth(
+    authorization: str = "",
+    signature: str = "",
+    timestamp: str = "",
+    request_id: str = "",
+    method: str = "POST",
+    path: str = "/internal/v1/realtime/process-chunk",
+    body_bytes: bytes = b"",
+    actor_id: str = "",
+    token_override: Optional[str] = None,
+    secret_override: Optional[str] = None,
+    clock_skew_seconds: int = 300,
+) -> Tuple[bool, str, int]:
+    """Verifies incoming Web-to-Bot Core Bridge request credentials and HMAC signature."""
+    bridge_token = (
+        token_override
+        if token_override is not None
+        else (
+            os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
+            or os.environ.get("INTERNAL_API_SECRET", "").strip()
+            or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
+        )
+    )
+    hmac_secret = (
+        secret_override
+        if secret_override is not None
+        else (
+            os.environ.get("CORE_BRIDGE_HMAC_SECRET", "").strip()
+            or os.environ.get("INTERNAL_API_SECRET", "").strip()
+            or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
+        )
+    )
+
+    if not bridge_token:
+        return False, "BRIDGE_NOT_CONFIGURED", 503
+
+    raw_auth = str(authorization or "").strip()
+    if not raw_auth:
+        return False, "AUTH_MISSING", 401
+
+    bearer = (
+        raw_auth.replace("Bearer ", "", 1).strip()
+        if raw_auth.lower().startswith("bearer ")
+        else raw_auth
+    )
+    if not bearer or not hmac.compare_digest(bearer, bridge_token):
+        return False, "AUTH_INVALID", 401
+
+    clean_actor = str(actor_id or "").strip()
+    if not clean_actor:
+        return False, "ACTOR_ID_REQUIRED", 401
+
+    if hmac_secret:
+        clean_sig = str(signature or "").strip()
+        clean_ts = str(timestamp or "").strip()
+        clean_req_id = str(request_id or "").strip()
+
+        if not clean_sig or not clean_ts or not clean_req_id:
+            return False, "SIGNATURE_MISSING", 401
+
+        try:
+            ts_int = int(clean_ts)
+            current_ts = int(time.time())
+            if abs(current_ts - ts_int) > clock_skew_seconds:
+                return False, "TIMESTAMP_OUT_OF_BOUNDS", 401
+        except (ValueError, TypeError):
+            return False, "INVALID_TIMESTAMP", 401
+
+        digest = hashlib.sha256(body_bytes).hexdigest()
+        msg = f"{clean_ts}.{clean_req_id}.{method.upper()}.{path}.{digest}.{clean_actor}".encode("utf-8")
+        expected_sig = hmac.new(hmac_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(clean_sig, expected_sig):
+            return False, "SIGNATURE_INVALID", 401
+
+    return True, "OK", 200
+
+
+class ProcessChunkRequest(BaseModel):
+    session_id: str = Field(description="Realtime session ID")
+    actor_id: str = Field(description="Authenticated owner/actor ID")
+    sequence: int = Field(description="Audio chunk sequence number")
+    segment_id: str = Field(description="Unique segment ID")
+    pcm_bytes_b64: str = Field(default="", description="Base64-encoded PCM16 audio bytes")
+    start_ms: int = Field(default=0, description="Segment start timestamp in ms")
+    end_ms: int = Field(default=0, description="Segment end timestamp in ms")
+    source_language: str = Field(default="auto", description="Source audio language")
+    target_language: str = Field(default="vi", description="Target translated language")
+    mode: str = Field(default="LIVE_DUB_BILINGUAL", description="Mode: CAPTION_ONLY, CAPTION_TRANSLATE, LIVE_DUB, LIVE_DUB_BILINGUAL")
+    voice_profile_id: Optional[str] = Field(default=None, description="Optional Voice Vault profile ID")
+    gender_preference: Optional[str] = Field(default="male", description="Preferred gender fallback")
+    voice_vault_data: Optional[Dict[str, Any]] = Field(default=None, description="Optional test profile data")
+
+
+@internal_router.post("/process-chunk")
+async def internal_process_realtime_chunk(
+    req: ProcessChunkRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    """Production internal execution endpoint for processing a realtime audio chunk.
+
+    Requires Core Bridge Bearer token and HMAC signature with actor_id.
+    Executes canonical Bot STT, Translation, TTS, and owner-scoped Voice Vault resolution.
+    Returns canonical Bot-shaped events: stt.final, translation.final, tts.audio.
+    """
+    raw_body = b""
+    try:
+        if hasattr(request, "body"):
+            body_res = request.body()
+            if asyncio.iscoroutine(body_res):
+                raw_body = await body_res
+            else:
+                raw_body = body_res or b""
+    except Exception:
+        raw_body = b""
+
+    if not raw_body:
+        payload_dict = {
+            "session_id": req.session_id,
+            "actor_id": req.actor_id,
+            "sequence": req.sequence,
+            "segment_id": req.segment_id,
+            "pcm_bytes_b64": req.pcm_bytes_b64,
+            "start_ms": req.start_ms,
+            "end_ms": req.end_ms,
+            "source_language": req.source_language,
+            "target_language": req.target_language,
+            "mode": req.mode,
+            "voice_profile_id": req.voice_profile_id,
+            "gender_preference": req.gender_preference,
+        }
+        raw_body = json.dumps(payload_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+    req_headers = getattr(request, "headers", {})
+    auth_header = req_headers.get("authorization", "")
+    sig_header = req_headers.get("x-toan-aas-signature", "")
+    ts_header = req_headers.get("x-toan-aas-timestamp", "")
+    req_id_header = req_headers.get("x-toan-aas-request-id", "")
+    actor_header = str(req_headers.get("x-toan-aas-actor-id") or req.actor_id or "").strip()
+
+    auth_ok, auth_err, auth_status = verify_internal_realtime_bridge_auth(
+        authorization=auth_header,
+        signature=sig_header,
+        timestamp=ts_header,
+        request_id=req_id_header,
+        method="POST",
+        path="/internal/v1/realtime/process-chunk",
+        body_bytes=raw_body,
+        actor_id=actor_header,
+    )
+    if not auth_ok:
+        raise HTTPException(
+            status_code=auth_status,
+            detail=f"Bridge auth failed: {auth_err}",
+        )
+
+    # Actor match
+    if str(req.actor_id).strip() != actor_header:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Actor ID mismatch between body and header",
+        )
+
+    # Decode PCM
+    pcm_bytes = b""
+    if req.pcm_bytes_b64:
+        try:
+            pcm_bytes = base64.b64decode(req.pcm_bytes_b64)
+        except Exception:
+            pcm_bytes = b""
+
+    # Voice Resolution
+    resolver = RealtimeVoiceResolver()
+    resolved_voice = resolver.resolve(
+        target_language=req.target_language,
+        gender_preference=req.gender_preference or "male",
+        voice_profile_id=req.voice_profile_id,
+        owner_id=req.actor_id,
+        voice_vault_data=req.voice_vault_data,
+    )
+
+    if req.voice_profile_id and resolved_voice.validation_status != "valid":
+        status_code = status.HTTP_403_FORBIDDEN if resolved_voice.error_code == "FOREIGN_PROFILE_BLOCKED" else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"Voice profile validation failed: {resolved_voice.error_code}",
+        )
+
+    speech_seg = SpeechSegment(
+        segment_id=req.segment_id,
+        sequence_start=req.sequence,
+        sequence_end=req.sequence,
+        start_ms=req.start_ms,
+        end_ms=req.end_ms,
+        pcm_bytes=pcm_bytes,
+        is_silence=False,
+    )
+
+    # 1. Canonical ASR
+    asr_adapter = RealtimeASRAdapter()
+    asr_res = await asr_adapter.transcribe(speech_seg, language=req.source_language)
+    source_text = asr_res.text if asr_res.ok else ""
+
+    events: List[Dict[str, Any]] = [
+        {
+            "type": "stt.final",
+            "segment_id": req.segment_id,
+            "sequence": req.sequence,
+            "source_text": source_text,
+            "language": asr_res.language,
+        }
+    ]
+
+    # 2. Canonical Translation
+    mode_str = req.mode.upper() if req.mode else "LIVE_DUB_BILINGUAL"
+    translated_text = ""
+    if mode_str in ("CAPTION_TRANSLATE", "LIVE_DUB", "LIVE_DUB_BILINGUAL"):
+        trans_adapter = RealtimeTranslationAdapter(target_language=req.target_language)
+        trans_res = await trans_adapter.translate(source_text, target_language=req.target_language)
+        translated_text = trans_res.translated_text if trans_res.ok else source_text
+        events.append({
+            "type": "translation.final",
+            "segment_id": req.segment_id,
+            "sequence": req.sequence,
+            "source_text": source_text,
+            "translated_text": translated_text,
+            "target_language": req.target_language,
+        })
+
+    # 3. Canonical TTS
+    if mode_str in ("LIVE_DUB", "LIVE_DUB_BILINGUAL"):
+        tts_adapter = RealtimeTTSAdapter()
+        tts_res = await tts_adapter.synthesize(translated_text, voice=resolved_voice)
+        events.append({
+            "type": "tts.audio",
+            "segment_id": req.segment_id,
+            "sequence": req.sequence,
+            "audio_b64": tts_res.audio_base64 or "",
+            "format": tts_res.format,
+            "sample_rate": getattr(tts_res, "sample_rate", 24000),
+        })
+
+    return {
+        "ok": True,
+        "session_id": req.session_id,
+        "sequence": req.sequence,
+        "segment_id": req.segment_id,
+        "events": events,
+    }

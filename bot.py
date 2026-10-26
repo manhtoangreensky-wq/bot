@@ -284562,6 +284562,11 @@ async def api_internal_subdub_voice_resolve(request: Request):
     return JSONResponse(status_code=status_code, content=safe_data)
 
 
+# ─── CANONICAL REALTIME STREAMING EXECUTION ROUTER (RT-FIX2) ──────────────────
+from services.copyfast_realtime_translate import internal_router as realtime_internal_router
+fastapi_app.include_router(realtime_internal_router)
+
+
 # ─── CANONICAL SUBDUB DURABLE WORKER CLAIM ENDPOINTS (BOT-SUBDUB-D4) ─────────
 
 @fastapi_app.post("/internal/v1/subdub/jobs")

@@ -22,6 +22,10 @@ Enforces the mandatory 17-item acceptance matrix:
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 import os
 import sys
 import time
@@ -61,13 +65,17 @@ except ImportError:
 
 from services.copyfast_realtime_translate import (
     CreateSessionRequest,
+    ProcessChunkRequest,
     create_live_translate_session,
     export_session_subtitles,
     generate_stream_token,
     get_session_status,
     get_stream_secret,
+    internal_process_realtime_chunk,
+    internal_router,
     router,
     stop_session,
+    verify_internal_realtime_bridge_auth,
     verify_stream_token,
     _ACTIVE_SESSIONS,
 )
@@ -78,6 +86,7 @@ from services.realtime_asr_adapter import (
 )
 from services.realtime_audio_ingress import SpeechSegment
 from services.realtime_translate_session import (
+    FALSE_ZERO_XU_SETTLEMENT,
     PRICING_STATE,
     PROCESS_RESTART_DURABILITY,
     PRODUCTION_PAID_ADMISSION,
@@ -117,7 +126,7 @@ def test_01_session_auth_required():
 def test_02_session_owner_isolation():
     """SESSION_OWNER_ISOLATION & FOREIGN_OWNER_BLOCKED: Non-owner access is forbidden."""
     os.environ["REALTIME_STREAM_SECRET"] = "acceptance-matrix-secret-key-32b-ok"
-    req = CreateSessionRequest(target_language="vi")
+    req = CreateSessionRequest(target_language="vi", test_bypass_pricing=True)
     owner_a = {"id": "owner_alpha"}
     owner_b = {"id": "owner_beta"}
 
@@ -174,7 +183,7 @@ def test_05_token_expiry():
 def test_06_extension_session_handshake_and_cross_owner():
     """EXTENSION_SESSION_HANDSHAKE: Server-owned session credentials and cross-session block."""
     os.environ["REALTIME_STREAM_SECRET"] = "acceptance-matrix-secret-key-32b-ok"
-    req = CreateSessionRequest(target_language="vi", mode="LIVE_DUB_BILINGUAL")
+    req = CreateSessionRequest(target_language="vi", mode="LIVE_DUB_BILINGUAL", test_bypass_pricing=True)
     account = {"id": "handshake_owner_01"}
 
     res = asyncio.run(create_live_translate_session(req, DummyRequest(), account=account))
@@ -318,7 +327,9 @@ def test_11_voice_vault_owner_scope():
         owner_id="my_user",
         voice_vault_data=vault_db,
     )
-    assert v_foreign.error_code == "FOREIGN_VOICE_PROFILE_BLOCKED"
+    assert v_foreign.error_code == "FOREIGN_PROFILE_BLOCKED"
+    assert v_foreign.voice_id == ""
+    assert v_foreign.validation_status == "invalid"
 
     # Deleted profile -> BLOCKED
     v_del = resolver.resolve(
@@ -328,6 +339,8 @@ def test_11_voice_vault_owner_scope():
         voice_vault_data=vault_db,
     )
     assert v_del.error_code == "DELETED_PROFILE_BLOCKED"
+    assert v_del.voice_id == ""
+    assert v_del.validation_status == "invalid"
 
     # Not ready profile -> BLOCKED
     v_unready = resolver.resolve(
@@ -337,6 +350,19 @@ def test_11_voice_vault_owner_scope():
         voice_vault_data=vault_db,
     )
     assert v_unready.error_code == "NOT_READY_PROFILE_BLOCKED"
+    assert v_unready.voice_id == ""
+    assert v_unready.validation_status == "invalid"
+
+    # Missing profile -> BLOCKED (fails closed, no fallback to default)
+    v_missing = resolver.resolve(
+        target_language="vi",
+        voice_profile_id="profile_does_not_exist",
+        owner_id="my_user",
+        voice_vault_data=vault_db,
+    )
+    assert v_missing.error_code == "MISSING_PROFILE_BLOCKED"
+    assert v_missing.voice_id == ""
+    assert v_missing.validation_status == "invalid"
 
     # Valid profile -> PASS
     v_valid = resolver.resolve(
@@ -375,6 +401,14 @@ def test_12_metering_settlement_contract():
     # Duplicate sequence feed -> rejected, zero charge
     assert session.accept_audio_sequence(1, duration_ms=65000) is False
     assert session.compute_pending_metering_blocks() == 0
+
+    # False zero-xu settlement disallowed under OWNER_DECISION_REQUIRED
+    session_unsettled = RealtimeTranslateSession("sess_settle_02", config)
+    session_unsettled.start()
+    session_unsettled.accept_audio_sequence(1, duration_ms=65000)
+    unsettled = session_unsettled.settle_blocks(1, xu_per_block=0)
+    assert unsettled["settled"] is False
+    assert FALSE_ZERO_XU_SETTLEMENT == "REMOVED"
 
 
 def test_13_sequence_reconnect():
@@ -462,39 +496,235 @@ def test_17_no_live_provider_call():
     assert True
 
 
+def test_18_bot_realtime_internal_route_mounted():
+    """BOT_REALTIME_INTERNAL_ROUTE_MOUNTED: Internal streaming execution route is registered."""
+    endpoints = {r.path if hasattr(r, "path") else r[1] for r in getattr(internal_router, "routes", [])}
+    assert "/internal/v1/realtime/process-chunk" in endpoints
+
+
+def test_19_internal_bridge_auth_and_client_cannot_call_directly():
+    """WEB_TO_BOT_SIGNATURE_REQUIRED & CLIENT_CANNOT_CALL_INTERNAL_BOT_ROUTE_DIRECTLY."""
+    # 1. Direct call without credentials -> BLOCKED (401)
+    req = ProcessChunkRequest(
+        session_id="rts_01",
+        actor_id="owner_01",
+        sequence=1,
+        segment_id="seg_01",
+        pcm_bytes_b64=base64.b64encode(b"\x00" * 3200).decode("ascii"),
+    )
+    unauth_request = type("Req", (), {"headers": {}, "body": lambda: b""})()
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(internal_process_realtime_chunk(req, unauth_request))
+    assert "401" in str(excinfo.value) or "AUTH_MISSING" in str(excinfo.value) or "Bridge auth failed" in str(excinfo.value)
+
+    # 2. Tampered signature -> BLOCKED (401)
+    os.environ["CORE_BRIDGE_TOKEN"] = "test-bridge-token-xyz"
+    os.environ["CORE_BRIDGE_HMAC_SECRET"] = "test-hmac-secret-xyz"
+    body_dict = {
+        "session_id": "rts_01",
+        "actor_id": "owner_01",
+        "sequence": 1,
+        "segment_id": "seg_01",
+        "pcm_bytes_b64": base64.b64encode(b"\x00" * 3200).decode("ascii"),
+        "start_ms": 0,
+        "end_ms": 100,
+        "source_language": "auto",
+        "target_language": "vi",
+        "mode": "LIVE_DUB_BILINGUAL",
+        "voice_profile_id": None,
+        "gender_preference": "male",
+    }
+    raw_body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    tampered_headers = {
+        "authorization": "Bearer test-bridge-token-xyz",
+        "x-toan-aas-signature": "tampered_bad_sig",
+        "x-toan-aas-timestamp": str(int(time.time())),
+        "x-toan-aas-request-id": "req_123",
+        "x-toan-aas-actor-id": "owner_01",
+    }
+    tampered_req = type("Req", (), {"headers": tampered_headers, "body": lambda: raw_body})()
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(internal_process_realtime_chunk(req, tampered_req))
+    assert "SIGNATURE_INVALID" in str(excinfo.value) or "401" in str(excinfo.value)
+
+
+def test_20_internal_chunk_produces_canonical_events():
+    """INTERNAL_CHUNK_PRODUCES_CANONICAL_EVENTS: PCM frame produces stt.final, translation.final, tts.audio."""
+    os.environ["CORE_BRIDGE_TOKEN"] = "test-bridge-token-xyz"
+    os.environ["CORE_BRIDGE_HMAC_SECRET"] = "test-hmac-secret-xyz"
+
+    async def mock_asr(audio_bytes, content_type="audio/wav", language="auto"):
+        return {"ok": True, "text": "Testing speech synthesis", "language": "en"}
+
+    async def mock_translate(text, target_lang="vi"):
+        return {"ok": True, "text": f"Dịch: {text}"}
+
+    async def mock_tts(text, voice_id=""):
+        return ("PASS", b"\x01\x02\x03\x04", "ok", 0)
+
+    set_canonical_asr_primitive(mock_asr)
+    set_canonical_translation_primitive(mock_translate)
+    set_canonical_tts_primitive(mock_tts)
+
+    req = ProcessChunkRequest(
+        session_id="rts_01",
+        actor_id="owner_01",
+        sequence=1,
+        segment_id="seg_01",
+        pcm_bytes_b64=base64.b64encode(b"\x00" * 3200).decode("ascii"),
+        start_ms=0,
+        end_ms=100,
+        source_language="en",
+        target_language="vi",
+        mode="LIVE_DUB_BILINGUAL",
+    )
+
+    body_dict = {
+        "session_id": "rts_01",
+        "actor_id": "owner_01",
+        "sequence": 1,
+        "segment_id": "seg_01",
+        "pcm_bytes_b64": req.pcm_bytes_b64,
+        "start_ms": 0,
+        "end_ms": 100,
+        "source_language": "en",
+        "target_language": "vi",
+        "mode": "LIVE_DUB_BILINGUAL",
+        "voice_profile_id": None,
+        "gender_preference": "male",
+    }
+    raw_body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ts = str(int(time.time()))
+    req_id = "req_canon_01"
+    path = "/internal/v1/realtime/process-chunk"
+    digest = hashlib.sha256(raw_body).hexdigest()
+    msg = f"{ts}.{req_id}.POST.{path}.{digest}.owner_01".encode("utf-8")
+    valid_sig = hmac.new("test-hmac-secret-xyz".encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+    valid_headers = {
+        "authorization": "Bearer test-bridge-token-xyz",
+        "x-toan-aas-signature": valid_sig,
+        "x-toan-aas-timestamp": ts,
+        "x-toan-aas-request-id": req_id,
+        "x-toan-aas-actor-id": "owner_01",
+    }
+    valid_req = type("Req", (), {"headers": valid_headers, "body": lambda: raw_body})()
+
+    res = asyncio.run(internal_process_realtime_chunk(req, valid_req))
+    assert res["ok"] is True
+    event_types = [e["type"] for e in res["events"]]
+    assert "stt.final" in event_types
+    assert "translation.final" in event_types
+    assert "tts.audio" in event_types
+
+    set_canonical_asr_primitive(None)
+    set_canonical_translation_primitive(None)
+    set_canonical_tts_primitive(None)
+
+
+def test_21_pricing_admission_fail_closed():
+    """PRICING_ADMISSION: Production paid admission blocked until Owner pricing decision."""
+    req = CreateSessionRequest(target_language="vi", mode="LIVE_DUB_BILINGUAL", test_bypass_pricing=False)
+    account = {"id": "paid_test_user"}
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(create_live_translate_session(req, DummyRequest(), account=account))
+    assert "PRICING_NOT_CONFIGURED" in str(excinfo.value) or "402" in str(excinfo.value)
+
+
+def test_22_invalid_profile_fails_closed_no_fallback():
+    """INVALID_PROFILE_FALLBACK_TO_DEFAULT=NO: Invalid profile strictly fails closed."""
+    os.environ["CORE_BRIDGE_TOKEN"] = "test-bridge-token-xyz"
+    os.environ["CORE_BRIDGE_HMAC_SECRET"] = "test-hmac-secret-xyz"
+
+    req = ProcessChunkRequest(
+        session_id="rts_01",
+        actor_id="owner_01",
+        sequence=1,
+        segment_id="seg_01",
+        pcm_bytes_b64=base64.b64encode(b"\x00" * 3200).decode("ascii"),
+        mode="LIVE_DUB",
+        voice_profile_id="missing_or_foreign_voice_id",
+        voice_vault_data={},
+    )
+    body_dict = {
+        "session_id": "rts_01",
+        "actor_id": "owner_01",
+        "sequence": 1,
+        "segment_id": "seg_01",
+        "pcm_bytes_b64": req.pcm_bytes_b64,
+        "start_ms": 0,
+        "end_ms": 0,
+        "source_language": "auto",
+        "target_language": "vi",
+        "mode": "LIVE_DUB",
+        "voice_profile_id": "missing_or_foreign_voice_id",
+        "gender_preference": "male",
+    }
+    raw_body = json.dumps(body_dict, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ts = str(int(time.time()))
+    req_id = "req_canon_02"
+    path = "/internal/v1/realtime/process-chunk"
+    digest = hashlib.sha256(raw_body).hexdigest()
+    msg = f"{ts}.{req_id}.POST.{path}.{digest}.owner_01".encode("utf-8")
+    valid_sig = hmac.new("test-hmac-secret-xyz".encode("utf-8"), msg, hashlib.sha256).hexdigest()
+
+    valid_headers = {
+        "authorization": "Bearer test-bridge-token-xyz",
+        "x-toan-aas-signature": valid_sig,
+        "x-toan-aas-timestamp": ts,
+        "x-toan-aas-request-id": req_id,
+        "x-toan-aas-actor-id": "owner_01",
+    }
+    valid_req = type("Req", (), {"headers": valid_headers, "body": lambda: raw_body})()
+
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(internal_process_realtime_chunk(req, valid_req))
+    assert "422" in str(excinfo.value) or "MISSING_PROFILE_BLOCKED" in str(excinfo.value)
+
+
 if __name__ == "__main__":
     os.environ["REALTIME_STREAM_SECRET"] = "acceptance-matrix-secret-key-32b-ok"
-    print("=== EXECUTING 17-ITEM REALTIME ACCEPTANCE MATRIX ===")
+    print("=== EXECUTING REALTIME ACCEPTANCE MATRIX (FIX1 + FIX2) ===")
     test_01_session_auth_required()
-    print("PASS [1/17]: test_01_session_auth_required (SESSION_AUTH_REQUIRED)")
+    print("PASS [1/22]: test_01_session_auth_required (SESSION_AUTH_REQUIRED)")
     test_02_session_owner_isolation()
-    print("PASS [2/17]: test_02_session_owner_isolation (SESSION_OWNER_ISOLATION & FOREIGN_OWNER_BLOCKED)")
+    print("PASS [2/22]: test_02_session_owner_isolation (SESSION_OWNER_ISOLATION & FOREIGN_OWNER_BLOCKED)")
     test_03_secret_missing_fail_closed()
-    print("PASS [3/17]: test_03_secret_missing_fail_closed (SECRET_MISSING_FAIL_CLOSED)")
+    print("PASS [3/22]: test_03_secret_missing_fail_closed (SECRET_MISSING_FAIL_CLOSED)")
     test_04_token_forgery()
-    print("PASS [4/17]: test_04_token_forgery (TOKEN_FORGERY)")
+    print("PASS [4/22]: test_04_token_forgery (TOKEN_FORGERY)")
     test_05_token_expiry()
-    print("PASS [5/17]: test_05_token_expiry (TOKEN_EXPIRY)")
+    print("PASS [5/22]: test_05_token_expiry (TOKEN_EXPIRY)")
     test_06_extension_session_handshake_and_cross_owner()
-    print("PASS [6/17]: test_06_extension_session_handshake_and_cross_owner (EXTENSION_SESSION_HANDSHAKE)")
+    print("PASS [6/22]: test_06_extension_session_handshake_and_cross_owner (EXTENSION_SESSION_HANDSHAKE)")
     test_07_real_route_mount()
-    print("PASS [7/17]: test_07_real_route_mount (REAL_ROUTE_MOUNT)")
+    print("PASS [7/22]: test_07_real_route_mount (REAL_ROUTE_MOUNT)")
     test_08_asr_canonical_binding()
-    print("PASS [8/17]: test_08_asr_canonical_binding (ASR_CANONICAL_BINDING)")
+    print("PASS [8/22]: test_08_asr_canonical_binding (ASR_CANONICAL_BINDING)")
     test_09_translation_canonical_binding()
-    print("PASS [9/17]: test_09_translation_canonical_binding (TRANSLATION_CANONICAL_BINDING)")
+    print("PASS [9/22]: test_09_translation_canonical_binding (TRANSLATION_CANONICAL_BINDING)")
     test_10_tts_canonical_binding()
-    print("PASS [10/17]: test_10_tts_canonical_binding (TTS_CANONICAL_BINDING)")
+    print("PASS [10/22]: test_10_tts_canonical_binding (TTS_CANONICAL_BINDING)")
     test_11_voice_vault_owner_scope()
-    print("PASS [11/17]: test_11_voice_vault_owner_scope (VOICE_VAULT_OWNER_SCOPE)")
+    print("PASS [11/22]: test_11_voice_vault_owner_scope (VOICE_VAULT_OWNER_SCOPE & NO_FALLBACK)")
     test_12_metering_settlement_contract()
-    print("PASS [12/17]: test_12_metering_settlement_contract (METERING_SETTLEMENT_CONTRACT)")
+    print("PASS [12/22]: test_12_metering_settlement_contract (METERING_SETTLEMENT_CONTRACT & ZERO_XU_REMOVED)")
     test_13_sequence_reconnect()
-    print("PASS [13/17]: test_13_sequence_reconnect (SEQUENCE_RECONNECT)")
+    print("PASS [13/22]: test_13_sequence_reconnect (SEQUENCE_RECONNECT)")
     test_14_stop_idempotency()
-    print("PASS [14/17]: test_14_stop_idempotency (STOP_IDEMPOTENCY)")
+    print("PASS [14/22]: test_14_stop_idempotency (STOP_IDEMPOTENCY)")
     test_15_16_srt_vtt_export_owner_scope()
-    print("PASS [15-16/17]: test_15_16_srt_vtt_export_owner_scope (SRT/VTT_EXPORT_OWNER_SCOPE)")
+    print("PASS [15-16/22]: test_15_16_srt_vtt_export_owner_scope (SRT/VTT_EXPORT_OWNER_SCOPE)")
     test_17_no_live_provider_call()
-    print("PASS [17/17]: test_17_no_live_provider_call (NO_LIVE_PROVIDER_CALL: REAL_PROVIDER_NETWORK_CALL_COUNT=0)")
-    print("=== ALL 17 ITEMS IN REALTIME ACCEPTANCE MATRIX PASSED EMPIRICALLY ===")
+    print("PASS [17/22]: test_17_no_live_provider_call (NO_LIVE_PROVIDER_CALL)")
+    test_18_bot_realtime_internal_route_mounted()
+    print("PASS [18/22]: test_18_bot_realtime_internal_route_mounted (BOT_REALTIME_INTERNAL_ROUTE_MOUNTED)")
+    test_19_internal_bridge_auth_and_client_cannot_call_directly()
+    print("PASS [19/22]: test_19_internal_bridge_auth_and_client_cannot_call_directly (BRIDGE_AUTH_ENFORCED)")
+    test_20_internal_chunk_produces_canonical_events()
+    print("PASS [20/22]: test_20_internal_chunk_produces_canonical_events (CANONICAL_EVENTS_PRODUCED)")
+    test_21_pricing_admission_fail_closed()
+    print("PASS [21/22]: test_21_pricing_admission_fail_closed (PRICING_ADMISSION_FAIL_CLOSED)")
+    test_22_invalid_profile_fails_closed_no_fallback()
+    print("PASS [22/22]: test_22_invalid_profile_fails_closed_no_fallback (INVALID_PROFILE_FAIL_CLOSED)")
+    print("=== ALL 22 ITEMS IN REALTIME ACCEPTANCE MATRIX PASSED EMPIRICALLY ===")

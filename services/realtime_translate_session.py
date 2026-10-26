@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Set
 PRICING_STATE: str = "OWNER_DECISION_REQUIRED"
 PRODUCTION_PAID_ADMISSION: str = "FAIL_CLOSED"
 PROCESS_RESTART_DURABILITY: str = "NOT_SUPPORTED"
+FALSE_ZERO_XU_SETTLEMENT: str = "REMOVED"
 
 
 class RealtimeSessionState(str, enum.Enum):
@@ -182,12 +183,25 @@ class RealtimeTranslateSession:
         return 0
 
     def settle_blocks(self, block_count: int, xu_per_block: int = 0) -> Dict[str, Any]:
-        """Settles accrued blocks exactly once and returns settlement truth."""
+        """Settles accrued blocks exactly once and returns settlement truth.
+
+        If PRICING_STATE is OWNER_DECISION_REQUIRED and xu_per_block is 0,
+        it does NOT claim successful canonical settlement (FALSE_ZERO_XU_SETTLEMENT=REMOVED).
+        """
         if block_count <= 0:
             return {
                 "settled": False,
                 "settled_blocks": self.settled_blocks,
                 "xu_consumed": self.settled_xu,
+            }
+        if PRICING_STATE == "OWNER_DECISION_REQUIRED" and xu_per_block == 0:
+            return {
+                "settled": False,
+                "blocks_pending": block_count,
+                "pricing_state": PRICING_STATE,
+                "xu_charged": 0,
+                "total_xu_consumed": self.settled_xu,
+                "reason": "PRICING_STATE=OWNER_DECISION_REQUIRED; zero xu settlement disallowed",
             }
         self.settled_blocks += block_count
         charge = block_count * max(0, xu_per_block)
@@ -199,6 +213,20 @@ class RealtimeTranslateSession:
             "total_settled_seconds": self.settled_blocks * self.config.metering_block_seconds,
             "xu_charged": charge,
             "total_xu_consumed": self.settled_xu,
+        }
+
+    def get_telemetry_usage(self) -> Dict[str, Any]:
+        """Returns telemetry usage update without claiming canonical Xu settlement."""
+        total_seconds = self.total_audio_ms // 1000
+        block_sec = max(1, self.config.metering_block_seconds)
+        current_blocks = total_seconds // block_sec
+        return {
+            "type": "usage.updated",
+            "audio_ms": self.total_audio_ms,
+            "total_seconds": total_seconds,
+            "pending_blocks": current_blocks - self.settled_blocks,
+            "settled": False,
+            "pricing_state": PRICING_STATE,
         }
 
     def add_segment(self, segment: RealtimeTranscriptSegment) -> None:
