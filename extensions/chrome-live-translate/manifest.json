@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "TOAN AAS Live Translate & Dub",
+  "version": "1.0.0",
+  "description": "Real-time AI speech recognition, live translation, and voice dubbing for video & audio on any website.",
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "TOAN AAS Live Translate"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "offscreen.html",
+        "audio-processor.js"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
