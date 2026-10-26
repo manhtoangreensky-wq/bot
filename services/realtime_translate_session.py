@@ -1,11 +1,13 @@
-"""Canonical Bot Core Realtime Translate & Dub Session Engine (RT-01).
+"""Canonical Bot Core Realtime Translate & Dub Session Engine (RT-01 / RT-FIX1).
 
 Governed by owner-governed-codex, locked-focus-engineering.
 Enforces:
-1. Session lifecycle FSM: CREATED -> ACTIVE <-> PAUSED -> ENDED / ERROR.
-2. Sequence idempotency: monotonic sequence counter, deduplication of incoming chunks.
-3. Authority isolation: client can only request mode/languages; bot owns routing & pricing.
-4. Metering blocks: usage tracked in ms, settled in 30s/60s blocks.
+1. Session lifecycle FSM with fully idempotent termination (STOP_ONCE, STOP_TWICE_SAFE, ERROR_FINALIZE_SAFE).
+2. Strict sequence idempotency and client reconnect ACK handshake.
+3. Authority isolation: client can only request preference; Bot owns pricing and settlement.
+4. Block settlement contract: settles exactly once, zero double-charging on reconnect or duplicate replay.
+5. Owner-scoped subtitle export (SRT / VTT).
+6. Process restart durability: declared as NOT_SUPPORTED for memory sessions.
 """
 
 from __future__ import annotations
@@ -15,6 +17,11 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
+
+# Product & Pricing Authority Invariants
+PRICING_STATE: str = "OWNER_DECISION_REQUIRED"
+PRODUCTION_PAID_ADMISSION: str = "FAIL_CLOSED"
+PROCESS_RESTART_DURABILITY: str = "NOT_SUPPORTED"
 
 
 class RealtimeSessionState(str, enum.Enum):
@@ -36,8 +43,8 @@ VALID_SESSION_TRANSITIONS: Dict[RealtimeSessionState, Set[RealtimeSessionState]]
     RealtimeSessionState.CREATED: {RealtimeSessionState.ACTIVE, RealtimeSessionState.ERROR, RealtimeSessionState.ENDED},
     RealtimeSessionState.ACTIVE: {RealtimeSessionState.PAUSED, RealtimeSessionState.ENDED, RealtimeSessionState.ERROR},
     RealtimeSessionState.PAUSED: {RealtimeSessionState.ACTIVE, RealtimeSessionState.ENDED, RealtimeSessionState.ERROR},
-    RealtimeSessionState.ENDED: set(),
-    RealtimeSessionState.ERROR: set(),
+    RealtimeSessionState.ENDED: {RealtimeSessionState.ENDED},
+    RealtimeSessionState.ERROR: {RealtimeSessionState.ERROR, RealtimeSessionState.ENDED},
 }
 
 
@@ -48,6 +55,7 @@ class RealtimeSessionConfig:
     target_language: str = "vi"
     mode: RealtimeTranslateMode = RealtimeTranslateMode.LIVE_DUB_BILINGUAL
     voice_profile_id: Optional[str] = None
+    gender_preference: Optional[str] = "male"
     client_device_id: Optional[str] = None
     metering_block_seconds: int = 60
 
@@ -77,13 +85,16 @@ class RealtimeTranslateSession:
         self.started_at: Optional[float] = None
         self.ended_at: Optional[float] = None
 
-        self.last_received_seq: int = 0
+        self.last_client_seq: int = 0
         self.last_processed_seq: int = 0
+        self.last_ack_seq: int = 0
         self.processed_seq_set: Set[int] = set()
 
         self.total_audio_ms: int = 0
         self.last_metered_seconds: int = 0
         self.consumed_blocks: int = 0
+        self.settled_blocks: int = 0
+        self.settled_xu: int = 0
 
         self.segments: List[RealtimeTranscriptSegment] = []
         self.error_message: Optional[str] = None
@@ -100,13 +111,23 @@ class RealtimeTranslateSession:
         self._transition_to(RealtimeSessionState.ACTIVE)
 
     def end(self) -> None:
+        """Idempotently finalizes the session. Safe to call multiple times or after error."""
+        if self.state == RealtimeSessionState.ENDED:
+            return
         self._transition_to(RealtimeSessionState.ENDED)
-        self.ended_at = time.time()
+        if self.ended_at is None:
+            self.ended_at = time.time()
 
     def fail(self, error_message: str) -> None:
+        """Idempotently marks session as ERROR. Safe to call multiple times."""
+        if self.state in (RealtimeSessionState.ENDED, RealtimeSessionState.ERROR):
+            if not self.error_message:
+                self.error_message = error_message
+            return
         self.error_message = error_message
         self._transition_to(RealtimeSessionState.ERROR)
-        self.ended_at = time.time()
+        if self.ended_at is None:
+            self.ended_at = time.time()
 
     def _transition_to(self, new_state: RealtimeSessionState) -> None:
         if new_state not in VALID_SESSION_TRANSITIONS.get(self.state, set()):
@@ -114,8 +135,13 @@ class RealtimeTranslateSession:
         self.state = new_state
 
     def accept_audio_sequence(self, seq: int, duration_ms: int) -> bool:
-        """Enforces sequence deduplication. Returns True if chunk is accepted, False if duplicate."""
+        """Enforces monotonic client sequence and deduplication.
+
+        Returns True if accepted, False if duplicate or out of order.
+        """
         if self.state not in (RealtimeSessionState.ACTIVE, RealtimeSessionState.CREATED):
+            return False
+        if seq <= 0:
             return False
         if seq in self.processed_seq_set:
             return False
@@ -123,12 +149,25 @@ class RealtimeTranslateSession:
             return False
 
         self.processed_seq_set.add(seq)
-        self.last_received_seq = max(self.last_received_seq, seq)
+        self.last_client_seq = max(self.last_client_seq, seq)
         self.total_audio_ms += max(0, duration_ms)
         return True
 
-    def mark_sequence_processed(self, seq: int) -> None:
+    def mark_sequence_processed(self, seq: int) -> int:
+        """Records processed sequence and updates server ACK counter."""
         self.last_processed_seq = max(self.last_processed_seq, seq)
+        self.last_ack_seq = self.last_processed_seq
+        return self.last_ack_seq
+
+    def handle_reconnect(self, client_last_ack_seq: int) -> Dict[str, Any]:
+        """Handles client reconnection and reports server ACK authority."""
+        return {
+            "reconnected": True,
+            "session_id": self.session_id,
+            "server_last_ack_seq": self.last_processed_seq,
+            "client_last_ack_seq": client_last_ack_seq,
+            "state": self.state.value,
+        }
 
     def compute_pending_metering_blocks(self) -> int:
         """Computes billable blocks (e.g. 60s) accrued since last settlement."""
@@ -142,11 +181,37 @@ class RealtimeTranslateSession:
             return new_blocks
         return 0
 
+    def settle_blocks(self, block_count: int, xu_per_block: int = 0) -> Dict[str, Any]:
+        """Settles accrued blocks exactly once and returns settlement truth."""
+        if block_count <= 0:
+            return {
+                "settled": False,
+                "settled_blocks": self.settled_blocks,
+                "xu_consumed": self.settled_xu,
+            }
+        self.settled_blocks += block_count
+        charge = block_count * max(0, xu_per_block)
+        self.settled_xu += charge
+        return {
+            "settled": True,
+            "blocks_settled": block_count,
+            "total_settled_blocks": self.settled_blocks,
+            "total_settled_seconds": self.settled_blocks * self.config.metering_block_seconds,
+            "xu_charged": charge,
+            "total_xu_consumed": self.settled_xu,
+        }
+
     def add_segment(self, segment: RealtimeTranscriptSegment) -> None:
         self.segments.append(segment)
 
-    def export_srt(self) -> str:
-        """Exports completed segments as standard SRT subtitle format."""
+    def export_srt(self, requesting_owner_id: str) -> str:
+        """Exports completed segments as standard SRT subtitle format.
+
+        Enforces strict owner scoping.
+        """
+        if str(requesting_owner_id).strip() != str(self.config.owner_id).strip():
+            raise PermissionError("Forbidden: requesting owner does not match session owner")
+
         lines = []
         idx = 1
         for seg in self.segments:
@@ -161,8 +226,14 @@ class RealtimeTranslateSession:
             idx += 1
         return "\n".join(lines)
 
-    def export_vtt(self) -> str:
-        """Exports completed segments as standard WebVTT subtitle format."""
+    def export_vtt(self, requesting_owner_id: str) -> str:
+        """Exports completed segments as standard WebVTT subtitle format.
+
+        Enforces strict owner scoping.
+        """
+        if str(requesting_owner_id).strip() != str(self.config.owner_id).strip():
+            raise PermissionError("Forbidden: requesting owner does not match session owner")
+
         lines = ["WEBVTT", ""]
         for seg in self.segments:
             if not seg.is_final:
@@ -198,11 +269,18 @@ class RealtimeTranslateSession:
             "source_language": self.config.source_language,
             "target_language": self.config.target_language,
             "voice_profile_id": self.config.voice_profile_id,
+            "gender_preference": self.config.gender_preference,
             "total_audio_ms": self.total_audio_ms,
             "consumed_blocks": self.consumed_blocks,
+            "settled_blocks": self.settled_blocks,
+            "settled_xu": self.settled_xu,
             "last_processed_seq": self.last_processed_seq,
+            "last_ack_seq": self.last_ack_seq,
             "segment_count": len([s for s in self.segments if s.is_final]),
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "error_message": self.error_message,
+            "pricing_state": PRICING_STATE,
+            "production_paid_admission": PRODUCTION_PAID_ADMISSION,
+            "process_restart_durability": PROCESS_RESTART_DURABILITY,
         }

@@ -208,6 +208,11 @@
       origText.textContent = "🇺🇸 Session ended.";
     }
 
+    if (message.type === "SESSION_FAILED") {
+      transText.textContent = `❌ ${message.error || "Phiên dịch bị gián đoạn do lỗi"}`;
+      origText.textContent = "CAPTURE_STOPPED: UI_STATE=FAILED";
+    }
+
     if (message.type === "SERVER_EVENT" && message.data) {
       const data = message.data;
 

@@ -1,11 +1,11 @@
-"""Canonical Bot Core Realtime TTS Adapter (RT-01).
+"""Canonical Bot Core Realtime TTS Adapter (RT-01 / RT-FIX1).
 
 Governed by owner-governed-codex, locked-focus-engineering.
 Enforces:
 1. Low-latency chunk speech synthesis for live dubbing.
-2. Returns base64 audio payload and duration for audio ducking synchronization.
-3. Pluggable provider routing (Edge-TTS, VieNeu, Kokoro, Mock for tests).
-4. Zero-cost testing guard: respects test environment mocks without touching paid APIs.
+2. Canonical binding to Bot TTS primitive (bot.tts_edge_bytes) WITHOUT requiring request-time context dictionary.
+3. Zero-cost testing guard: supports dependency injection / mock hook without external provider network calls.
+4. Returns base64 audio payload and duration for audio ducking synchronization.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ class RealtimeTTSResult:
 
 
 _TEST_MOCK_TTS_HANDLER: Optional[Callable[[str, ResolvedVoice], RealtimeTTSResult]] = None
+_CANONICAL_TTS_PRIMITIVE: Optional[Callable] = None
 
 
 def set_test_tts_mock_handler(
@@ -41,11 +42,32 @@ def set_test_tts_mock_handler(
     _TEST_MOCK_TTS_HANDLER = handler
 
 
+def set_canonical_tts_primitive(primitive: Optional[Callable]) -> None:
+    """Dependency injection hook for binding the canonical TTS primitive."""
+    global _CANONICAL_TTS_PRIMITIVE
+    _CANONICAL_TTS_PRIMITIVE = primitive
+
+
+def get_canonical_tts_primitive() -> Optional[Callable]:
+    """Resolves and returns the canonical TTS primitive without blocking on cold module imports."""
+    global _CANONICAL_TTS_PRIMITIVE
+    if _CANONICAL_TTS_PRIMITIVE is not None:
+        return _CANONICAL_TTS_PRIMITIVE
+    import sys
+    if "bot" in sys.modules:
+        bot_mod = sys.modules["bot"]
+        if hasattr(bot_mod, "tts_edge_bytes"):
+            _CANONICAL_TTS_PRIMITIVE = bot_mod.tts_edge_bytes
+            return _CANONICAL_TTS_PRIMITIVE
+    return None
+
+
 class RealtimeTTSAdapter:
     """Adapter for synthesizing translated sentences into audio chunks for dubbing."""
 
-    def __init__(self, default_format: str = "mp3"):
+    def __init__(self, default_format: str = "mp3", tts_primitive: Optional[Callable] = None):
         self.default_format = default_format
+        self._primitive = tts_primitive
 
     async def synthesize(
         self,
@@ -68,17 +90,31 @@ class RealtimeTTSAdapter:
         if _TEST_MOCK_TTS_HANDLER is not None:
             return _TEST_MOCK_TTS_HANDLER(clean_text, voice)
 
-        # Try Bot core tts helper if provided in context
-        bot_tts = None
-        if context and "bot_tts_func" in context:
-            bot_tts = context["bot_tts_func"]
+        # Resolve canonical TTS primitive
+        tts_func = self._primitive
+        if tts_func is None and context and "bot_tts_func" in context:
+            tts_func = context["bot_tts_func"]
+        if tts_func is None:
+            tts_func = get_canonical_tts_primitive()
 
-        if bot_tts:
+        if tts_func is not None:
             try:
-                res = await bot_tts(clean_text, voice_id=voice.voice_id)
-                audio_bytes = res.get("audio_bytes") or b""
-                b64_str = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else ""
-                dur_ms = int(res.get("duration_seconds", 1.0) * 1000)
+                # bot.tts_edge_bytes returns tuple: (status, audio_bytes, detail, 0)
+                # or dict: {"audio_bytes": ..., "duration_seconds": ...}
+                res = await tts_func(clean_text, voice_id=voice.voice_id)
+                audio_bytes = b""
+                dur_ms = 1500
+                if isinstance(res, tuple):
+                    status, audio_bytes, detail, _ = res
+                    ok = (status == "PASS" and bool(audio_bytes))
+                elif isinstance(res, dict):
+                    audio_bytes = res.get("audio_bytes") or b""
+                    ok = bool(res.get("ok", bool(audio_bytes)))
+                    dur_ms = int(res.get("duration_seconds", 1.5) * 1000)
+                else:
+                    ok = False
+
+                b64_str = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else None
                 return RealtimeTTSResult(
                     ok=bool(b64_str),
                     audio_base64=b64_str,
@@ -87,7 +123,7 @@ class RealtimeTTSAdapter:
                     provider=voice.provider,
                 )
             except Exception as e:
-                logger.warning(f"Bot TTS error: {e}")
+                logger.warning(f"Canonical TTS execution error: {e}")
                 return RealtimeTTSResult(
                     ok=False,
                     audio_base64=None,
@@ -96,7 +132,6 @@ class RealtimeTTSAdapter:
                     provider=voice.provider,
                 )
 
-        # Fallback if unconfigured
         return RealtimeTTSResult(
             ok=False,
             audio_base64=None,
