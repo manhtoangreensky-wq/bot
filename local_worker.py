@@ -4248,7 +4248,7 @@ def _aiedit_progress(job_id, stage: str, **fields) -> None:
 
 
 def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
-    raw = dict(payload.get("local_preprocess_plan") or {})
+    raw = dict(payload.get("local_edit_plan") or payload.get("local_preprocess_plan") or {})
     plan = default_manual_edit_plan(source_path)
     plan["input_video"] = source_path
     metadata = dict(payload.get("source_metadata") or {})
@@ -4261,11 +4261,26 @@ def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
     crop.update({"aspect_ratio": target_aspect, "mode": str(raw.get("crop_or_fit", {}).get("mode") or "fit")})
     plan["crop_or_fit"] = crop
     plan["color_preset"] = str(raw.get("color_preset") or "keep")
+    qf = raw.get("quality_filters") if isinstance(raw.get("quality_filters"), dict) else {}
     plan["quality_filters"] = {
-        "sharpen": bool(raw.get("sharpen")),
-        "denoise": bool(raw.get("denoise")),
+        "sharpen": bool(raw.get("sharpen") or qf.get("sharpen")),
+        "denoise": bool(raw.get("denoise") or qf.get("denoise")),
     }
-    plan["audio_normalization"] = "loudnorm" if bool(raw.get("audio_normalize")) else "off"
+    plan["audio_normalization"] = (
+        "loudnorm"
+        if bool(raw.get("audio_normalize") or raw.get("audio_normalization") == "loudnorm")
+        else "off"
+    )
+    if "local_effects" in raw and isinstance(raw["local_effects"], dict):
+        plan["local_effects"] = dict(raw["local_effects"])
+    if "speed" in raw:
+        plan["speed"] = float(raw["speed"])
+    if "volume" in raw:
+        plan["volume"] = float(raw["volume"])
+    allowed_base = {*default_manual_edit_plan(), "watermark_overlay", "sharpen", "denoise", "audio_normalize", "intensity"}
+    for key, value in raw.items():
+        if key not in allowed_base:
+            plan[key] = value
     return plan
 
 
@@ -4322,6 +4337,21 @@ def _aiedit_submit_and_wait(
         progress=on_poll,
         deadline_monotonic=deadline_monotonic,
     )
+
+
+def _aiedit_cached_output_valid(output_path, source_path, workspace, target_duration_seconds, ffmpeg, ffprobe, deadline_monotonic) -> bool:
+    if not (output_path.is_file() and output_path.stat().st_size > 0):
+        return False
+    cached_check = video_ai_edit_validation.validate_final_edited_mp4(
+        output_path,
+        source_path=source_path,
+        workspace=workspace,
+        requested_duration_seconds=target_duration_seconds,
+        ffmpeg_path=ffmpeg,
+        ffprobe_path=ffprobe,
+        deadline_monotonic=deadline_monotonic,
+    )
+    return bool(cached_check.get("ok"))
 
 
 def run_video_ai_edit(job: dict) -> None:
@@ -4417,25 +4447,26 @@ def run_video_ai_edit(job: dict) -> None:
         poll_count = 0
         fallback_count = 0
         if lane == "local":
-            plan = _aiedit_local_plan(payload, source_path)
-            result = execute_manual_edit(
-                plan,
-                output_path=str(output_path),
-                workspace=workspace,
-                ffmpeg_path=ffmpeg,
-                ffprobe_path=ffprobe,
-                timeout=render_timeout,
-                deadline_monotonic=deadline_monotonic,
-                progress=lambda status: _aiedit_progress(
-                    job_id,
-                    "ai_processing",
-                    provider_status="local_processing",
-                    local_processed=int(status.get("processed") or 0),
-                    local_total=max(1, int(status.get("total") or 1)),
-                ),
-            )
-            if not result.get("ok"):
-                raise video_ai_edit_validation.AiEditValidationError("local_enhancement_failed")
+            if not _aiedit_cached_output_valid(output_path, source_path, workspace, int(payload.get("target_duration_seconds") or 0), ffmpeg, ffprobe, deadline_monotonic):
+                plan = _aiedit_local_plan(payload, source_path)
+                result = execute_manual_edit(
+                    plan,
+                    output_path=str(output_path),
+                    workspace=workspace,
+                    ffmpeg_path=ffmpeg,
+                    ffprobe_path=ffprobe,
+                    timeout=render_timeout,
+                    deadline_monotonic=deadline_monotonic,
+                    progress=lambda status: _aiedit_progress(
+                        job_id,
+                        "ai_processing",
+                        provider_status="local_processing",
+                        local_processed=int(status.get("processed") or 0),
+                        local_total=max(1, int(status.get("total") or 1)),
+                    ),
+                )
+                if not result.get("ok"):
+                    raise video_ai_edit_validation.AiEditValidationError("local_enhancement_failed")
         else:
             ready = _aiedit_ready_provider_configs(payload)
             if not ready:
@@ -4577,7 +4608,7 @@ def run_video_ai_edit(job: dict) -> None:
             "charge_status": "pending_post_delivery" if int(payload.get("price_xu") or 0) > 0 else "free_local_tool",
             "cleanup": "pending",
         }
-    except (video_ai_edit_provider.AiEditProviderError, video_ai_edit_validation.AiEditValidationError) as exc:
+    except (video_ai_edit_provider.AiEditProviderError, video_ai_edit_validation.AiEditValidationError, LocalVideoEditError) as exc:
         exc_reason = str(getattr(exc, "reason", str(exc)))[:160]
         if exc_reason == "provider_poll_timeout" and provider_task_id:
             terminal_status = "running"
