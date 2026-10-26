@@ -287,7 +287,7 @@ async def stop_session(
 @router.get("/sessions/{session_id}/export")
 async def export_session_subtitles(
     session_id: str,
-    format: str = Query("srt", regex="^(srt|vtt)$"),
+    format: str = Query("srt", pattern="^(srt|vtt)$"),
     account: dict = Depends(require_account),
 ) -> Dict[str, Any]:
     """Exports transcript as SRT or WebVTT subtitles, enforcing owner scope (EXPORT_OWNER_AUTH)."""
