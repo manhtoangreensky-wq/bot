@@ -10,10 +10,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-try:
-    import cv2
-except ImportError:
-    cv2 = None
+import cv2
 import numpy as np
 
 

@@ -16,10 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-try:
-    import cv2
-except ImportError:
-    cv2 = None
+import cv2
 import numpy as np
 
 from services.video_selfshot_object_validator import (
