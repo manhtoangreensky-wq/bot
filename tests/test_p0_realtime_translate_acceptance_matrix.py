@@ -973,9 +973,7 @@ def test_22_invalid_profile_fails_closed_no_fallback():
     # 8. Real SQLite Voice Vault DB authority test (VOICE_VAULT_REAL_SCHEMA_LOOKUP=PASS & CLIENT_VOICE_ID_SCHEMA_DRIFT=NO)
     import tempfile
     import sqlite3
-    from contextlib import contextmanager
-    import bot
-    from services.realtime_voice_resolution import canonical_db_voice_vault_lookup
+    from services.realtime_voice_resolution import canonical_db_voice_vault_lookup, set_voice_db_conn_factory
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
         test_db_path = tf.name
@@ -1007,16 +1005,7 @@ def test_22_invalid_profile_fails_closed_no_fallback():
             db.execute("INSERT INTO voice_profiles (id, user_id, provider_voice_id, status) VALUES (4, 'other_owner', 'canonical_provider_voice_04', 'ready')")
             db.commit()
 
-        @contextmanager
-        def mock_db_connect():
-            conn = sqlite3.connect(test_db_path)
-            try:
-                yield conn
-            finally:
-                conn.close()
-
-        orig_db_connect = bot.db_connect
-        bot.db_connect = mock_db_connect
+        set_voice_db_conn_factory(lambda: sqlite3.connect(test_db_path))
         try:
             # Valid profile in real SQLite table
             rec1 = canonical_db_voice_vault_lookup("1", "owner_01")
@@ -1053,7 +1042,7 @@ def test_22_invalid_profile_fails_closed_no_fallback():
             assert res_db_del.validation_status == "invalid"
             assert res_db_del.error_code == "DELETED_PROFILE_BLOCKED"
         finally:
-            bot.db_connect = orig_db_connect
+            set_voice_db_conn_factory(None)
     finally:
         try:
             os.remove(test_db_path)

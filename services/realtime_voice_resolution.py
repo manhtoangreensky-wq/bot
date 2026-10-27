@@ -65,12 +65,30 @@ CANONICAL_VOICE_CATALOG: Dict[str, Dict[str, str]] = {
 
 
 _TEST_VOICE_VAULT_LOOKUP: Optional[Callable[[str, str], Optional[Dict[str, Any]]]] = None
+_DB_CONN_FACTORY: Optional[Callable[[], Any]] = None
 
 
 def set_test_voice_vault_lookup(func: Optional[Callable[[str, str], Optional[Dict[str, Any]]]]) -> None:
     """Sets a test lookup function for canonical Voice Vault records in provider-free tests."""
     global _TEST_VOICE_VAULT_LOOKUP
     _TEST_VOICE_VAULT_LOOKUP = func
+
+
+def set_voice_db_conn_factory(func: Optional[Callable[[], Any]]) -> None:
+    """Sets a custom DB connection factory for isolated and provider-free testing."""
+    global _DB_CONN_FACTORY
+    _DB_CONN_FACTORY = func
+
+
+def _get_voice_db_connection() -> Any:
+    if _DB_CONN_FACTORY is not None:
+        return _DB_CONN_FACTORY()
+    import os
+    import sqlite3
+    target_path = os.environ.get("DB_FILE") or "toandaas_system.db"
+    conn = sqlite3.connect(target_path, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
@@ -80,9 +98,9 @@ def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Opt
     if not clean_actor or not clean_id:
         return None
     try:
-        import bot
         import sqlite3
-        with bot.db_connect() as conn:
+        conn = _get_voice_db_connection()
+        try:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM voice_profiles WHERE id=?",
@@ -101,6 +119,11 @@ def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Opt
                 "consent_status": str(record.get("consent_status") or "active"),
                 "gender": str(record.get("gender") or "male"),
             }
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning(f"canonical_db_voice_vault_lookup query failed: {exc}")
         return None
