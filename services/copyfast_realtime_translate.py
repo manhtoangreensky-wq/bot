@@ -16,10 +16,12 @@ Enforces:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import enum
 import hashlib
 import hmac
+import inspect
 import io
 import json
 import logging
@@ -184,6 +186,49 @@ def verify_stream_token(token: str, session_id: str) -> Optional[Tuple[str, str]
     return None
 
 
+_TEST_PRICING_ADMISSION_OVERRIDE: Optional[Callable[[RealtimeTranslateMode], bool]] = None
+
+
+def set_test_pricing_admission_override(override: Optional[Callable[[RealtimeTranslateMode], bool]]) -> None:
+    """Sets a server-side test authority for pricing admission in provider-free tests."""
+    global _TEST_PRICING_ADMISSION_OVERRIDE
+    _TEST_PRICING_ADMISSION_OVERRIDE = override
+
+
+def is_pricing_admission_allowed(mode: RealtimeTranslateMode) -> bool:
+    """Determines whether realtime session admission is allowed.
+
+    Fails closed on production paid modes until Owner approves prices.
+    Never allows environment or client bypass in production environment.
+    """
+    if PRODUCTION_PAID_ADMISSION != "FAIL_CLOSED":
+        return True
+
+    env_name = (
+        os.environ.get("ENV")
+        or os.environ.get("ENVIRONMENT")
+        or os.environ.get("TOAN_AAS_ENV")
+        or ""
+    ).lower()
+    is_production = env_name in ("production", "prod", "live")
+    if is_production:
+        return False
+
+    if _TEST_PRICING_ADMISSION_OVERRIDE is not None:
+        return bool(_TEST_PRICING_ADMISSION_OVERRIDE(mode))
+
+    is_test_env = (
+        os.environ.get("ENV") == "test"
+        or os.environ.get("TESTING") == "1"
+        or os.environ.get("CI") == "true"
+        or os.environ.get("PYTEST_CURRENT_TEST") is not None
+    )
+    if is_test_env and os.environ.get("REALTIME_ALLOW_UNPRICED_TEST_SESSION") == "1":
+        return True
+
+    return False
+
+
 class CreateSessionRequest(BaseModel):
     source_language: str = Field(default="auto", description="Source audio language (e.g. en, zh, ja, auto)")
     target_language: str = Field(default="vi", description="Target translated language (e.g. vi)")
@@ -191,7 +236,6 @@ class CreateSessionRequest(BaseModel):
     voice_profile_id: Optional[str] = Field(default=None, description="Optional Voice Vault profile ID")
     gender_preference: Optional[str] = Field(default="male", description="male or female")
     device_id: Optional[str] = Field(default=None, description="Client device identifier")
-    test_bypass_pricing: Optional[bool] = Field(default=False, description="Explicit test bypass for provider-free CI only")
 
 
 class SessionResponse(BaseModel):
@@ -221,11 +265,7 @@ async def create_live_translate_session(
     )
 
     # PRICING ADMISSION CHECK (Owner decision unresolved -> fail closed on production)
-    is_test_bypass = bool(
-        getattr(req, "test_bypass_pricing", False)
-        or os.environ.get("REALTIME_ALLOW_UNPRICED_TEST_SESSION") == "1"
-    )
-    if PRODUCTION_PAID_ADMISSION == "FAIL_CLOSED" and not is_test_bypass:
+    if not is_pricing_admission_allowed(mode_enum):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=f"PRICING_NOT_CONFIGURED: Production paid admission for mode '{mode_enum.value}' is blocked until Owner pricing decision.",
@@ -498,9 +538,14 @@ def verify_internal_realtime_bridge_auth(
     actor_id: str = "",
     token_override: Optional[str] = None,
     secret_override: Optional[str] = None,
-    clock_skew_seconds: int = 300,
+    clock_skew_seconds: Optional[int] = None,
 ) -> Tuple[bool, str, int]:
     """Verifies incoming Web-to-Bot Core Bridge request credentials and HMAC signature."""
+    max_skew = (
+        clock_skew_seconds
+        if clock_skew_seconds is not None
+        else int(os.environ.get("CORE_BRIDGE_CLOCK_SKEW", "300"))
+    )
     bridge_token = (
         token_override
         if token_override is not None
@@ -523,6 +568,9 @@ def verify_internal_realtime_bridge_auth(
     if not bridge_token:
         return False, "BRIDGE_NOT_CONFIGURED", 503
 
+    if not hmac_secret:
+        return False, "BRIDGE_NOT_CONFIGURED", 503
+
     raw_auth = str(authorization or "").strip()
     if not raw_auth:
         return False, "AUTH_MISSING", 401
@@ -539,27 +587,26 @@ def verify_internal_realtime_bridge_auth(
     if not clean_actor:
         return False, "ACTOR_ID_REQUIRED", 401
 
-    if hmac_secret:
-        clean_sig = str(signature or "").strip()
-        clean_ts = str(timestamp or "").strip()
-        clean_req_id = str(request_id or "").strip()
+    clean_sig = str(signature or "").strip()
+    clean_ts = str(timestamp or "").strip()
+    clean_req_id = str(request_id or "").strip()
 
-        if not clean_sig or not clean_ts or not clean_req_id:
-            return False, "SIGNATURE_MISSING", 401
+    if not clean_sig or not clean_ts or not clean_req_id:
+        return False, "SIGNATURE_MISSING", 401
 
-        try:
-            ts_int = int(clean_ts)
-            current_ts = int(time.time())
-            if abs(current_ts - ts_int) > clock_skew_seconds:
-                return False, "TIMESTAMP_OUT_OF_BOUNDS", 401
-        except (ValueError, TypeError):
-            return False, "INVALID_TIMESTAMP", 401
+    try:
+        ts_int = int(clean_ts)
+        current_ts = int(time.time())
+        if abs(current_ts - ts_int) > max_skew:
+            return False, "TIMESTAMP_OUT_OF_BOUNDS", 401
+    except (ValueError, TypeError):
+        return False, "INVALID_TIMESTAMP", 401
 
-        digest = hashlib.sha256(body_bytes).hexdigest()
-        msg = f"{clean_ts}.{clean_req_id}.{method.upper()}.{path}.{digest}.{clean_actor}".encode("utf-8")
-        expected_sig = hmac.new(hmac_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(clean_sig, expected_sig):
-            return False, "SIGNATURE_INVALID", 401
+    digest = hashlib.sha256(body_bytes).hexdigest()
+    msg = f"{clean_ts}.{clean_req_id}.{method.upper()}.{path}.{digest}.{clean_actor}".encode("utf-8")
+    expected_sig = hmac.new(hmac_secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(clean_sig, expected_sig):
+        return False, "SIGNATURE_INVALID", 401
 
     return True, "OK", 200
 
@@ -577,7 +624,6 @@ class ProcessChunkRequest(BaseModel):
     mode: str = Field(default="LIVE_DUB_BILINGUAL", description="Mode: CAPTION_ONLY, CAPTION_TRANSLATE, LIVE_DUB, LIVE_DUB_BILINGUAL")
     voice_profile_id: Optional[str] = Field(default=None, description="Optional Voice Vault profile ID")
     gender_preference: Optional[str] = Field(default="male", description="Preferred gender fallback")
-    voice_vault_data: Optional[Dict[str, Any]] = Field(default=None, description="Optional test profile data")
 
 
 @internal_router.post("/process-chunk")
@@ -595,7 +641,7 @@ async def internal_process_realtime_chunk(
     try:
         if hasattr(request, "body"):
             body_res = request.body()
-            if asyncio.iscoroutine(body_res):
+            if inspect.isawaitable(body_res):
                 raw_body = await body_res
             else:
                 raw_body = body_res or b""
@@ -646,7 +692,7 @@ async def internal_process_realtime_chunk(
     if str(req.actor_id).strip() != actor_header:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Actor ID mismatch between body and header",
+            detail="ACTOR_BODY_HEADER_MISMATCH",
         )
 
     # Decode PCM
@@ -664,7 +710,6 @@ async def internal_process_realtime_chunk(
         gender_preference=req.gender_preference or "male",
         voice_profile_id=req.voice_profile_id,
         owner_id=req.actor_id,
-        voice_vault_data=req.voice_vault_data,
     )
 
     if req.voice_profile_id and resolved_voice.validation_status != "valid":

@@ -64,6 +64,48 @@ CANONICAL_VOICE_CATALOG: Dict[str, Dict[str, str]] = {
 }
 
 
+_TEST_VOICE_VAULT_LOOKUP: Optional[Callable[[str, str], Optional[Dict[str, Any]]]] = None
+
+
+def set_test_voice_vault_lookup(func: Optional[Callable[[str, str], Optional[Dict[str, Any]]]]) -> None:
+    """Sets a test lookup function for canonical Voice Vault records in provider-free tests."""
+    global _TEST_VOICE_VAULT_LOOKUP
+    _TEST_VOICE_VAULT_LOOKUP = func
+
+
+def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
+    """Default DB-backed owner-scoped voice profile lookup in Bot."""
+    clean_actor = str(owner_id or "").strip()
+    clean_id = str(voice_profile_id or "").strip()
+    if not clean_actor or not clean_id:
+        return None
+    try:
+        import bot
+        import sqlite3
+        with bot.db_connect() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM voice_profiles WHERE id=? OR client_voice_id=?",
+                (clean_id, clean_id),
+            ).fetchone()
+            if not row:
+                return None
+            record = dict(row)
+            return {
+                "id": str(record["id"]),
+                "owner_id": str(record.get("user_id") or ""),
+                "voice_id": str(record.get("provider_voice_id") or ""),
+                "provider": str(record.get("provider") or "voice_vault"),
+                "status": str(record.get("status") or ""),
+                "state": "deleted" if record.get("deleted_at") is not None else "active",
+                "consent_status": str(record.get("consent_status") or "active"),
+                "gender": str(record.get("gender") or "male"),
+            }
+    except Exception as exc:
+        logger.warning(f"canonical_db_voice_vault_lookup query failed: {exc}")
+        return None
+
+
 class RealtimeVoiceResolver:
     """Server-side authority for resolving TTS voices and validating Voice Vault records."""
 
@@ -77,7 +119,6 @@ class RealtimeVoiceResolver:
         gender_preference: Optional[str] = None,
         voice_profile_id: Optional[str] = None,
         owner_id: Optional[str] = None,
-        voice_vault_data: Optional[Dict[str, Any]] = None,
     ) -> ResolvedVoice:
         """Resolves target language, gender, and owner-scoped voice profile into a verified voice."""
         lang_key = target_language.lower().split("-")[0]
@@ -93,13 +134,18 @@ class RealtimeVoiceResolver:
         # Check if user requested a specific Voice Vault profile
         if voice_profile_id:
             profile = None
-            if self.vault_lookup_func is not None and owner_id:
+            if _TEST_VOICE_VAULT_LOOKUP is not None:
                 try:
-                    profile = self.vault_lookup_func(voice_profile_id, owner_id)
+                    profile = _TEST_VOICE_VAULT_LOOKUP(str(voice_profile_id), str(owner_id or ""))
+                except Exception as e:
+                    logger.warning(f"Test voice vault lookup error: {e}")
+            elif self.vault_lookup_func is not None:
+                try:
+                    profile = self.vault_lookup_func(str(voice_profile_id), str(owner_id or ""))
                 except Exception as e:
                     logger.warning(f"Voice vault lookup error: {e}")
-            elif voice_vault_data and voice_profile_id in voice_vault_data:
-                profile = voice_vault_data[voice_profile_id]
+            else:
+                profile = canonical_db_voice_vault_lookup(str(voice_profile_id), str(owner_id or ""))
 
             if not profile:
                 return ResolvedVoice(
