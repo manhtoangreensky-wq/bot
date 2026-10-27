@@ -330,6 +330,14 @@ def test_11_voice_vault_owner_scope():
             "voice_id": "custom_cloned_voice",
             "provider": "voice_vault",
         },
+        "profile_empty_voice": {
+            "owner_id": "my_user",
+            "state": "active",
+            "status": "ready",
+            "gender": "female",
+            "voice_id": "",
+            "provider": "voice_vault",
+        },
     }
 
     set_test_voice_vault_lookup(lambda pid, oid: vault_db.get(pid))
@@ -363,6 +371,16 @@ def test_11_voice_vault_owner_scope():
     assert v_unready.error_code == "NOT_READY_PROFILE_BLOCKED"
     assert v_unready.voice_id == ""
     assert v_unready.validation_status == "invalid"
+
+    # Missing provider voice_id -> FAIL_CLOSED (no fallback to default)
+    v_empty = resolver.resolve(
+        target_language="vi",
+        voice_profile_id="profile_empty_voice",
+        owner_id="my_user",
+    )
+    assert v_empty.error_code == "MISSING_PROVIDER_VOICE_ID"
+    assert v_empty.voice_id == ""
+    assert v_empty.validation_status == "invalid"
 
     # Missing profile -> BLOCKED (fails closed, no fallback to default)
     v_missing = resolver.resolve(
@@ -814,6 +832,16 @@ def test_22_invalid_profile_fails_closed_no_fallback():
             "consent_status": "active",
             "gender": "male",
         },
+        "105": {
+            "id": "105",
+            "owner_id": "owner_01",
+            "voice_id": "",
+            "provider": "voice_vault",
+            "status": "ready",
+            "state": "active",
+            "consent_status": "active",
+            "gender": "male",
+        },
     }
 
     def mock_vault_lookup(profile_id: str, owner_id: str):
@@ -851,6 +879,12 @@ def test_22_invalid_profile_fails_closed_no_fallback():
     assert v_missing.validation_status == "invalid"
     assert v_missing.error_code == "MISSING_PROFILE_BLOCKED"
     assert v_missing.voice_id == ""
+
+    # 5B. Missing provider voice_id -> FAIL_CLOSED (no fallback to default voice)
+    v_empty = resolver.resolve(voice_profile_id="105", owner_id="owner_01")
+    assert v_empty.validation_status == "invalid"
+    assert v_empty.error_code == "MISSING_PROVIDER_VOICE_ID"
+    assert v_empty.voice_id == ""
 
     # 6. Verify through internal route: foreign profile returns 403
     def make_bridge_req(profile_id: str):
@@ -905,10 +939,25 @@ def test_22_invalid_profile_fails_closed_no_fallback():
         asyncio.run(internal_process_realtime_chunk(req_unready, wrap_unready))
     assert "422" in str(excinfo.value)
 
+    req_empty, wrap_empty = make_bridge_req("105")
+    with pytest.raises(Exception) as excinfo:
+        asyncio.run(internal_process_realtime_chunk(req_empty, wrap_empty))
+    assert "422" in str(excinfo.value)
+    assert "MISSING_PROVIDER_VOICE_ID" in str(excinfo.value)
+
     # 7. Valid profile executes TTS successfully with canonical resolved voice
+    async def mock_asr(audio_bytes, content_type="audio/wav", language="auto"):
+        return {"ok": True, "text": "Valid audio segment", "language": "en"}
+
+    async def mock_translate(text, target_lang="vi"):
+        return {"ok": True, "text": f"Dịch: {text}"}
+
     async def mock_tts(text, voice_id=""):
         assert voice_id == "provider_cartesia_101"
         return ("PASS", b"\x01\x02\x03\x04", "ok", 0)
+
+    set_canonical_asr_primitive(mock_asr)
+    set_canonical_translation_primitive(mock_translate)
     set_canonical_tts_primitive(mock_tts)
 
     req_valid, wrap_valid = make_bridge_req("101")
@@ -916,8 +965,100 @@ def test_22_invalid_profile_fails_closed_no_fallback():
     assert res_valid["ok"] is True
     assert any(e["type"] == "tts.audio" for e in res_valid["events"])
 
+    set_canonical_asr_primitive(None)
+    set_canonical_translation_primitive(None)
     set_canonical_tts_primitive(None)
     set_test_voice_vault_lookup(None)
+
+    # 8. Real SQLite Voice Vault DB authority test (VOICE_VAULT_REAL_SCHEMA_LOOKUP=PASS & CLIENT_VOICE_ID_SCHEMA_DRIFT=NO)
+    import tempfile
+    import sqlite3
+    from contextlib import contextmanager
+    import bot
+    from services.realtime_voice_resolution import canonical_db_voice_vault_lookup
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
+        test_db_path = tf.name
+
+    try:
+        with sqlite3.connect(test_db_path) as db:
+            db.execute("""CREATE TABLE voice_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                provider TEXT DEFAULT '',
+                provider_voice_id TEXT DEFAULT '',
+                display_name TEXT DEFAULT '',
+                consent_status TEXT DEFAULT 'required',
+                consent_at TEXT,
+                source_file_id TEXT DEFAULT '',
+                source_file_ref TEXT DEFAULT '',
+                preview_audio_ref TEXT DEFAULT '',
+                status TEXT DEFAULT 'draft',
+                is_default INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT,
+                last_used_at TEXT,
+                deleted_at TEXT,
+                metadata_json TEXT DEFAULT ''
+            )""")
+            db.execute("INSERT INTO voice_profiles (id, user_id, provider_voice_id, status) VALUES (1, 'owner_01', 'canonical_provider_voice_01', 'ready')")
+            db.execute("INSERT INTO voice_profiles (id, user_id, provider_voice_id, status, deleted_at) VALUES (2, 'owner_01', 'canonical_provider_voice_02', 'ready', '2026-10-27')")
+            db.execute("INSERT INTO voice_profiles (id, user_id, provider_voice_id, status) VALUES (3, 'owner_01', '', 'ready')")
+            db.execute("INSERT INTO voice_profiles (id, user_id, provider_voice_id, status) VALUES (4, 'other_owner', 'canonical_provider_voice_04', 'ready')")
+            db.commit()
+
+        @contextmanager
+        def mock_db_connect():
+            conn = sqlite3.connect(test_db_path)
+            try:
+                yield conn
+            finally:
+                conn.close()
+
+        orig_db_connect = bot.db_connect
+        bot.db_connect = mock_db_connect
+        try:
+            # Valid profile in real SQLite table
+            rec1 = canonical_db_voice_vault_lookup("1", "owner_01")
+            assert rec1 is not None
+            assert rec1["id"] == "1"
+            assert rec1["owner_id"] == "owner_01"
+            assert rec1["voice_id"] == "canonical_provider_voice_01"
+            assert rec1["state"] == "active"
+
+            # Deleted profile in real SQLite table
+            rec2 = canonical_db_voice_vault_lookup("2", "owner_01")
+            assert rec2 is not None
+            assert rec2["state"] == "deleted"
+
+            # Empty provider voice in real SQLite table
+            rec3 = canonical_db_voice_vault_lookup("3", "owner_01")
+            assert rec3 is not None
+            assert rec3["voice_id"] == ""
+
+            # Resolver directly against real DB (set_test_voice_vault_lookup is None)
+            res_db_valid = resolver.resolve(voice_profile_id="1", owner_id="owner_01")
+            assert res_db_valid.validation_status == "valid"
+            assert res_db_valid.voice_id == "canonical_provider_voice_01"
+
+            res_db_foreign = resolver.resolve(voice_profile_id="4", owner_id="owner_01")
+            assert res_db_foreign.validation_status == "invalid"
+            assert res_db_foreign.error_code == "FOREIGN_PROFILE_BLOCKED"
+
+            res_db_empty = resolver.resolve(voice_profile_id="3", owner_id="owner_01")
+            assert res_db_empty.validation_status == "invalid"
+            assert res_db_empty.error_code == "MISSING_PROVIDER_VOICE_ID"
+
+            res_db_del = resolver.resolve(voice_profile_id="2", owner_id="owner_01")
+            assert res_db_del.validation_status == "invalid"
+            assert res_db_del.error_code == "DELETED_PROFILE_BLOCKED"
+        finally:
+            bot.db_connect = orig_db_connect
+    finally:
+        try:
+            os.remove(test_db_path)
+        except OSError:
+            pass
 
 
 def test_23_cross_repo_contract_fixture():

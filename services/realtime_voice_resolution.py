@@ -85,8 +85,8 @@ def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Opt
         with bot.db_connect() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT * FROM voice_profiles WHERE id=? OR client_voice_id=?",
-                (clean_id, clean_id),
+                "SELECT * FROM voice_profiles WHERE id=?",
+                (clean_id,),
             ).fetchone()
             if not row:
                 return None
@@ -94,10 +94,10 @@ def canonical_db_voice_vault_lookup(voice_profile_id: str, owner_id: str) -> Opt
             return {
                 "id": str(record["id"]),
                 "owner_id": str(record.get("user_id") or ""),
-                "voice_id": str(record.get("provider_voice_id") or ""),
+                "voice_id": str(record.get("provider_voice_id") or record.get("voice_id") or ""),
                 "provider": str(record.get("provider") or "voice_vault"),
                 "status": str(record.get("status") or ""),
-                "state": "deleted" if record.get("deleted_at") is not None else "active",
+                "state": "deleted" if (record.get("deleted_at") is not None and str(record.get("deleted_at")).strip() != "") else "active",
                 "consent_status": str(record.get("consent_status") or "active"),
                 "gender": str(record.get("gender") or "male"),
             }
@@ -158,25 +158,31 @@ class RealtimeVoiceResolver:
                 )
 
             # 1. Foreign profile check (must match owner_id if owner specified)
-            profile_owner = str(profile.get("owner_id") or profile.get("account_id") or "").strip()
-            if owner_id and profile_owner and profile_owner != str(owner_id).strip():
-                return ResolvedVoice(
-                    voice_id="",
-                    provider=self.default_provider,
-                    gender=gender,
-                    language_code=lang_key,
-                    validation_status="invalid",
-                    error_code="FOREIGN_PROFILE_BLOCKED",
+            profile_owner = str(profile.get("owner_id") or profile.get("account_id") or profile.get("user_id") or "").strip()
+            if owner_id and profile_owner:
+                match = (profile_owner == str(owner_id).strip()) or (
+                    profile_owner.replace("tg_", "") == str(owner_id).strip().replace("tg_", "")
                 )
+                if not match:
+                    return ResolvedVoice(
+                        voice_id="",
+                        provider=self.default_provider,
+                        gender=gender,
+                        language_code=lang_key,
+                        voice_vault_id=voice_profile_id,
+                        validation_status="invalid",
+                        error_code="FOREIGN_PROFILE_BLOCKED",
+                    )
 
             # 2. Deleted / archived profile check
-            state = str(profile.get("state") or "active").lower()
-            if state in ("deleted", "archived"):
+            state = str(profile.get("state") or ("deleted" if profile.get("deleted_at") else "active")).lower()
+            if state in ("deleted", "archived") or (profile.get("deleted_at") and str(profile.get("deleted_at")).strip()):
                 return ResolvedVoice(
                     voice_id="",
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,
+                    voice_vault_id=voice_profile_id,
                     validation_status="invalid",
                     error_code="DELETED_PROFILE_BLOCKED",
                 )
@@ -190,14 +196,27 @@ class RealtimeVoiceResolver:
                     provider=self.default_provider,
                     gender=gender,
                     language_code=lang_key,
+                    voice_vault_id=voice_profile_id,
                     validation_status="invalid",
                     error_code="NOT_READY_PROFILE_BLOCKED",
                 )
 
-            # 4. Valid profile
+            # 4. Valid profile - strictly require provider voice_id (FAIL_CLOSED if empty)
+            resolved_voice_id = str(profile.get("voice_id") or profile.get("provider_voice_id") or "").strip()
+            if not resolved_voice_id:
+                return ResolvedVoice(
+                    voice_id="",
+                    provider=self.default_provider,
+                    gender=gender,
+                    language_code=lang_key,
+                    voice_vault_id=voice_profile_id,
+                    validation_status="invalid",
+                    error_code="MISSING_PROVIDER_VOICE_ID",
+                )
+
             resolved_gender = profile.get("gender") or gender
             return ResolvedVoice(
-                voice_id=str(profile.get("voice_id") or canonical_fallback_voice),
+                voice_id=resolved_voice_id,
                 provider=str(profile.get("provider") or "voice_vault"),
                 gender=resolved_gender,
                 language_code=lang_key,
