@@ -92743,7 +92743,20 @@ def video_ai_edit_invoice_snapshot(state: dict) -> dict:
         }
 
     if profile_id and (video_ai_edit_router.is_local_profile(profile_id) or profile_id in video_ai_edit_router.LOCAL_PROFILES_ALLOWLIST):
-        local_plan = dict(route.get("local_preprocess_plan") or {})
+        local_plan = dict(current.get("local_edit_plan") or route.get("local_preprocess_plan") or {})
+        try:
+            video_ai_edit_validation.validate_aiedit_local_plan(local_plan)
+        except video_ai_edit_validation.AiEditValidationError:
+            return {
+                "ready": False,
+                "reason": "unsupported_local_edit_operation",
+                "execution_lane": "local",
+                "profile_id": profile_id,
+                "price_xu": 0,
+                "pricing_source": "free_local_tool",
+                "provider_call": False,
+                "message_vi": "Yêu cầu chứa thao tác cục bộ chưa được hỗ trợ.",
+            }
         return {
             "ready": True,
             "reason": "local_edit_ready",

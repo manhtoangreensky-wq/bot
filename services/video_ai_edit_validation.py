@@ -275,7 +275,75 @@ def validate_final_edited_mp4(
     }
 
 
+AIEDIT_LOCAL_TOP_LEVEL_ALLOWLIST = frozenset({
+    "crop_or_fit",
+    "color_preset",
+    "quality_filters",
+    "sharpen",
+    "denoise",
+    "stabilize",
+    "audio_normalize",
+    "audio_normalization",
+    "local_effects",
+    "speed",
+    "volume",
+    "watermark_overlay",
+    "intensity",
+    "trim",
+    "resolution",
+    "rotation",
+    "flip",
+    "brightness_percent",
+    "text_overlay",
+    "logo_overlay",
+    "subtitle_file",
+    "remove_middle",
+    "output_format",
+    "input_video",
+    "concat_inputs",
+    "audio_tracks",
+})
+
+AIEDIT_LOCAL_EFFECTS_ALLOWLIST = frozenset({
+    "fade_in_ms",
+    "fade_out_ms",
+    "vignette",
+    "slow_zoom",
+})
+
+AIEDIT_LOCAL_QUALITY_FILTERS_ALLOWLIST = frozenset({
+    "sharpen",
+    "denoise",
+})
+
+
+def validate_aiedit_local_plan(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Validate that local_edit_plan contains only canonical, supported operations and nested effects."""
+    if not isinstance(raw, dict):
+        raise AiEditValidationError("unsupported_local_edit_operation")
+    unknown_top = sorted(set(raw.keys()) - AIEDIT_LOCAL_TOP_LEVEL_ALLOWLIST)
+    if unknown_top:
+        raise AiEditValidationError("unsupported_local_edit_operation")
+    if "local_effects" in raw:
+        effects = raw["local_effects"]
+        if not isinstance(effects, dict):
+            raise AiEditValidationError("unsupported_local_edit_operation")
+        unknown_effects = sorted(set(effects.keys()) - AIEDIT_LOCAL_EFFECTS_ALLOWLIST)
+        if unknown_effects:
+            raise AiEditValidationError("unsupported_local_edit_operation")
+    if "quality_filters" in raw:
+        qf = raw["quality_filters"]
+        if not isinstance(qf, dict):
+            raise AiEditValidationError("unsupported_local_edit_operation")
+        unknown_qf = sorted(set(qf.keys()) - AIEDIT_LOCAL_QUALITY_FILTERS_ALLOWLIST)
+        if unknown_qf:
+            raise AiEditValidationError("unsupported_local_edit_operation")
+    return raw
+
+
 __all__ = [
+    "AIEDIT_LOCAL_TOP_LEVEL_ALLOWLIST", "AIEDIT_LOCAL_EFFECTS_ALLOWLIST",
+    "AIEDIT_LOCAL_QUALITY_FILTERS_ALLOWLIST", "validate_aiedit_local_plan",
     "AiEditValidationError", "ai_edit_limits", "artifact_delivery_allowed",
     "build_preprocess_command", "preprocess_source_video", "safe_output_name",
     "sha256_file", "validate_final_edited_mp4", "validate_input_metadata",

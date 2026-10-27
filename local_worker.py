@@ -4249,6 +4249,7 @@ def _aiedit_progress(job_id, stage: str, **fields) -> None:
 
 def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
     raw = dict(payload.get("local_edit_plan") or payload.get("local_preprocess_plan") or {})
+    video_ai_edit_validation.validate_aiedit_local_plan(raw)
     plan = default_manual_edit_plan(source_path)
     plan["input_video"] = source_path
     metadata = dict(payload.get("source_metadata") or {})
@@ -4277,10 +4278,8 @@ def _aiedit_local_plan(payload: dict, source_path: str) -> dict:
         plan["speed"] = float(raw["speed"])
     if "volume" in raw:
         plan["volume"] = float(raw["volume"])
-    allowed_base = {*default_manual_edit_plan(), "watermark_overlay", "sharpen", "denoise", "audio_normalize", "intensity"}
-    for key, value in raw.items():
-        if key not in allowed_base:
-            plan[key] = value
+    if "watermark_overlay" in raw and isinstance(raw["watermark_overlay"], dict):
+        plan["watermark_overlay"] = dict(raw["watermark_overlay"])
     return plan
 
 
@@ -4447,6 +4446,8 @@ def run_video_ai_edit(job: dict) -> None:
         poll_count = 0
         fallback_count = 0
         if lane == "local":
+            raw_local = payload.get("local_edit_plan") or payload.get("local_preprocess_plan") or {}
+            video_ai_edit_validation.validate_aiedit_local_plan(raw_local)
             if not _aiedit_cached_output_valid(output_path, source_path, workspace, int(payload.get("target_duration_seconds") or 0), ffmpeg, ffprobe, deadline_monotonic):
                 plan = _aiedit_local_plan(payload, source_path)
                 result = execute_manual_edit(

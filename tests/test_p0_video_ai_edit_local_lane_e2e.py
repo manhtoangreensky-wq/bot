@@ -515,3 +515,157 @@ def test_generative_lane_still_fails_closed_without_provider():
     assert invoice["price_xu"] == 0
     assert invoice["provider_call"] is False
     assert "chưa có provider" in invoice["message_vi"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Test Case 13: Unknown Top-Level Local Operation Fails Closed
+# ---------------------------------------------------------------------------
+def test_unknown_top_level_local_operation_fails_closed(tmp_path, monkeypatch):
+    source_video = _generate_sample_mp4(tmp_path / "source_unk_top.mp4", duration_seconds=1)
+    updates = []
+    _setup_worker_test_env(monkeypatch, tmp_path, updates)
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["local_edit_plan"]["laser_eyes_unknown_op"] = True
+    job = {"id": 113, "input_file_id": json.dumps(payload), "job_type": "video_ai_edit", "status": "processing"}
+
+    local_worker.run_video_ai_edit(job)
+
+    assert len(updates) > 0
+    final = updates[-1]
+    assert final["status"] == "failed"
+    assert final["detail"]["stage"] == "failed_no_charge"
+    assert final["detail"]["reason"] == "unsupported_local_edit_operation"
+    assert final["detail"]["charge"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test Case 14: Unknown Nested Local Effect Fails Closed
+# ---------------------------------------------------------------------------
+def test_unknown_nested_local_effect_fails_closed(tmp_path, monkeypatch):
+    source_video = _generate_sample_mp4(tmp_path / "source_unk_nested.mp4", duration_seconds=1)
+    updates = []
+    _setup_worker_test_env(monkeypatch, tmp_path, updates)
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["local_edit_plan"]["local_effects"] = {"vignette": True, "quantum_explosion_fx": True}
+    job = {"id": 114, "input_file_id": json.dumps(payload), "job_type": "video_ai_edit", "status": "processing"}
+
+    local_worker.run_video_ai_edit(job)
+
+    assert len(updates) > 0
+    final = updates[-1]
+    assert final["status"] == "failed"
+    assert final["detail"]["stage"] == "failed_no_charge"
+    assert final["detail"]["reason"] == "unsupported_local_edit_operation"
+    assert final["detail"]["charge"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test Case 15: Unknown Operation Never Invokes FFmpeg
+# ---------------------------------------------------------------------------
+def test_unknown_operation_never_invokes_ffmpeg(tmp_path, monkeypatch):
+    source_video = _generate_sample_mp4(tmp_path / "source_no_ffmpeg.mp4", duration_seconds=1)
+    updates = []
+    _setup_worker_test_env(monkeypatch, tmp_path, updates)
+
+    ffmpeg_call_count = 0
+
+    def spy_execute_manual_edit(*args, **kwargs):
+        nonlocal ffmpeg_call_count
+        ffmpeg_call_count += 1
+        return {"ok": True}
+
+    monkeypatch.setattr(local_worker, "execute_manual_edit", spy_execute_manual_edit)
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["local_edit_plan"]["flying_dragon_unsupported"] = True
+    job = {"id": 115, "input_file_id": json.dumps(payload), "job_type": "video_ai_edit", "status": "processing"}
+
+    local_worker.run_video_ai_edit(job)
+
+    assert ffmpeg_call_count == 0, "execute_manual_edit must NOT be invoked when operation is unknown"
+    assert updates[-1]["status"] == "failed"
+    assert updates[-1]["detail"]["reason"] == "unsupported_local_edit_operation"
+
+
+# ---------------------------------------------------------------------------
+# Test Case 16: Unknown Operation Never Delivers
+# ---------------------------------------------------------------------------
+def test_unknown_operation_never_delivers(tmp_path, monkeypatch):
+    source_video = _generate_sample_mp4(tmp_path / "source_no_deliv.mp4", duration_seconds=1)
+    updates = []
+    deliveries = []
+    _setup_worker_test_env(monkeypatch, tmp_path, updates, deliveries)
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["local_edit_plan"]["local_effects"] = {"hyperspace_jump": True}
+    job = {"id": 116, "input_file_id": json.dumps(payload), "job_type": "video_ai_edit", "status": "processing"}
+
+    local_worker.run_video_ai_edit(job)
+
+    assert len(deliveries) == 0, "Delivery must NEVER be attempted for unknown operation"
+    assert updates[-1]["status"] == "failed"
+    assert updates[-1]["detail"]["charge"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Test Case 17: Unknown Operation Charge Zero
+# ---------------------------------------------------------------------------
+def test_unknown_operation_charge_zero(tmp_path, monkeypatch):
+    source_video = _generate_sample_mp4(tmp_path / "source_charge_zero.mp4", duration_seconds=1)
+    updates = []
+    _setup_worker_test_env(monkeypatch, tmp_path, updates)
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["price_xu"] = 500  # Set non-zero price to ensure zero charge is strictly asserted
+    payload["local_edit_plan"]["unsupported_special_fx"] = True
+    job = {"id": 117, "input_file_id": json.dumps(payload), "job_type": "video_ai_edit", "status": "processing"}
+
+    local_worker.run_video_ai_edit(job)
+
+    final = updates[-1]
+    assert final["status"] == "failed"
+    assert final["detail"]["charge"] == 0
+    assert final["detail"]["stage"] == "failed_no_charge"
+    assert final["detail"]["reason"] == "unsupported_local_edit_operation"
+
+
+# ---------------------------------------------------------------------------
+# Test Case 18: Known Local Operations Remain Supported
+# ---------------------------------------------------------------------------
+def test_known_local_operations_remain_supported(tmp_path):
+    source_video = _generate_sample_mp4(tmp_path / "source_known_ops.mp4", duration_seconds=1)
+
+    known_plan = {
+        "crop_or_fit": {"aspect_ratio": "16:9", "mode": "fit"},
+        "color_preset": "bright_clear",
+        "quality_filters": {"sharpen": True, "denoise": True},
+        "sharpen": True,
+        "denoise": True,
+        "audio_normalize": True,
+        "audio_normalization": "loudnorm",
+        "local_effects": {"fade_in_ms": 100, "fade_out_ms": 100, "vignette": True, "slow_zoom": True},
+        "speed": 1.25,
+        "volume": 0.9,
+        "intensity": "medium",
+    }
+
+    # Must pass validation without raising
+    validated = video_ai_edit_validation.validate_aiedit_local_plan(known_plan)
+    assert validated == known_plan
+
+    payload = _base_ai_payload(source_video, profile_id="clean_enhance", lane="local")
+    payload["local_edit_plan"] = known_plan
+
+    compiled = local_worker._aiedit_local_plan(payload, str(source_video))
+
+    assert compiled["crop_or_fit"]["aspect_ratio"] == "16:9"
+    assert compiled["color_preset"] == "bright_clear"
+    assert compiled["quality_filters"]["sharpen"] is True
+    assert compiled["quality_filters"]["denoise"] is True
+    assert compiled["audio_normalization"] == "loudnorm"
+    assert compiled["local_effects"]["vignette"] is True
+    assert compiled["local_effects"]["slow_zoom"] is True
+    assert compiled["speed"] == 1.25
+    assert compiled["volume"] == 0.9
