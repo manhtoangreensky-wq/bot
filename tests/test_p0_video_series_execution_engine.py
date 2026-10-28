@@ -986,3 +986,305 @@ def test_multi_scene_film_invalid_count_real_path_fail_closed() -> None:
     assert outbox_count == 0
     credits = conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0]
     assert credits == 10000
+
+
+def test_uiflow3_handoff_omitted_scenes_per_episode_defaults_safely() -> None:
+    """Blocker A: Canonical UIFLOW3 handoff with omitted scenes_per_episode in snapshot['series']
+
+    cleanly falls back to video_series_planner.DEFAULT_SCENES_PER_EPISODE (4) without NameError.
+    """
+    from copy import deepcopy
+    from services import video_series_planner
+    from services import video_uiflow3_routeengine as ure
+
+    user_id = 888999
+
+    # Case 1: scenes_per_episode omitted from series info with scene_count=4, ep=1
+    snapshot_1 = _make_uiflow3_series_snapshot(episodes_count=1, scenes_per_episode=4, series_id="series_default_fallback_ep1")
+    snapshot_1["series"].pop("scenes_per_episode", None)
+    mat_1 = deepcopy(snapshot_1)
+    mat_1.pop("config_hash", None)
+    snapshot_1["config_hash"] = ure._sha256(mat_1)
+
+    handoff_1 = ure.compile_routeengine_handoff(
+        snapshot_1,
+        owner_user_id=user_id,
+        owner_chat_id=user_id,
+    )
+    assert handoff_1["ok"] is True
+    assert handoff_1["series_id"] == "series_default_fallback_ep1"
+    story_bible_1 = handoff_1.get("story_bible") or {}
+    assert story_bible_1.get("scenes_per_episode") == video_series_planner.DEFAULT_SCENES_PER_EPISODE
+    assert handoff_1["side_effects"]["provider_calls"] == 0
+
+    # Case 2: scenes_per_episode omitted from series info with scene_count=8, ep=2
+    snapshot_2 = _make_uiflow3_series_snapshot(episodes_count=2, scenes_per_episode=4, series_id="series_default_fallback_ep2")
+    snapshot_2["series"].pop("scenes_per_episode", None)
+    mat_2 = deepcopy(snapshot_2)
+    mat_2.pop("config_hash", None)
+    snapshot_2["config_hash"] = ure._sha256(mat_2)
+
+    handoff_2 = ure.compile_routeengine_handoff(
+        snapshot_2,
+        owner_user_id=user_id,
+        owner_chat_id=user_id,
+    )
+    assert handoff_2["ok"] is True
+    assert handoff_2["series_id"] == "series_default_fallback_ep2"
+    story_bible_2 = handoff_2.get("story_bible") or {}
+    assert story_bible_2.get("scenes_per_episode") == video_series_planner.DEFAULT_SCENES_PER_EPISODE
+    assert handoff_2["side_effects"]["provider_calls"] == 0
+
+
+def test_multi_scene_film_tampered_zero_counts_fail_closed_at_real_admission() -> None:
+    """Blocker B: Explicit tampered zero values for episodes_count or scenes_per_episode
+
+    are preserved (not swallowed by 'or' fallback) and fail closed at admission and confirm boundaries.
+    Zero jobs created, zero outbox records created, zero wallet mutations.
+    """
+    import json
+    import sqlite3
+    import bot
+    from services import video_project_queue as vpq
+
+    user_id = 999111
+    preflight = {
+        "ok": True,
+        "configured_provider_chain": ["shopaikey_video"],
+        "public_submit_enabled": True,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+    scene_gate = {
+        "ok": True,
+        "eligible_provider_keys": ["shopaikey_video"],
+        "scene_count": 4,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+
+    # Case 1: Tampered episodes_count = 0
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    vpq.ensure_video_project_queue_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 0)")
+    conn.execute("INSERT OR REPLACE INTO users (user_id, credits) VALUES (?, 5000)", (user_id,))
+    conn.commit()
+
+    tampered_ep0 = {
+        "source": "product_video",
+        "product_type": "multi_scene_film",
+        "public_user": True,
+        "render_mode": "real",
+        "episodes_count": 0,
+        "scenes_per_episode": 4,
+        "scene_count": 4,
+        "total_xu": 600,
+        "customer_charge_planned_xu": 600,
+        "user_visible_price_xu": 600,
+    }
+    proj_ep0 = vpq.create_video_project(
+        conn,
+        user_id=user_id,
+        profile_id="multi_scene_film",
+        topic="tampered_ep0_test",
+        asset_pack=tampered_ep0,
+    )
+    p_id_ep0 = proj_ep0["project_id"]
+    conn.execute(
+        'UPDATE video_projects SET status="draft_invoice", invoice_json=?, total_xu_estimated=600 WHERE project_id=?',
+        (json.dumps(tampered_ep0), p_id_ep0),
+    )
+    conn.commit()
+    proj_ep0 = vpq.get_video_project(conn, p_id_ep0)
+
+    adm_ep0 = bot.build_product_video_public_final_admission(proj_ep0, user_id, preflight, scene_gate)
+    assert adm_ep0.get("ok") is False
+    assert adm_ep0.get("admission_block_reason") == "invalid_episode_count"
+
+    res_ep0 = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=p_id_ep0,
+        user_id=user_id,
+        balance_xu=5000,
+        provider_admission=adm_ep0,
+    )
+    assert res_ep0.get("ok") is False
+    assert res_ep0.get("reason") == "invalid_episode_count"
+    assert res_ep0.get("job_created", False) is False
+
+    # Invariants for Case 1
+    assert conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM video_dispatch_outbox").fetchone()[0] == 0
+    assert conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0] == 5000
+
+    # Case 2: Tampered scenes_per_episode = 0
+    tampered_sc0 = {
+        "source": "product_video",
+        "product_type": "multi_scene_film",
+        "public_user": True,
+        "render_mode": "real",
+        "episodes_count": 1,
+        "scenes_per_episode": 0,
+        "scene_count": 4,
+        "total_xu": 600,
+        "customer_charge_planned_xu": 600,
+        "user_visible_price_xu": 600,
+    }
+    proj_sc0 = vpq.create_video_project(
+        conn,
+        user_id=user_id,
+        profile_id="multi_scene_film",
+        topic="tampered_sc0_test",
+        asset_pack=tampered_sc0,
+    )
+    p_id_sc0 = proj_sc0["project_id"]
+    conn.execute(
+        'UPDATE video_projects SET status="draft_invoice", invoice_json=?, total_xu_estimated=600 WHERE project_id=?',
+        (json.dumps(tampered_sc0), p_id_sc0),
+    )
+    conn.commit()
+    proj_sc0 = vpq.get_video_project(conn, p_id_sc0)
+
+    adm_sc0 = bot.build_product_video_public_final_admission(proj_sc0, user_id, preflight, scene_gate)
+    assert adm_sc0.get("ok") is False
+    assert adm_sc0.get("admission_block_reason") == "invalid_scene_count"
+
+    res_sc0 = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=p_id_sc0,
+        user_id=user_id,
+        balance_xu=5000,
+        provider_admission=adm_sc0,
+    )
+    assert res_sc0.get("ok") is False
+    assert res_sc0.get("reason") == "invalid_scene_count"
+    assert res_sc0.get("job_created", False) is False
+
+    # Invariants for Case 2
+    assert conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM video_dispatch_outbox").fetchone()[0] == 0
+    assert conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0] == 5000
+
+
+def test_multi_scene_film_missing_or_corrupt_manifest_fails_closed() -> None:
+    """Blocker C: Missing or corrupted series manifest fails closed before job/outbox creation.
+
+    Zero jobs persisted, zero outbox records created, zero wallet deductions.
+    """
+    import json
+    import sqlite3
+    import bot
+    from services import video_project_queue as vpq
+
+    user_id = 777333
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    vpq.ensure_video_project_queue_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 0)")
+    conn.execute("INSERT OR REPLACE INTO users (user_id, credits) VALUES (?, 8000)", (user_id,))
+    conn.commit()
+
+    preflight = {
+        "ok": True,
+        "configured_provider_chain": ["shopaikey_video"],
+        "public_submit_enabled": True,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+    scene_gate = {
+        "ok": True,
+        "eligible_provider_keys": ["shopaikey_video"],
+        "scene_count": 4,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+
+    # Case 1: Missing series_manifest (None or omitted)
+    asset_pack_no_manifest = {
+        "source": "product_video",
+        "product_type": "multi_scene_film",
+        "public_user": True,
+        "render_mode": "real",
+        "episodes_count": 1,
+        "scenes_per_episode": 4,
+        "scene_count": 4,
+        "total_xu": 600,
+        "customer_charge_planned_xu": 600,
+        "user_visible_price_xu": 600,
+        # series_manifest is intentionally absent
+    }
+    proj_no_mf = vpq.create_video_project(
+        conn,
+        user_id=user_id,
+        profile_id="multi_scene_film",
+        topic="missing_manifest_test",
+        asset_pack=asset_pack_no_manifest,
+    )
+    p_id_no_mf = proj_no_mf["project_id"]
+    conn.execute(
+        'UPDATE video_projects SET status="draft_invoice", invoice_json=?, total_xu_estimated=600 WHERE project_id=?',
+        (json.dumps(asset_pack_no_manifest), p_id_no_mf),
+    )
+    conn.commit()
+    proj_no_mf = vpq.get_video_project(conn, p_id_no_mf)
+
+    adm_no_mf = bot.build_product_video_public_final_admission(proj_no_mf, user_id, preflight, scene_gate)
+
+    res_no_mf = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=p_id_no_mf,
+        user_id=user_id,
+        balance_xu=8000,
+        provider_admission=adm_no_mf,
+    )
+    assert res_no_mf.get("ok") is False
+    assert res_no_mf.get("reason") == "multi_scene_series_manifest_missing"
+    assert res_no_mf.get("job_created", False) is False
+
+    assert conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM video_dispatch_outbox").fetchone()[0] == 0
+    assert conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0] == 8000
+
+    # Case 2: Corrupted series_manifest (invalid schema / missing all_scenes)
+    asset_pack_corrupt = {
+        "source": "product_video",
+        "product_type": "multi_scene_film",
+        "public_user": True,
+        "render_mode": "real",
+        "episodes_count": 1,
+        "scenes_per_episode": 4,
+        "scene_count": 4,
+        "total_xu": 600,
+        "customer_charge_planned_xu": 600,
+        "user_visible_price_xu": 600,
+        "series_manifest": {"corrupted": True, "all_scenes": []},
+    }
+    proj_corrupt = vpq.create_video_project(
+        conn,
+        user_id=user_id,
+        profile_id="multi_scene_film",
+        topic="corrupt_manifest_test",
+        asset_pack=asset_pack_corrupt,
+    )
+    p_id_corrupt = proj_corrupt["project_id"]
+    conn.execute(
+        'UPDATE video_projects SET status="draft_invoice", invoice_json=?, total_xu_estimated=600 WHERE project_id=?',
+        (json.dumps(asset_pack_corrupt), p_id_corrupt),
+    )
+    conn.commit()
+    proj_corrupt = vpq.get_video_project(conn, p_id_corrupt)
+
+    adm_corrupt = bot.build_product_video_public_final_admission(proj_corrupt, user_id, preflight, scene_gate)
+
+    res_corrupt = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=p_id_corrupt,
+        user_id=user_id,
+        balance_xu=8000,
+        provider_admission=adm_corrupt,
+    )
+    assert res_corrupt.get("ok") is False
+    assert "multi_scene_series_manifest_invalid" in str(res_corrupt.get("reason"))
+    assert res_corrupt.get("job_created", False) is False
+
+    assert conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM video_dispatch_outbox").fetchone()[0] == 0
+    assert conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0] == 8000

@@ -6093,16 +6093,38 @@ def build_product_video_public_final_admission(
     series_admission_block_reason = ""
     if requested_product_type == "multi_scene_film":
         from services.video_series_planner import validate_series_execution_request
-        ep_count = (
-            asset_pack.get("episodes_count")
-            or (asset_pack.get("uiflow3_series") or {}).get("episodes_count")
-            or 1
-        )
-        sc_per_ep = (
-            asset_pack.get("scenes_per_episode")
-            or (asset_pack.get("uiflow3_series") or {}).get("scenes_per_episode")
-            or scene_count
-        )
+        ep_count = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1
+
+        sc_per_ep = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                if "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                    sc_per_ep = src["scenes_per_episode"]
+                    break
+            if sc_per_ep is not None:
+                break
+        if sc_per_ep is None:
+            sc_per_ep = scene_count
         char_bible = (
             asset_pack.get("character_bible")
             or (asset_pack.get("story_bible") or {}).get("characters")

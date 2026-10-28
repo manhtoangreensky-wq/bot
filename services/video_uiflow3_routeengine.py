@@ -17,6 +17,8 @@ import uuid
 
 from services import video_engine_contract
 from services import video_project_queue
+from services import video_series_planner
+from services.video_series_planner import DEFAULT_SCENES_PER_EPISODE
 from services.video_uiflow3_execution_contract import BRIDGE_VERSION, RATIO_GEOMETRY
 
 
@@ -850,10 +852,12 @@ def compile_routeengine_handoff(
         if ep_count is None:
             ep_count = 1 if episode_info else 1
 
-        sc_per_ep = series_info.get("scenes_per_episode")
-        if sc_per_ep is None:
+        sc_per_ep = None
+        if "scenes_per_episode" in series_info and series_info["scenes_per_episode"] is not None:
+            sc_per_ep = series_info["scenes_per_episode"]
+        else:
             ep_int = max(1, _positive_int(ep_count) or 1)
-            sc_per_ep = scene_count // ep_int if ep_int > 0 else scene_count
+            sc_per_ep = (scene_count // ep_int) if (ep_int > 0 and scene_count > 0) else DEFAULT_SCENES_PER_EPISODE
 
         series_val = video_series_planner.validate_series_execution_request(
             episodes_count=ep_count,
@@ -886,7 +890,7 @@ def compile_routeengine_handoff(
             title=title,
             concept=concept,
             episodes_count=_positive_int(ep_count) or 1,
-            scenes_per_episode=_positive_int(sc_per_ep) or DEFAULT_SCENES_PER_EPISODE,
+            scenes_per_episode=_positive_int(sc_per_ep) or video_series_planner.DEFAULT_SCENES_PER_EPISODE,
             genre=_clean(production_bible.get("genre") or "drama", 80),
             aspect_ratio=ratio,
             character_bible=production_bible.get("characters"),
@@ -1227,18 +1231,26 @@ def prepare_commercial_project(
         series_info = dict(snapshot.get("series") or {})
         episode_info = dict(snapshot.get("episode") or {})
         story_bible_in = dict(handoff_value.get("story_bible") or {})
-        ep_count = (
-            story_bible_in.get("episodes_count")
-            or handoff_value.get("episodes_count")
-            or series_info.get("episodes_count")
-            or (1 if episode_info else 1)
-        )
-        sc_per_ep = (
-            story_bible_in.get("scenes_per_episode")
-            or handoff_value.get("scenes_per_episode")
-            or series_info.get("scenes_per_episode")
-            or (scene_count // max(1, _positive_int(ep_count) or 1) if _positive_int(ep_count) > 0 else scene_count)
-        )
+        ep_count = None
+        for src in (story_bible_in, handoff_value, series_info):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1 if episode_info else 1
+
+        sc_per_ep = None
+        for src in (story_bible_in, handoff_value, series_info):
+            if isinstance(src, dict) and "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                sc_per_ep = src["scenes_per_episode"]
+                break
+        if sc_per_ep is None:
+            ep_int = max(1, _positive_int(ep_count) or 1)
+            sc_per_ep = (scene_count // ep_int) if (ep_int > 0 and scene_count > 0) else DEFAULT_SCENES_PER_EPISODE
         series_val = video_series_planner.validate_series_execution_request(
             episodes_count=ep_count,
             scenes_per_episode=sc_per_ep,

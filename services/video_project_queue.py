@@ -3633,20 +3633,40 @@ def _product_video_final_admission_state(
         story_bible_loaded = _json_loads(str(project.get("story_bible_json") or ""), {})
         if not isinstance(story_bible_loaded, dict):
             story_bible_loaded = {}
-        ep_count = (
-            admission.get("episodes_count")
-            or asset_pack.get("episodes_count")
-            or (asset_pack.get("uiflow3_series") or {}).get("episodes_count")
-            or story_bible_loaded.get("episodes_count")
-            or 1
-        )
-        sc_per_ep = (
-            admission.get("scenes_per_episode")
-            or asset_pack.get("scenes_per_episode")
-            or (asset_pack.get("uiflow3_series") or {}).get("scenes_per_episode")
-            or story_bible_loaded.get("scenes_per_episode")
-            or _product_video_scene_count(project)
-        )
+        ep_count = None
+        for src in (
+            admission,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            story_bible_loaded,
+            project,
+        ):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1
+
+        sc_per_ep = None
+        for src in (
+            admission,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            story_bible_loaded,
+            project,
+        ):
+            if isinstance(src, dict):
+                if "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                    sc_per_ep = src["scenes_per_episode"]
+                    break
+            if sc_per_ep is not None:
+                break
+        if sc_per_ep is None:
+            sc_per_ep = _product_video_scene_count(project)
         char_bible = (
             story_bible_loaded.get("characters")
             or asset_pack.get("character_bible")
@@ -5411,6 +5431,7 @@ def build_product_video_confirm_kickoff_payload(
     multiscene_contract: dict[str, Any] = {}
     series_id = ""
     series_hash = ""
+    series_manifest_error = ""
     if execution_product_type == "multi_scene_film" or requested_product_type == "multi_scene_film":
         from services import video_series_planner
         series_id = str(
@@ -5429,7 +5450,11 @@ def build_product_video_confirm_kickoff_payload(
             story_bible_obj = _json_loads(str(project.get("story_bible_json") or ""), {})
             if isinstance(story_bible_obj, dict):
                 series_manifest = story_bible_obj.get("series_manifest")
-        if isinstance(series_manifest, dict) and series_manifest:
+        if not isinstance(series_manifest, dict) or not series_manifest:
+            series_manifest_error = "multi_scene_series_manifest_missing"
+        elif not series_manifest.get("all_scenes"):
+            series_manifest_error = "multi_scene_series_manifest_invalid: empty all_scenes"
+        else:
             try:
                 manifest_obj = video_series_planner.build_multiscene_manifest_for_series(
                     series_manifest,
@@ -5446,8 +5471,8 @@ def build_product_video_confirm_kickoff_payload(
                     series_id = str(manifest_obj.addon_application.get("series_id") or "")
                 if not series_hash:
                     series_hash = str(manifest_obj.addon_application.get("series_hash") or manifest_obj.composition_signature or "")
-            except Exception:
-                pass
+            except Exception as e:
+                series_manifest_error = f"multi_scene_series_manifest_invalid: {str(e)[:120]}"
     if is_storyboard_job:
         preconfirm_candidate_keys = [storyboard_provider]
     else:
@@ -5469,6 +5494,9 @@ def build_product_video_confirm_kickoff_payload(
     elif not quote_state.get("quote_consistent"):
         provider_chain_resolved = False
         dispatch_blocker = "product_video_quote_mismatch_no_charge"
+    elif series_manifest_error:
+        provider_chain_resolved = False
+        dispatch_blocker = "multi_scene_series_manifest_invalid" if "invalid" in series_manifest_error else "multi_scene_series_manifest_missing"
     provider_health_at_submit = (
         asset_pack.get("provider_health_at_submit")
         or invoice.get("provider_health_at_submit")
