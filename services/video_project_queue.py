@@ -3619,6 +3619,48 @@ def _product_video_final_admission_state(
     )
     execution_mode = str(admission.get("execution_mode") or ("cloud" if has_cloud else "local")).strip().lower()
     local_worker_required = bool(execution_mode == "local" or not has_cloud)
+    requested_product_type = str(
+        route_contract.get("route_contract_product_type")
+        or asset_pack.get("product_type")
+        or invoice.get("product_type")
+        or project.get("profile_id")
+        or ""
+    ).strip()
+    series_admission_valid = True
+    series_admission_block_reason = ""
+    if requested_product_type == "multi_scene_film":
+        from services.video_series_planner import validate_series_execution_request
+        story_bible_loaded = _json_loads(str(project.get("story_bible_json") or ""), {})
+        if not isinstance(story_bible_loaded, dict):
+            story_bible_loaded = {}
+        ep_count = (
+            admission.get("episodes_count")
+            or asset_pack.get("episodes_count")
+            or (asset_pack.get("uiflow3_series") or {}).get("episodes_count")
+            or story_bible_loaded.get("episodes_count")
+            or 1
+        )
+        sc_per_ep = (
+            admission.get("scenes_per_episode")
+            or asset_pack.get("scenes_per_episode")
+            or (asset_pack.get("uiflow3_series") or {}).get("scenes_per_episode")
+            or story_bible_loaded.get("scenes_per_episode")
+            or _product_video_scene_count(project)
+        )
+        char_bible = (
+            story_bible_loaded.get("characters")
+            or asset_pack.get("character_bible")
+            or (asset_pack.get("story_bible") or {}).get("characters")
+        )
+        series_val = validate_series_execution_request(
+            episodes_count=ep_count,
+            scenes_per_episode=sc_per_ep,
+            product_type="multi_scene_film",
+            character_bible=char_bible,
+        )
+        if not series_val.get("ok"):
+            series_admission_valid = False
+            series_admission_block_reason = str(series_val.get("reason") or "invalid_series_execution_request")
     authoritative_ok = bool(
         context_signature_valid
         and snapshot_id
@@ -3646,8 +3688,9 @@ def _product_video_final_admission_state(
         and not replayed
         and admission_mode_valid
         and probation_contract_ok
+        and series_admission_valid
     )
-    admission_ok = bool(candidates) and (
+    admission_ok = bool(candidates) and series_admission_valid and (
         not require_provider_admission
         or (
             authoritative_ok
@@ -3657,6 +3700,8 @@ def _product_video_final_admission_state(
     )
     if admission_ok:
         block_reason = ""
+    elif not series_admission_valid:
+        block_reason = series_admission_block_reason
     elif require_authoritative_snapshot and not context_signature_valid:
         block_reason = "admission_context_missing_or_invalid"
     elif not candidates or declared_candidate_count <= 0:
@@ -3741,6 +3786,18 @@ def _product_video_final_admission_state(
         "admission_worker_sha": str(admission.get("admission_worker_sha") or ""),
         "admission_worker_version_compatible": worker_version_compatible,
         "admission_route_requires_provider": route_requires_provider,
+        "series_id": str(
+            admission.get("series_id")
+            or asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
+        "series_hash": str(
+            admission.get("series_hash")
+            or asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
         "worker_generation_id": worker_generation_id,
         "worker_git_sha": worker_git_sha,
         "runtime_sha": runtime_sha,
@@ -5099,6 +5156,13 @@ def product_video_initial_scene_tasks(
             ),
             "image_prompt": str(cards_by_index.get(index, {}).get("image_prompt") or ""),
             "scene_prompt_source": "video_project_scene" if cards_by_index.get(index) else "",
+            "episode_index": _as_int(cards_by_index.get(index, {}).get("episode_index"), 1),
+            "series_id": str(cards_by_index.get(index, {}).get("series_id") or ""),
+            "series_hash": str(cards_by_index.get(index, {}).get("series_hash") or ""),
+            "series_title": str(cards_by_index.get(index, {}).get("series_title") or ""),
+            "episodes_count": _as_int(cards_by_index.get(index, {}).get("episodes_count"), 1),
+            "characters": list(cards_by_index.get(index, {}).get("characters") or []),
+            "character_bible": list(cards_by_index.get(index, {}).get("character_bible") or []),
         }
         for index in range(1, safe_count + 1)
     ]
@@ -5344,6 +5408,46 @@ def build_product_video_confirm_kickoff_payload(
                 }
             )
     next_poll_at = now_text(current_dt + timedelta(seconds=25))
+    multiscene_contract: dict[str, Any] = {}
+    series_id = ""
+    series_hash = ""
+    if execution_product_type == "multi_scene_film" or requested_product_type == "multi_scene_film":
+        from services import video_series_planner
+        series_id = str(
+            asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or (project.get("story_bible") or {}).get("series_id")
+            or ""
+        )
+        series_hash = str(
+            asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        )
+        series_manifest = asset_pack.get("series_manifest")
+        if not series_manifest:
+            story_bible_obj = _json_loads(str(project.get("story_bible_json") or ""), {})
+            if isinstance(story_bible_obj, dict):
+                series_manifest = story_bible_obj.get("series_manifest")
+        if isinstance(series_manifest, dict) and series_manifest:
+            try:
+                manifest_obj = video_series_planner.build_multiscene_manifest_for_series(
+                    series_manifest,
+                    job_id=str(job.get("id") or job.get("job_id") or "job"),
+                    user_id=str(project.get("user_id") or "user"),
+                )
+                multiscene_contract = {
+                    "manifest_composition_signature": manifest_obj.composition_signature,
+                    "manifest_addon_application": manifest_obj.addon_application,
+                    "manifest_scene_order": manifest_obj.scene_order,
+                    "manifest_expected_duration_sec": manifest_obj.expected_duration_sec,
+                }
+                if not series_id:
+                    series_id = str(manifest_obj.addon_application.get("series_id") or "")
+                if not series_hash:
+                    series_hash = str(manifest_obj.addon_application.get("series_hash") or manifest_obj.composition_signature or "")
+            except Exception:
+                pass
     if is_storyboard_job:
         preconfirm_candidate_keys = [storyboard_provider]
     else:
@@ -5503,6 +5607,9 @@ def build_product_video_confirm_kickoff_payload(
             or invoice.get("selected_model")
             or ""
         ),
+        "series_id": series_id,
+        "series_hash": series_hash,
+        "multiscene_contract": multiscene_contract,
         "public_confirm_kickoff_attempted": True,
         "public_confirm_kickoff_success": provider_chain_resolved,
         "worker_dispatch_attempted": True,

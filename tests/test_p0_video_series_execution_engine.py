@@ -665,3 +665,324 @@ def test_multi_scene_film_runtime_readiness_fail_closed_at_admission_boundary() 
     assert db_jobs == 0
     user_row = conn.execute("SELECT credits FROM users WHERE user_id=888999").fetchone()
     assert int(user_row["credits"]) == 1000
+
+
+
+def _make_uiflow3_series_snapshot(*, episodes_count=2, scenes_per_episode=3, series_id="series_canon_1234"):
+    import hashlib
+    import json
+    from copy import deepcopy
+
+    def _cjson(value):
+        return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+
+    def _shash(value):
+        return hashlib.sha256(_cjson(value).encode("utf-8")).hexdigest()
+
+    scene_count = episodes_count * scenes_per_episode
+    scenes = [
+        {
+            "scene_id": f"sc_{i}",
+            "scene_index": i,
+            "scene_role": "beat",
+            "semantic_beat": f"Cảnh hành động {i}",
+            "ratio": "9:16",
+            "duration_seconds": 8,
+            "duration_target": 8,
+            "character_ids": ["hero_1"],
+        }
+        for i in range(1, scene_count + 1)
+    ]
+    raw = {
+        "flow_schema_version": 3,
+        "draft_id": "draft_series_canon_001",
+        "parent_product": "multi_scene_film",
+        "entry_mode": "prompt",
+        "render_family": "video_ai_real",
+        "format": {
+            "ratio": "9:16",
+            "scene_count": scene_count,
+            "seconds_per_scene": 8,
+            "target_duration_seconds": scene_count * 8,
+        },
+        "content": {
+            "profile_id": "multi_scene_film",
+            "original_intent": "Hành trình tầm sư học đạo của thiếu niên Kiếm Khách",
+            "approved_brief": {
+                "title": "Kiếm Khách Khởi Nguyên",
+                "technical_profile": "cinematic_trailer",
+            },
+        },
+        "series": {
+            "series_id": series_id,
+            "goal": "Hành trình tầm sư học đạo",
+            "episodes_count": episodes_count,
+            "scenes_per_episode": scenes_per_episode,
+            "revision": 1,
+        },
+        "episode": {
+            "episode_id": "ep_1",
+            "number": 1,
+            "title": "Tập 1: Xuất sơn",
+        },
+        "effective_episode": None,
+        "production_bible": {
+            "genre": "fantasy",
+            "characters": [
+                {
+                    "character_id": "hero_1",
+                    "name": "Bảo Kiếm",
+                    "role": "protagonist",
+                    "visual_description": "Thiếu niên áo lam, đeo kiếm gỗ",
+                    "costume_lock": "áo lam",
+                }
+            ],
+            "continuity": {
+                "character_bible": [{"character_id": "hero_1", "name": "Bảo Kiếm"}],
+            },
+        },
+        "creative_controls": {},
+        "preservation_requirements": {},
+        "references": [],
+        "scenes": scenes,
+        "audio": {
+            "voice_cast": {},
+            "dialogue_segments": [],
+            "music_scope": "none",
+            "music_plan": {},
+            "sfx_plan": {},
+            "ambient_plan": {},
+        },
+        "branding": {},
+        "source": {},
+        "render_blockers": [],
+    }
+    material = deepcopy(raw)
+    material.pop("config_hash", None)
+    raw["config_hash"] = _shash(material)
+    return raw
+
+
+def test_multi_scene_film_canonical_uiflow3_to_durable_job_handoff_e2e() -> None:
+    """Requirement 1 & 2: Real canonical Product Video handoff proves stable series identity,
+
+    episode provenance, and sequential scene order survive into durable project and job execution payload.
+    """
+    import json
+    import sqlite3
+    import bot
+    from services import video_project_queue as vpq
+    from services import video_uiflow3_routeengine as ure
+
+    user_id = 888999
+    snapshot = _make_uiflow3_series_snapshot(episodes_count=2, scenes_per_episode=3, series_id="series_canon_1234")
+
+    # 1. Compile RouteEngine handoff
+    handoff = ure.compile_routeengine_handoff(
+        snapshot,
+        owner_user_id=user_id,
+        owner_chat_id=user_id,
+    )
+    assert handoff["ok"] is True
+    assert handoff["series_id"] == "series_canon_1234"
+    assert len(handoff["scene_cards"]) == 6
+    assert handoff["scene_cards"][0]["series_id"] == "series_canon_1234"
+    assert handoff["scene_cards"][0]["episode_index"] == 1
+    assert handoff["scene_cards"][3]["episode_index"] == 2
+    assert handoff["side_effects"]["provider_calls"] == 0
+
+    # 2. Prepare durable commercial project in SQLite
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    vpq.ensure_video_project_queue_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 0)")
+    conn.execute("INSERT OR REPLACE INTO users (user_id, credits) VALUES (?, 1000)", (user_id,))
+    conn.commit()
+
+    quote = {
+        "scene_count": 6,
+        "user_visible_price_xu": 900,
+        "persisted_quoted_price_xu": 900,
+        "customer_charge_planned_xu": 900,
+        "wallet_charge_amount_xu": 900,
+        "total_xu": 900,
+        "quality_tier": 300,
+    }
+    prep = ure.prepare_commercial_project(conn, handoff, quote=quote)
+    assert prep["ok"] is True
+    project_id = prep["project"]["project_id"]
+    proj = vpq.get_video_project(conn, project_id)
+
+    # 3. Final Admission Evaluation
+    preflight = {
+        "ok": True,
+        "configured_provider_chain": ["shopaikey_video"],
+        "public_submit_enabled": True,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+    scene_gate = {
+        "ok": True,
+        "eligible_provider_keys": ["shopaikey_video"],
+        "scene_count": 6,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+    adm = bot.build_product_video_public_final_admission(proj, user_id, preflight, scene_gate)
+    assert adm.get("ok") is True or adm.get("admission_result") == "PASS"
+    assert adm.get("series_id") == "series_canon_1234"
+
+    # 4. Confirm Public Product Video Invoice
+    res_confirm = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=project_id,
+        user_id=user_id,
+        balance_xu=1000,
+        provider_admission=adm,
+    )
+    assert res_confirm["ok"] is True
+    assert res_confirm["job_created"] is True
+    assert res_confirm["dispatch_outbox_created"] is True
+    assert res_confirm["scene_records_created"] is True
+
+    # 5. Verify Durable Job Payload Lineage
+    job_row = conn.execute("SELECT * FROM video_jobs WHERE project_id=?", (project_id,)).fetchone()
+    assert job_row is not None
+    job_payload = json.loads(job_row["result_json"])
+
+    assert job_payload["series_id"] == "series_canon_1234"
+    assert len(job_payload["series_hash"]) == 64
+    assert job_payload["multiscene_contract"]["manifest_composition_signature"] == job_payload["series_hash"]
+    assert job_payload["multiscene_contract"]["manifest_addon_application"]["series_id"] == "series_canon_1234"
+    assert job_payload["multiscene_contract"]["manifest_scene_order"] == [1, 2, 3, 4, 5, 6]
+
+    scene_tasks = job_payload["scene_tasks"]
+    assert len(scene_tasks) == 6
+    assert [t["scene_index"] for t in scene_tasks] == [1, 2, 3, 4, 5, 6]
+    assert [t["episode_index"] for t in scene_tasks] == [1, 1, 1, 2, 2, 2]
+    assert all(t["series_id"] == "series_canon_1234" for t in scene_tasks)
+    assert all(t["series_hash"] == job_payload["series_hash"] for t in scene_tasks)
+
+    # 6. Verify Outbox and Wallet Balance Intact
+    outbox = vpq.get_product_video_dispatch_outbox(conn, job_id=job_row["id"])
+    assert outbox is not None
+    outbox_scenes = [int(x) for x in (outbox.get("scene_indexes") or json.loads(outbox.get("scene_indexes_json") or "[]"))]
+    assert outbox_scenes == [1, 2, 3, 4, 5, 6]
+
+    user_row = conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()
+    assert int(user_row["credits"]) == 1000
+
+
+def test_multi_scene_film_invalid_count_real_path_fail_closed() -> None:
+    """Requirement 1 & Controller Finding 1: Invalid/tampered episode/scene count and overflow
+
+    strictly fail closed across the real canonical planning and admission path before any job/outbox/wallet mutations.
+    """
+    import json
+    import sqlite3
+    from copy import deepcopy
+    import bot
+    from services import video_project_queue as vpq
+    from services import video_uiflow3_routeengine as ure
+
+    user_id = 888999
+
+    # 1. Untrusted request with tampered episode count 0 fails closed at RouteEngine handoff boundary
+    snap_0 = _make_uiflow3_series_snapshot(episodes_count=1, scenes_per_episode=3)
+    snap_0["series"]["episodes_count"] = 0
+    mat = deepcopy(snap_0)
+    mat.pop("config_hash", None)
+    snap_0["config_hash"] = ure._sha256(mat)
+    h_0 = ure.compile_routeengine_handoff(snap_0, owner_user_id=user_id, owner_chat_id=user_id)
+    assert h_0["ok"] is False
+    assert h_0.get("blocker") == "invalid_episode_count"
+
+    # 2. Untrusted request with out-of-range episode count 99 fails closed at RouteEngine handoff boundary
+    snap_99 = _make_uiflow3_series_snapshot(episodes_count=1, scenes_per_episode=3)
+    snap_99["series"]["episodes_count"] = 99
+    mat = deepcopy(snap_99)
+    mat.pop("config_hash", None)
+    snap_99["config_hash"] = ure._sha256(mat)
+    h_99 = ure.compile_routeengine_handoff(snap_99, owner_user_id=user_id, owner_chat_id=user_id)
+    assert h_99["ok"] is False
+    assert h_99.get("blocker") == "invalid_episode_count"
+
+    # 3. Untrusted request with invalid scenes_per_episode 0 fails closed at RouteEngine handoff boundary
+    snap_sc0 = _make_uiflow3_series_snapshot(episodes_count=1, scenes_per_episode=3)
+    snap_sc0["series"]["scenes_per_episode"] = 0
+    mat = deepcopy(snap_sc0)
+    mat.pop("config_hash", None)
+    snap_sc0["config_hash"] = ure._sha256(mat)
+    h_sc0 = ure.compile_routeengine_handoff(snap_sc0, owner_user_id=user_id, owner_chat_id=user_id)
+    assert h_sc0["ok"] is False
+    assert h_sc0.get("blocker") == "invalid_scene_count"
+
+    # 4. Tampered project with overflow 5x8=40 > 20 fails closed at real admission boundary
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    vpq.ensure_video_project_queue_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 0)")
+    conn.execute("INSERT OR REPLACE INTO users (user_id, credits) VALUES (?, 10000)", (user_id,))
+    conn.commit()
+
+    tampered_asset = {
+        "source": "product_video",
+        "product_type": "multi_scene_film",
+        "public_user": True,
+        "render_mode": "real",
+        "episodes_count": 5,
+        "scenes_per_episode": 8,
+        "scene_count": 40,
+        "total_xu": 6000,
+        "customer_charge_planned_xu": 6000,
+        "user_visible_price_xu": 6000,
+    }
+    tampered_proj = vpq.create_video_project(
+        conn,
+        user_id=user_id,
+        profile_id="multi_scene_film",
+        topic="tampered_overflow_test",
+        asset_pack=tampered_asset,
+    )
+    project_id = tampered_proj["project_id"]
+    conn.execute(
+        'UPDATE video_projects SET status="draft_invoice", invoice_json=?, total_xu_estimated=6000 WHERE project_id=?',
+        (json.dumps(tampered_asset), project_id),
+    )
+    conn.commit()
+    tampered_proj = vpq.get_video_project(conn, project_id)
+
+    preflight = {
+        "ok": True,
+        "configured_provider_chain": ["shopaikey_video"],
+        "public_submit_enabled": True,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+    scene_gate = {
+        "ok": True,
+        "eligible_provider_keys": ["shopaikey_video"],
+        "scene_count": 40,
+        "freeze_truth": {"public_final_confirm_allowed": True},
+    }
+
+    adm_overflow = bot.build_product_video_public_final_admission(tampered_proj, user_id, preflight, scene_gate)
+    assert adm_overflow.get("ok") is False
+    assert adm_overflow.get("admission_result") == "BLOCKED"
+    assert adm_overflow.get("admission_block_reason") == "total_scenes_exceed_capacity"
+
+    res_overflow = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=project_id,
+        user_id=user_id,
+        balance_xu=10000,
+        provider_admission=adm_overflow,
+    )
+    assert res_overflow.get("ok") is False
+    assert res_overflow.get("reason") == "total_scenes_exceed_capacity"
+    assert res_overflow.get("job_created", False) is False
+
+    # Invariant: exactly 0 jobs in DB, 0 outbox in DB, user credits remain 10000
+    jobs_count = conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0]
+    assert jobs_count == 0
+    outbox_count = conn.execute("SELECT count(*) FROM video_dispatch_outbox").fetchone()[0]
+    assert outbox_count == 0
+    credits = conn.execute("SELECT credits FROM users WHERE user_id=?", (user_id,)).fetchone()[0]
+    assert credits == 10000
