@@ -396,7 +396,7 @@ def test_two_plus_episode_plan_preserves_indexes_order_and_continuity_handoff() 
 
 
 def test_multiscene_manifest_preserves_episode_provenance_and_metadata() -> None:
-    """Requirement 3: Conversion into multiscene manifest preserves scene count, order, and episode metadata."""
+    """Requirement 3 & Controller Issue 1: Manifest preserves scene count, order, episode provenance, and stable series identity."""
     series = plan_film_series(
         title="Thần Kiếm Trọng Sinh",
         concept="Tu tiên kiếm hiệp qua 2 tập phim",
@@ -404,6 +404,9 @@ def test_multiscene_manifest_preserves_episode_provenance_and_metadata() -> None
         scenes_per_episode=4,
         aspect_ratio="9:16",
     )
+
+    assert bool(series["series_hash"]) is True
+    assert bool(series["series_id"]) is True
 
     manifest = build_multiscene_manifest_for_series(
         series,
@@ -419,8 +422,20 @@ def test_multiscene_manifest_preserves_episode_provenance_and_metadata() -> None
     assert manifest.scene_order == list(range(1, 9))
     assert manifest.required_scene_indexes == list(range(1, 9))
     assert manifest.expected_duration_sec == 8 * 8.0
+    assert manifest.composition_signature == series["series_hash"]
+    assert manifest.addon_application.get("series_id") == series["series_id"]
+    assert manifest.addon_application.get("series_hash") == series["series_hash"]
 
-    # Ensure episode provenance is strictly preserved in each scene spec (not flattened away)
+    # Verify specs from convert_series_to_scene_specs also propagate series_id and series_hash
+    specs = convert_series_to_scene_specs(series)
+    assert len(specs) == 8
+    for sp in specs:
+        assert sp["series_id"] == series["series_id"]
+        assert sp["series_hash"] == series["series_hash"]
+        assert sp["series_title"] == "Thần Kiếm Trọng Sinh"
+        assert sp["episodes_count"] == 2
+
+    # Ensure episode provenance and stable identity are strictly preserved in each scene spec (not flattened away)
     for idx, sc_spec in enumerate(manifest.scene_specs, start=1):
         assert sc_spec["scene_id"] == idx
         expected_ep = 1 if idx <= 4 else 2
@@ -429,12 +444,43 @@ def test_multiscene_manifest_preserves_episode_provenance_and_metadata() -> None
         assert sc_spec["scene_index"] == expected_sc
         assert sc_spec["series_title"] == "Thần Kiếm Trọng Sinh"
         assert sc_spec["episodes_count"] == 2
+        assert sc_spec["series_id"] == series["series_id"]
+        assert sc_spec["series_hash"] == series["series_hash"]
         assert len(sc_spec["characters"]) > 0
 
 
+def test_series_identity_handoff_with_explicit_upstream_series_id() -> None:
+    """Requirement 3 & Controller Issue 1: Upstream series_id survives planning -> specs -> manifest."""
+    custom_series_id = "series_uiflow3_custom_abc123"
+    series = plan_film_series(
+        title="Custom Series ID Test",
+        concept="Bảo toàn series_id từ upstream UIFLOW3",
+        episodes_count=2,
+        scenes_per_episode=2,
+        series_id=custom_series_id,
+    )
+    assert series["series_id"] == custom_series_id
+    assert bool(series["series_hash"]) is True
+
+    specs = convert_series_to_scene_specs(series)
+    assert len(specs) == 4
+    for sp in specs:
+        assert sp["series_id"] == custom_series_id
+        assert sp["series_hash"] == series["series_hash"]
+
+    manifest = build_multiscene_manifest_for_series(series, job_id="custom_series_job_1")
+    assert manifest.composition_signature == series["series_hash"]
+    assert manifest.addon_application.get("series_id") == custom_series_id
+    assert manifest.addon_application.get("series_hash") == series["series_hash"]
+    for sc_spec in manifest.scene_specs:
+        assert sc_spec["series_id"] == custom_series_id
+        assert sc_spec["series_hash"] == series["series_hash"]
+
+
 def test_tampered_unknown_product_and_invalid_state_fail_closed() -> None:
-    """Requirement 5: Unknown/tampered product and invalid state fail closed without side effects."""
+    """Requirement 5 & Controller Issue 2: Unknown/tampered product and invalid counts fail closed without side effects."""
     from services import video_tail9, video_project_queue
+    from services.video_series_planner import validate_series_execution_request
 
     # Unknown product
     for tampered in ("tampered_series_product", "multi_scene_film_fake", "unknown_series"):
@@ -446,7 +492,42 @@ def test_tampered_unknown_product_and_invalid_state_fail_closed() -> None:
         assert eng["execution_enabled"] is False
         assert eng["execution_blocker"] in {"product_owner_missing", f"{tampered}_deferred"}
 
-    # Canonical count clamping (fail-safe bounding)
+    # Validation at admission boundary: invalid/tampered episode counts fail closed with zero side effects
+    for bad_ep in (0, -1, 6, 999, "invalid", None):
+        res = validate_series_execution_request(episodes_count=bad_ep, scenes_per_episode=3)
+        assert res["ok"] is False
+        assert bool(res["reason"]) is True
+        assert res["side_effects"]["jobs_created"] == 0
+        assert res["side_effects"]["outbox_created"] == 0
+        assert res["side_effects"]["provider_calls"] == 0
+        assert res["side_effects"]["wallet_mutations"] == 0
+
+    # Validation at admission boundary: invalid/tampered scene counts fail closed with zero side effects
+    for bad_sc in (0, 1, 9, 100, "malformed", None):
+        res = validate_series_execution_request(episodes_count=2, scenes_per_episode=bad_sc)
+        assert res["ok"] is False
+        assert bool(res["reason"]) is True
+        assert res["side_effects"]["jobs_created"] == 0
+        assert res["side_effects"]["outbox_created"] == 0
+        assert res["side_effects"]["provider_calls"] == 0
+        assert res["side_effects"]["wallet_mutations"] == 0
+
+    # Total scenes exceeding capacity (e.g., 5 episodes x 8 scenes = 40 > 20 max)
+    res_overflow = validate_series_execution_request(episodes_count=5, scenes_per_episode=8)
+    assert res_overflow["ok"] is False
+    assert res_overflow["reason"] == "total_scenes_exceed_capacity"
+
+    # Commercial admission boundary checks: package_compatibility fails closed with 0 side effects
+    for bad_count in (21, 50, 100, 999):
+        compat = video_tail9.package_compatibility("multi_scene_film", scene_count=bad_count, ratio="9:16", quality_tier_id=300)
+        assert compat["ok"] is False
+        assert compat["reason"] == "scene_count_not_supported"
+        assert compat["side_effects"]["job"] == 0
+        assert compat["side_effects"]["outbox"] == 0
+        assert compat["side_effects"]["provider_calls"] == 0
+        assert compat["side_effects"]["wallet_mutations"] == 0
+
+    # Canonical count clamping (internal helper safety)
     assert canonical_episode_count(0) == 1
     assert canonical_episode_count(-10) == 1
     assert canonical_episode_count(999) == 5
@@ -475,3 +556,112 @@ def test_pre_confirm_zero_provider_calls_and_zero_wallet_mutations() -> None:
     assert series["side_effects"]["jobs_created"] == 0
     assert len(scene_specs) == 9
     assert len(manifest.scene_specs) == 9
+
+
+
+def test_multi_scene_film_runtime_readiness_fail_closed_at_admission_boundary() -> None:
+    """Requirement 2 & Controller Issue 3: Actual confirm/admission boundary blocks missing/stale/incompatible readiness with zero side effects."""
+    import bot
+    import services.video_project_queue as vpq
+    import json
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    vpq.ensure_video_project_queue_schema(conn)
+    conn.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 0)")
+    conn.execute("INSERT OR REPLACE INTO users (user_id, credits) VALUES (888999, 1000)")
+    conn.commit()
+
+    series = plan_film_series(
+        title="Series Readiness Admission Test",
+        concept="Kịch bản kiểm thử admission boundary fail-closed",
+        episodes_count=1,
+        scenes_per_episode=3,
+    )
+    series["source"] = "product_video"
+    series["render_mode"] = "real"
+    series["public_user"] = True
+    series["product_type"] = "multi_scene_film"
+
+    proj = vpq.create_video_project(
+        conn,
+        user_id=888999,
+        profile_id="multi_scene_film",
+        topic="Series Readiness Admission Test",
+        asset_pack=series,
+    )
+    project_id = int(proj.get("project_id") or proj.get("id"))
+
+    invoice = {
+        "source": "product_video",
+        "render_mode": "real",
+        "public_user": True,
+        "product_type": "multi_scene_film",
+        "scene_count": 3,
+        "customer_charge_planned_xu": 450,
+        "total_xu": 450,
+    }
+    conn.execute(
+        "UPDATE video_projects SET status='draft_invoice', invoice_json=?, total_xu_estimated=450 WHERE project_id=?",
+        (json.dumps(invoice), project_id),
+    )
+    conn.commit()
+    proj = vpq.get_video_project(conn, project_id)
+
+    # 1. Missing admission context (provider_admission=None)
+    res_missing = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=project_id,
+        user_id=888999,
+        balance_xu=1000,
+        provider_admission=None,
+    )
+    assert res_missing["ok"] is False
+    assert res_missing["reason"] == "admission_context_missing_or_invalid"
+    assert res_missing["job_created"] is False
+    assert res_missing["charged_xu"] == 0
+
+    # 2. Tampered signature in admission context
+    tampered_adm = {
+        "admission_context_version": 1,
+        "admission_context_signature": "tampered_fake_signature_abc",
+    }
+    res_tampered = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=project_id,
+        user_id=888999,
+        balance_xu=1000,
+        provider_admission=tampered_adm,
+    )
+    assert res_tampered["ok"] is False
+    assert res_tampered["reason"] == "admission_context_missing_or_invalid"
+    assert res_tampered["job_created"] is False
+    assert res_tampered["charged_xu"] == 0
+
+    # 3. Blocked readiness (freeze_truth disallows confirm / readiness missing)
+    preflight_blocked = {
+        "ok": False,
+        "configured_provider_chain": ["shopaikey_video"],
+        "freeze_truth": {"public_final_confirm_allowed": False, "public_blocker_code": "readiness_missing_or_stale"},
+    }
+    gate_blocked = {"ok": False, "eligible_provider_keys": ["shopaikey_video"]}
+    adm_blocked = bot.build_product_video_public_final_admission(proj, 888999, preflight_blocked, gate_blocked)
+    assert adm_blocked.get("ok") is False
+    assert adm_blocked.get("admission_result") == "BLOCKED"
+
+    res_blocked = vpq.confirm_public_product_video_invoice(
+        conn,
+        project_id=project_id,
+        user_id=888999,
+        balance_xu=1000,
+        provider_admission=adm_blocked,
+    )
+    assert res_blocked["ok"] is False
+    assert res_blocked.get("job_created", False) is False
+    assert res_blocked.get("charged_xu", 0) == 0
+
+    # 4. Invariant: exactly 0 jobs in DB, user credits remain intact
+    db_jobs = conn.execute("SELECT count(*) FROM video_jobs").fetchone()[0]
+    assert db_jobs == 0
+    user_row = conn.execute("SELECT credits FROM users WHERE user_id=888999").fetchone()
+    assert int(user_row["credits"]) == 1000
