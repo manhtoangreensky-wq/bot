@@ -839,11 +839,11 @@ def test_public_execution_locked_products_invariants_cases_a_b_c() -> None:
     assert vle_contract["execution_enabled"] is True
     assert vle_contract["execution_blocker"] == ""
 
-    # CASE_B: multi_scene_film remains locked
-    assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    # CASE_B: multi_scene_film is unlocked
+    assert "multi_scene_film" not in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
     msf_contract = video_project_queue.product_video_engine_contract("multi_scene_film")
-    assert msf_contract["execution_enabled"] is False
-    assert msf_contract["execution_blocker"] == "multi_scene_film_under_upgrade"
+    assert msf_contract["execution_enabled"] is True
+    assert msf_contract["execution_blocker"] == ""
 
     # CASE_C: video_long remains locked
     assert "video_long" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS

@@ -320,6 +320,8 @@ def convert_series_to_scene_specs(
             "order": int(sc.get("global_scene_index") or 1),
             "characters": list(sc.get("characters") or []),
             "visual_style": str(sc.get("visual_style") or ""),
+            "episode_index": int(sc.get("episode_index") or 1),
+            "scene_index": int(sc.get("scene_index") or 1),
         })
     return specs
 
@@ -351,6 +353,12 @@ def build_multiscene_manifest_for_series(
             "target_duration_sec": float(sc.get("duration_seconds") or SCENE_SECONDS),
             "aspect_ratio": str(sc.get("aspect_ratio") or output_profile or "9:16"),
             "transition": str(sc.get("transition_out") or "dissolve"),
+            "episode_index": int(sc.get("episode_index") or 1),
+            "scene_index": int(sc.get("scene_index") or 1),
+            "characters": list(sc.get("characters") or []),
+            "character_bible": list(series_manifest.get("character_bible") or []),
+            "series_title": str(series_manifest.get("series_title") or ""),
+            "episodes_count": int(series_manifest.get("episodes_count") or 1),
         }
         for idx, sc in enumerate(all_scenes, start=1)
     ]

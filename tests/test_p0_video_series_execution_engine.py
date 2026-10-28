@@ -295,3 +295,183 @@ def test_series_double_confirmation_creates_one_job_only():
     # User balance must be intact
     user_row = conn.execute("SELECT credits FROM users WHERE user_id=888124").fetchone()
     assert int(user_row["credits"]) == 1000
+
+
+# ==============================================================================
+# P0.PRODUCT_VIDEO_LONG_SERIES_R1 DETERMINISTIC ACCEPTANCE SUITE
+# ==============================================================================
+
+def test_multi_scene_film_execution_contract_enabled_and_canonical_route() -> None:
+    """Requirement 1 & 2: multi_scene_film execution contract enabled and resolves to canonical route."""
+    from services import video_tail9, video_uifreeze1, video_project_queue, admin_product_service
+
+    # 1. Removed from global execution lock
+    assert "multi_scene_film" not in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+
+    # 2. Commercial contract execution enabled
+    comm = video_tail9.commercial_contract("multi_scene_film")
+    assert comm["execution_enabled"] is True
+    assert comm["execution_blocker"] == ""
+    assert comm["engine_route"] == "multi_scene_film"
+    assert comm["executor_product_type"] == "multi_scene_film"
+
+    # 3. Engine contract execution enabled and canonical route
+    eng = video_project_queue.product_video_engine_contract("multi_scene_film")
+    assert eng["execution_enabled"] is True
+    assert eng["execution_blocker"] == ""
+    assert eng["engine_route"] == "multi_scene_film"
+    assert eng["executor_product_type"] == "multi_scene_film"
+    assert eng["product_type"] == "multi_scene_film"
+    assert eng["public_product_type"] == "multi_scene_film"
+
+    # 4. Admin canonical technical contract reflection
+    admin_contract = admin_product_service.resolve_canonical_technical_contract("multi_scene_film")
+    assert admin_contract["execution_enabled"] is True
+    assert admin_contract["execution_blocker"] == ""
+
+
+def test_video_long_remains_strictly_execution_locked() -> None:
+    """Requirement 1: video_long remains locked and out of scope."""
+    from services import video_tail9, video_uifreeze1, video_project_queue, admin_product_service
+
+    # 1. Must be in PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    assert "video_long" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+
+    # 2. Commercial contract execution disabled
+    comm = video_tail9.commercial_contract("video_long")
+    assert comm["execution_enabled"] is False
+    assert bool(comm["execution_blocker"]) is True
+
+    # 3. Engine contract execution disabled
+    eng = video_project_queue.product_video_engine_contract("video_long")
+    assert eng["execution_enabled"] is False
+    assert bool(eng["execution_blocker"]) is True
+
+    # 4. Admin canonical technical contract reflection
+    admin_contract = admin_product_service.resolve_canonical_technical_contract("video_long")
+    assert admin_contract["execution_enabled"] is False
+    assert bool(admin_contract["execution_blocker"]) is True
+
+
+def test_two_plus_episode_plan_preserves_indexes_order_and_continuity_handoff() -> None:
+    """Requirement 3: 2+ episode plan preserves episode indexes, global scene order and continuity."""
+    from services.video_scene_continuity import validate_continuity
+
+    series = plan_film_series(
+        title="Biên Niên Sử Vũ Trụ",
+        concept="Cuộc du hành liên sao tìm kiếm nền văn minh cổ",
+        episodes_count=3,
+        scenes_per_episode=3,
+        aspect_ratio="16:9",
+        genre="sci-fi",
+    )
+
+    assert series["episodes_count"] == 3
+    assert series["scenes_per_episode"] == 3
+    assert series["total_scenes"] == 9
+    assert len(series["episodes"]) == 3
+    assert len(series["all_scenes"]) == 9
+
+    # Verify episode indexes and scene indexing
+    for ep_idx, ep in enumerate(series["episodes"], start=1):
+        assert ep["episode_index"] == ep_idx
+        assert len(ep["scenes"]) == 3
+        for sc_idx, sc in enumerate(ep["scenes"], start=1):
+            assert sc["episode_index"] == ep_idx
+            assert sc["scene_index"] == sc_idx
+
+    # Verify global scene order is strictly 1..9
+    global_indices = [sc["global_scene_index"] for sc in series["all_scenes"]]
+    assert global_indices == list(range(1, 10))
+
+    # Verify continuity handoff: each subsequent scene inherits previous completion state
+    for i in range(1, len(series["all_scenes"])):
+        prev_sc = series["all_scenes"][i - 1]
+        curr_sc = series["all_scenes"][i]
+        assert curr_sc.get("start_state") == prev_sc.get("completion_state")
+
+    # Verify overall continuity validation passes
+    report = validate_continuity(series["all_scenes"], series["continuity_contract"])
+    assert report["ok"] is True
+
+
+def test_multiscene_manifest_preserves_episode_provenance_and_metadata() -> None:
+    """Requirement 3: Conversion into multiscene manifest preserves scene count, order, and episode metadata."""
+    series = plan_film_series(
+        title="Thần Kiếm Trọng Sinh",
+        concept="Tu tiên kiếm hiệp qua 2 tập phim",
+        episodes_count=2,
+        scenes_per_episode=4,
+        aspect_ratio="9:16",
+    )
+
+    manifest = build_multiscene_manifest_for_series(
+        series,
+        job_id="series_job_e2e_456",
+        user_id="user_test_99",
+        workspace_dir="/tmp/test_series_456",
+        output_profile="9:16",
+    )
+
+    assert manifest.job_id == "series_job_e2e_456"
+    assert manifest.user_id == "user_test_99"
+    assert len(manifest.scene_specs) == 8
+    assert manifest.scene_order == list(range(1, 9))
+    assert manifest.required_scene_indexes == list(range(1, 9))
+    assert manifest.expected_duration_sec == 8 * 8.0
+
+    # Ensure episode provenance is strictly preserved in each scene spec (not flattened away)
+    for idx, sc_spec in enumerate(manifest.scene_specs, start=1):
+        assert sc_spec["scene_id"] == idx
+        expected_ep = 1 if idx <= 4 else 2
+        expected_sc = idx if idx <= 4 else (idx - 4)
+        assert sc_spec["episode_index"] == expected_ep
+        assert sc_spec["scene_index"] == expected_sc
+        assert sc_spec["series_title"] == "Thần Kiếm Trọng Sinh"
+        assert sc_spec["episodes_count"] == 2
+        assert len(sc_spec["characters"]) > 0
+
+
+def test_tampered_unknown_product_and_invalid_state_fail_closed() -> None:
+    """Requirement 5: Unknown/tampered product and invalid state fail closed without side effects."""
+    from services import video_tail9, video_project_queue
+
+    # Unknown product
+    for tampered in ("tampered_series_product", "multi_scene_film_fake", "unknown_series"):
+        comm = video_tail9.commercial_contract(tampered)
+        assert comm["execution_enabled"] is False
+        assert comm.get("public_planning_enabled", False) is False
+
+        eng = video_project_queue.product_video_engine_contract(tampered)
+        assert eng["execution_enabled"] is False
+        assert eng["execution_blocker"] in {"product_owner_missing", f"{tampered}_deferred"}
+
+    # Canonical count clamping (fail-safe bounding)
+    assert canonical_episode_count(0) == 1
+    assert canonical_episode_count(-10) == 1
+    assert canonical_episode_count(999) == 5
+    assert canonical_scenes_per_episode(0) == 2
+    assert canonical_scenes_per_episode(100) == 8
+
+
+def test_pre_confirm_zero_provider_calls_and_zero_wallet_mutations() -> None:
+    """Requirement 4 & 5: Pre-confirm planning & quoting creates zero provider calls and zero wallet mutations."""
+    from unittest.mock import patch
+
+    with patch("urllib.request.urlopen") as mock_url:
+        series = plan_film_series(
+            title="Zero Cost Audit Series",
+            concept="Kiểm thử không phát sinh chi phí và không gọi provider",
+            episodes_count=3,
+            scenes_per_episode=3,
+        )
+        scene_specs = convert_series_to_scene_specs(series)
+        manifest = build_multiscene_manifest_for_series(series, job_id="audit_job_123")
+
+        assert mock_url.call_count == 0
+
+    assert series["side_effects"]["provider_calls"] == 0
+    assert series["side_effects"]["wallet_mutations"] == 0
+    assert series["side_effects"]["jobs_created"] == 0
+    assert len(scene_specs) == 9
+    assert len(manifest.scene_specs) == 9
