@@ -92,7 +92,7 @@ def get_owner_voice_profiles_safe(
                 SELECT id, display_name, status, is_default, consent_status,
                        preview_audio_ref, provider_voice_id, created_at, updated_at
                 FROM voice_profiles
-                WHERE user_id=? AND deleted_at IS NULL
+                WHERE user_id=? AND deleted_at IS NULL AND status NOT IN ('deleted')
                 ORDER BY is_default DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -189,7 +189,7 @@ def resolve_subdub_voice_authority(
                     (profile_id,),
                 ).fetchone()
 
-                if not row or row["deleted_at"] is not None:
+                if not row or row["deleted_at"] is not None or str(row["status"]).lower() == "deleted":
                     return False, "PROFILE_NOT_FOUND", 422, {"detail": f"Voice profile #{profile_id} not found"}
 
                 record = dict(row)
