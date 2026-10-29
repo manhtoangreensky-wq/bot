@@ -250,8 +250,8 @@ PRODUCT_ADAPTERS: dict[str, dict[str, Any]] = {
         "scene_duration_seconds": 300,
         "maximum_scene_count": 20,
         "supported_quality_tiers": UIFLOW3_EXTENDED_QUALITY_TIERS,
-        "execution_enabled": False,
-        "execution_blocker": "multi_scene_film_under_upgrade",
+        "execution_enabled": True,
+        "execution_blocker": "",
     },
     "video_long": {
         "flow_owner": "video_long",

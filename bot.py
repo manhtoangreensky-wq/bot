@@ -6089,6 +6089,55 @@ def build_product_video_public_final_admission(
         or {}
     )
     freeze_ok = bool(freeze_truth.get("public_final_confirm_allowed", True))
+    series_admission_valid = True
+    series_admission_block_reason = ""
+    if requested_product_type == "multi_scene_film":
+        from services.video_series_planner import validate_series_execution_request
+        ep_count = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1
+
+        sc_per_ep = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                if "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                    sc_per_ep = src["scenes_per_episode"]
+                    break
+            if sc_per_ep is not None:
+                break
+        if sc_per_ep is None:
+            sc_per_ep = scene_count
+        char_bible = (
+            asset_pack.get("character_bible")
+            or (asset_pack.get("story_bible") or {}).get("characters")
+        )
+        series_val = validate_series_execution_request(
+            episodes_count=ep_count,
+            scenes_per_episode=sc_per_ep,
+            product_type="multi_scene_film",
+            character_bible=char_bible,
+        )
+        if not series_val.get("ok"):
+            series_admission_valid = False
+            series_admission_block_reason = str(series_val.get("reason") or "invalid_series_execution_request")
 
     raw_snapshot = dict(scene_gate.get("provider_eligibility_snapshot") or preflight.get("provider_eligibility_snapshot") or {})
     eligibility_evaluated = False
@@ -6189,6 +6238,8 @@ def build_product_video_public_final_admission(
 
     if not contract_valid_chain:
         allowed = False
+    elif not series_admission_valid:
+        allowed = False
     elif execution_mode == "cloud":
         allowed = bool(
             candidates
@@ -6196,6 +6247,7 @@ def build_product_video_public_final_admission(
             and route_ok
             and handler_ok
             and freeze_ok
+            and series_admission_valid
         )
     else:
         allowed = bool(
@@ -6211,11 +6263,14 @@ def build_product_video_public_final_admission(
             and route_ok
             and handler_ok
             and freeze_ok
+            and series_admission_valid
         )
     snapshot_id = f"pv-admission-{int(project.get('project_id') or 0)}-{uuid.uuid4().hex}"
     checked_at = now_text()
     quote_fingerprint = video_project_queue.product_video_admission_quote_fingerprint(project, int(user_id))
-    if not freeze_ok:
+    if not series_admission_valid:
+        block_reason = series_admission_block_reason
+    elif not freeze_ok:
         block_reason = str(
             freeze_truth.get("blocker_code")
             or freeze_truth.get("public_blocker_code")
@@ -6249,6 +6304,16 @@ def build_product_video_public_final_admission(
         **eligibility_snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "admission_snapshot_id": snapshot_id,
+        "series_id": str(
+            asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
+        "series_hash": str(
+            asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
         "admission_checked_at": checked_at,
         "admission_user_id": int(user_id),
         "admission_project_id": int(project.get("project_id") or 0),
@@ -6325,6 +6390,16 @@ def build_product_video_public_final_admission(
         "worker_capability_version": str(worker.get("worker_capability_version") or ""),
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": bool(diagnostics.get("duplicate_confirm_handler_detected")),
+        "series_id": str(
+            asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
+        "series_hash": str(
+            asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
     }
     return video_project_queue.sign_product_video_final_admission_context(admission)
 
