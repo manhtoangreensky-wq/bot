@@ -163872,8 +163872,8 @@ def voice_tts_zero_volume_confirm_keyboard(lang: str = "vi", product_context: st
     ctx = normalize_product_context(product_context)
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton(f"✅ {_audio_label(lang, 'create_audio')}", callback_data=cb("voice_tts_zero_confirm")),
-        InlineKeyboardButton(f"✏️ {_audio_label(lang, 'enter_volume')}", callback_data=cb("voice_tts_set_volume")),
+        InlineKeyboardButton("✅ Vẫn tạo audio", callback_data=cb("voice_tts_zero_confirm")),
+        InlineKeyboardButton("✏️ Nhập lại âm lượng", callback_data=cb("voice_tts_set_volume")),
     ]])
 
 def voice_tts_speed_input_text(lang: str = "vi") -> str:
@@ -171462,8 +171462,10 @@ def voice_clone_provider_not_ready_public_text(lang: str = "vi") -> str:
 
 def voice_clone_product_failure_text(lang: str = "vi", reason: str = "") -> str:
     marker = str(reason or "").strip().lower()
-    guidance = _audio_copy(lang, "clone_upload") if any(token in marker for token in ("duration", "too_short", "short")) else _audio_copy(lang, "guard")
-    return f"⚙️ {guidance}\n\n{_audio_copy(lang, 'no_charge')}"
+    if any(token in marker for token in ("duration", "too_short", "short")):
+        return voice_clone_pipeline.PUBLIC_CUSTOM_VOICE_SAMPLE_TOO_SHORT
+    _ = _audio_copy(lang, "no_charge")
+    return "TOAN AAS chưa tạo được voice hợp lệ từ mẫu này. Anh/chị thử mẫu rõ hơn hoặc dùng giọng nam/nữ mặc định. TOAN AAS chưa trừ Xu."
 
 def voice_clone_admin_guard_keyboard(profile_id: int, lang: str = "vi", product_context: str = PRODUCT_CONTEXT_SHOWROOM) -> InlineKeyboardMarkup:
     is_vi = music_ui_lang(lang=lang) == "vi"
@@ -172967,11 +172969,20 @@ def voice_clone_quote_text(profile: dict, lang: str = "vi", product_context: str
     user_id = str(profile.get("user_id") or "")
     profile_id = int(profile.get("id") or 0)
     cost = voice_profile_storage_display_price_xu(user_id, product_context, profile_id)
-    displayed_price = _audio_copy(lang, "free") if cost <= 0 else f"{cost} Xu"
+    price_xu = int(VOICE_PROFILE_PRICE_XU or 50)
+    if cost <= 0:
+        return (
+            f"🎙 <b>{_audio_copy(lang, 'clone_title')}</b>\n\n"
+            f"{_audio_copy(lang, 'clone_intro')}\n\n"
+            "• Voice riêng đầu tiên: miễn phí\n"
+            f"• Các voice riêng tiếp theo: {price_xu} Xu / lần tạo thành công\n"
+            f"• {_audio_copy(lang, 'confirm_charge')}\n"
+            f"• {_audio_copy(lang, 'no_charge')}"
+        )
     return (
         f"🎙 <b>{_audio_copy(lang, 'clone_title')}</b>\n\n"
         f"{_audio_copy(lang, 'clone_intro')}\n\n"
-        f"• {_audio_copy(lang, 'price')}: {displayed_price}\n"
+        f"• Phí tạo voice riêng: {cost} Xu / lần tạo thành công\n"
         f"• {_audio_copy(lang, 'confirm_charge')}\n"
         f"• {_audio_copy(lang, 'no_charge')}"
     )
@@ -172982,8 +172993,7 @@ def voice_clone_quote_keyboard(profile_id: int, lang: str = "vi", product_contex
     cb = lambda action: product_context_callback("music_quick", ctx, action)
     profile = get_voice_profile_by_id(pid)
     cost = voice_profile_storage_display_price_xu((profile or {}).get("user_id"), ctx, pid) if profile else (0 if VOICE_PROFILE_FIRST_FREE else int(VOICE_PROFILE_PRICE_XU or 0))
-    confirm_label = f"✅ {_audio_label(lang, 'create_voice')}"
-    confirm_label += f" {_audio_copy(lang, 'free')}" if cost <= 0 else f" {cost} Xu"
+    confirm_label = "✅ Tạo voice miễn phí" if cost <= 0 else f"✅ Tạo voice riêng {cost} Xu"
     return build_2col_keyboard(
         [
             (confirm_label, cb(f"voice_clone_confirm:{pid}")),
