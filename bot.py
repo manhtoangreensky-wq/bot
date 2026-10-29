@@ -284576,6 +284576,214 @@ async def api_internal_subdub_voice_profiles(request: Request):
     )
 
 
+@fastapi_app.patch("/internal/v1/voice/profiles/{profile_id}")
+async def api_internal_voice_profile_rename(profile_id: int, request: Request):
+    """Rename a voice profile with owner isolation (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import rename_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="PATCH",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    display_name = str(payload.get("display_name") or payload.get("name") or "")
+    ok, err_code, status_code, result = rename_owner_voice_profile(clean_actor, profile_id, display_name)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/voice/profiles/{profile_id}/default")
+async def api_internal_voice_profile_set_default(profile_id: int, request: Request):
+    """Set a voice profile as default for the owner, enforcing readiness (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import set_default_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}/default"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result = set_default_owner_voice_profile(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.delete("/internal/v1/voice/profiles/{profile_id}")
+async def api_internal_voice_profile_delete(profile_id: int, request: Request):
+    """Soft delete a voice profile with owner isolation (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import soft_delete_owner_voice_profile
+
+    raw_body = await request.body()
+    try:
+        payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+    except Exception:
+        payload = {}
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    body_actor = str(payload.get("user_id") or payload.get("actor_id") or "").strip()
+    actor_candidate = header_actor or body_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="DELETE",
+        path=path,
+        body_bytes=raw_body,
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result = soft_delete_owner_voice_profile(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.get("/internal/v1/voice/profiles/{profile_id}/preview")
+async def api_internal_voice_profile_preview(profile_id: int, request: Request):
+    """Deliver preview audio safely without private path leakage (R37 SPEC)."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.voice_vault_service import get_voice_profile_preview_delivery
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "ACTOR_ID_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/voice/profiles/{profile_id}/preview"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    ok, err_code, status_code, result, file_path, telegram_file_id = get_voice_profile_preview_delivery(clean_actor, profile_id)
+    if not ok:
+        return JSONResponse(status_code=status_code, content={"ok": False, "error_code": err_code, "message": result.get("message", "")})
+
+    mode = str(request.query_params.get("mode") or "").strip().lower()
+    download = str(request.query_params.get("download") or "").strip().lower() in ("1", "true", "yes")
+
+    if mode == "meta":
+        return JSONResponse(status_code=200, content=result)
+
+    filename = f"voice_preview_{profile_id}.mp3"
+    content_disposition_type = "attachment" if download else "inline"
+
+    if file_path:
+        return FileResponse(
+            file_path,
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
+        )
+
+    if telegram_file_id:
+        from services.voice_vault_service import fetch_telegram_file_audio
+        ok_fetch, audio_bytes, media_type = await fetch_telegram_file_audio(telegram_file_id)
+        if not ok_fetch or not audio_bytes:
+            return JSONResponse(status_code=404, content={"ok": False, "error_code": "PREVIEW_MISSING_ARTIFACT", "message": "Không thể tải bản nghe thử từ Telegram"})
+        return Response(
+            content=audio_bytes,
+            media_type=media_type or "audio/mpeg",
+            headers={"Content-Disposition": f'{content_disposition_type}; filename="{filename}"'},
+        )
+
+    return JSONResponse(status_code=200, content=result)
+
+
 @fastapi_app.post("/internal/v1/voice/resolve")
 async def api_internal_subdub_voice_resolve(request: Request):
     """Canonical Bot Core SubDub voice resolution authority endpoint (BOT-SUBDUB-D3).
@@ -284681,7 +284889,56 @@ async def api_internal_subdub_jobs_enqueue(request: Request):
 
     mode = str(payload.get("mode") or "dub")
     job_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+    if not isinstance(job_payload, dict):
+        job_payload = {}
+    else:
+        job_payload = dict(job_payload)
     max_attempts = int(payload.get("max_attempts") or 3)
+
+    # 1. Reject client speaker count / mapping / provider forgery
+    forged_speaker_fields = {
+        "speaker_count",
+        "detected_speaker_count",
+        "speaker_mapping",
+        "speaker_casts",
+        "per_cue_voice_assignments",
+        "raw_worker_route",
+        "provider_model_id",
+        "provider_voice_id",
+    }
+    if any(k in job_payload for k in forged_speaker_fields):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "ok": False,
+                "error_code": "CLIENT_SPEAKER_COUNT_FORGE_BLOCKED",
+                "message": "Client cannot specify speaker detection, mapping internals, or provider IDs",
+            },
+        )
+
+    # 2. Server authority voice & auto-speaker lane resolution
+    from services.subdub_voice_resolution import resolve_subdub_voice_authority
+    vr_ok, vr_reason, vr_code, vr_data = resolve_subdub_voice_authority(
+        clean_actor,
+        {**job_payload, "mode": mode},
+    )
+    if not vr_ok:
+        return JSONResponse(
+            status_code=vr_code,
+            content={
+                "ok": False,
+                "error_code": vr_reason,
+                "message": vr_data.get("detail") or f"Validation failed: {vr_reason}",
+            },
+        )
+
+    # 3. If auto speaker, bind canonical lane fields into job_payload
+    if vr_data.get("voice_selection_mode") == "auto_speaker":
+        job_payload["voice_kind"] = vr_data["voice_kind"]
+        job_payload["voice_selection_mode"] = vr_data["voice_selection_mode"]
+        job_payload["auto_speaker_lane"] = vr_data["auto_speaker_lane"]
+        if vr_data.get("auto_smart_multivoice_opt_in"):
+            job_payload["auto_smart_multivoice_opt_in"] = True
 
     job = enqueue_subdub_job(clean_actor, mode=mode, payload=job_payload, max_attempts=max_attempts)
     return JSONResponse(status_code=200, content={"ok": True, "job": job})
@@ -287349,6 +287606,245 @@ async def api_internal_web_image_transform_prepare(request: Request):
         },
     }
     return JSONResponse(status_code=200, content=prepare_response)
+
+
+# ─── FREE TOOLS CANONICAL INTERNAL APIS (R38) ────────────────────────────────
+
+@fastapi_app.api_route("/internal/v1/free-tools/rate", methods=["GET", "POST"])
+async def api_internal_free_tools_rate(request: Request):
+    """Canonical Bot Core exchange rate & Xu conversion endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_exchange_rate
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method=request.method,
+        path="/internal/v1/free-tools/rate",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+    raw_input = data.get("raw_input") or data.get("query") or request.query_params.get("raw_input") or request.query_params.get("query") or ""
+    target_lang = data.get("target_lang") or request.query_params.get("target_lang") or "vi"
+
+    ok, result, status_code = handle_exchange_rate(raw_input, target_lang=target_lang)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.api_route("/internal/v1/free-tools/weather", methods=["GET", "POST"])
+async def api_internal_free_tools_weather(request: Request):
+    """Canonical Bot Core weather forecast endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_weather
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method=request.method,
+        path="/internal/v1/free-tools/weather",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+    location = data.get("location") or request.query_params.get("location") or ""
+    unit = data.get("unit") or request.query_params.get("unit") or "celsius"
+
+    ok, result, status_code = handle_weather(location, unit=unit)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/avatar")
+async def api_internal_free_tools_avatar(request: Request):
+    """Canonical Bot Core AI avatar URL construction endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_avatar
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/avatar",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    seed = data.get("seed") or "toanaas_user"
+    avatar_set = data.get("avatar_set") or 1
+    confirmed_rights = bool(data.get("confirmed_rights", False))
+    style = data.get("style") or "realistic"
+
+    ok, result, status_code = handle_avatar(seed=seed, avatar_set=avatar_set, confirmed_rights=confirmed_rights, style=style)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/downloader/inspect")
+async def api_internal_free_tools_downloader_inspect(request: Request):
+    """Canonical Bot Core video downloader inspection endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_downloader_inspect
+
+    raw_body = await request.body()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/downloader/inspect",
+        body_bytes=raw_body,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    url = data.get("url") or ""
+    requested_asset = data.get("requested_asset") or "video"
+
+    ok, result, status_code = handle_downloader_inspect(url=url, requested_asset=requested_asset)
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@fastapi_app.post("/internal/v1/free-tools/downloader/download")
+async def api_internal_free_tools_downloader_download(request: Request):
+    """Canonical Bot Core video downloader safe download & delivery endpoint."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.free_tools_service import handle_downloader_download
+
+    raw_body = await request.body()
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/free-tools/downloader/download",
+        body_bytes=raw_body,
+        actor_id=header_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(status_code=auth_status, content={"ok": False, "error_code": auth_err, "message": f"Auth failed: {auth_err}"})
+
+    data = {}
+    if raw_body:
+        try:
+            data = json.loads(raw_body.decode("utf-8") or "{}")
+        except Exception:
+            data = {}
+
+    url = data.get("url") or ""
+    requested_asset = data.get("requested_asset") or "video"
+    confirmed_rights = bool(data.get("confirmed_rights", False))
+
+    ok, result, status_code = handle_downloader_download(
+        url=url,
+        requested_asset=requested_asset,
+        confirmed_rights=confirmed_rights,
+        user_id=header_actor,
+    )
+    return JSONResponse(status_code=status_code, content=result)
+
+
+
+@fastapi_app.get("/internal/v1/free-tools/downloader/delivery/{job_id}")
+async def api_internal_free_tools_downloader_delivery(job_id: str, request: Request):
+    """Deliver verified downloaded artifact safely without private filesystem path leakage."""
+    from services.admin_wallet_service import verify_internal_admin_wallet_auth
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.free_tools_service import handle_downloader_delivery
+    from fastapi.responses import FileResponse
+
+    header_actor = str(request.headers.get("x-toan-aas-actor-id") or request.headers.get("x-actor-user-id") or "").strip()
+    query_actor = str(request.query_params.get("user_id") or "").strip()
+    actor_candidate = header_actor or query_actor
+    clean_actor = normalize_target_user_id(actor_candidate) if actor_candidate else ""
+    if not clean_actor:
+        return JSONResponse(
+            status_code=401,
+            content={"ok": False, "error_code": "DELIVERY_ACTOR_REQUIRED", "message": "Authenticated actor_id / user_id is required"},
+        )
+
+    path = f"/internal/v1/free-tools/downloader/delivery/{job_id}"
+    auth_ok, auth_err, auth_status = verify_internal_admin_wallet_auth(
+        authorization=request.headers.get("authorization", ""),
+        signature=request.headers.get("x-toan-aas-signature", ""),
+        timestamp=request.headers.get("x-toan-aas-timestamp", ""),
+        request_id=request.headers.get("x-toan-aas-request-id", ""),
+        method="GET",
+        path=path,
+        body_bytes=b"",
+        actor_id=clean_actor,
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=auth_status,
+            content={"ok": False, "error_code": auth_err, "message": f"Authentication failed: {auth_err}"},
+        )
+
+    mode = str(request.query_params.get("mode") or "stream").strip().lower()
+    kind = str(request.query_params.get("kind") or "video").strip().lower()
+    download = str(request.query_params.get("download") or "").strip().lower() in ("1", "true", "yes")
+
+    ok, result, status_code = handle_downloader_delivery(
+        job_id=job_id,
+        actor_id=clean_actor,
+        kind=kind,
+        mode=mode,
+    )
+    if not ok:
+        return JSONResponse(status_code=status_code, content=result)
+
+    if mode == "meta":
+        return JSONResponse(status_code=status_code, content=result)
+
+    file_path, content_type, filename = result
+    content_disposition_type = "attachment" if download else "inline"
+    return FileResponse(
+        str(file_path),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'{content_disposition_type}; filename="{filename}"',
+            "X-Filename": filename,
+        },
+    )
 
 
 # ─── ENTRY POINT ──────────────────────────────────────────────────────────────
