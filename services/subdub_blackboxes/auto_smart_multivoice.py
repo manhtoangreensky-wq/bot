@@ -2176,7 +2176,14 @@ async def run_auto_smart_multivoice(
                         "auto_smart_verified": False,
                     }
                 elif item_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
-                    overfit_cues.append((str(item.get("cue_id") or ""), round(item_fit_ratio, 3)))
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    overfit_cues.append((fail_cid, round(item_fit_ratio, 3)))
 
         if overfit_cues and len(synth_artifacts) > 0:
             overfit_ratio = len(overfit_cues) / len(synth_artifacts)
