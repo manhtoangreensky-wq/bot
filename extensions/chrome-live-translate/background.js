@@ -1,5 +1,5 @@
 /**
- * Background Service Worker for TOAN AAS Live Translate & Dub (Manifest V3).
+ * Background Service Worker for TOAN AAS Live Translate & Dub (Manifest V3 / RT-FIX1).
  * Governed by owner-governed-codex, locked-focus-engineering.
  */
 
@@ -34,10 +34,10 @@ async function setupOffscreenDocument(path) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "START_CAPTURE") {
-    handleStartCapture(message.config, sender.tab?.id || message.tabId)
+    handleStartCapture(message.sessionData, sender.tab?.id || message.tabId)
       .then((res) => sendResponse({ ok: true, data: res }))
       .catch((err) => sendResponse({ ok: false, error: err.message }));
-    return true; // Keep message channel open for async response
+    return true;
   }
 
   if (message.type === "STOP_CAPTURE") {
@@ -52,14 +52,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // Relay downstream events from offscreen document to tab content script
+  // Relay downstream events to content script
   if (message.target === "CONTENT_SCRIPT" && activeSession?.tabId) {
     chrome.tabs.sendMessage(activeSession.tabId, message).catch(() => {});
     return false;
   }
+
+  if (message.type === "OFFSCREEN_ERROR") {
+    // Fail closed: stop capture and notify tab
+    handleStopCapture().then(() => {
+      if (activeSession?.tabId) {
+        chrome.tabs.sendMessage(activeSession.tabId, {
+          type: "SESSION_FAILED",
+          error: message.error || "Lỗi luồng âm thanh/WebSocket",
+        }).catch(() => {});
+      }
+    });
+    return false;
+  }
 });
 
-async function handleStartCapture(config, tabId) {
+async function handleStartCapture(sessionData, tabId) {
+  if (!sessionData || !sessionData.sessionId || !sessionData.streamToken || !sessionData.websocketUrl) {
+    throw new Error("Missing server-owned session credentials (sessionId/streamToken/websocketUrl)");
+  }
+
   if (!tabId) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     tabId = tab?.id;
@@ -74,26 +91,31 @@ async function handleStartCapture(config, tabId) {
     targetTabId: tabId,
   });
 
+  if (!streamId) {
+    throw new Error("chrome.tabCapture did not yield a valid streamId");
+  }
+
   activeSession = {
+    active: true,
     tabId: tabId,
-    config: config,
+    sessionId: sessionData.sessionId,
+    streamToken: sessionData.streamToken,
+    websocketUrl: sessionData.websocketUrl,
     startedAt: Date.now(),
   };
 
-  // Dispatch streamId and config to offscreen document
   chrome.runtime.sendMessage({
     type: "INIT_AUDIO_CAPTURE",
     streamId: streamId,
-    config: config,
+    config: sessionData,
   });
 
-  // Notify tab to open floating widget
   chrome.tabs.sendMessage(tabId, {
     type: "SESSION_STARTED",
-    config: config,
+    config: sessionData,
   }).catch(() => {});
 
-  return { tabId, streamId };
+  return { tabId, streamId, sessionId: sessionData.sessionId };
 }
 
 async function handleStopCapture() {

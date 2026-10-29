@@ -177,6 +177,10 @@ jobs:
       - name: Manual Package Admin Ownership Acknowledgement
         run: python -m unittest tests/test_manual_package_choice_ack_only.py
 
+      - name: Realtime Translate & Dub Acceptance Matrix
+        run: |
+          python tests/test_p0_realtime_translate_acceptance_matrix.py
+
       - name: Run Workflow Hygiene Unit Tests
         run: |
           python -m unittest tests/test_deploy_vps_workflow_hygiene.py
