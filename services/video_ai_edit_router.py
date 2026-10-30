@@ -102,6 +102,18 @@ AI_EDIT_PROFILES: tuple[dict[str, Any], ...] = (
 
 PROFILE_BY_ID = {item["profile_id"]: item for item in AI_EDIT_PROFILES}
 
+LOCAL_PROFILES_ALLOWLIST: tuple[str, ...] = tuple(
+    item["profile_id"] for item in AI_EDIT_PROFILES if not item.get("generative_required")
+)
+
+
+def is_local_profile(profile_id: str) -> bool:
+    prof = PROFILE_BY_ID.get(str(profile_id or "").strip())
+    if not prof:
+        return False
+    return not bool(prof.get("generative_required"))
+
+
 PROFILE_PRIORITY_BY_FOOTAGE = {
     "talking_head": ("talking_head_pro", "ugc_social", "cinematic_professional", "cyberpunk_neon", "fantasy_energy"),
     "person": ("talking_head_pro", "ugc_social", "cinematic_professional", "fashion_lookbook", "fantasy_energy"),
@@ -330,5 +342,6 @@ def route_ai_edit_intent(
 __all__ = [
     "AI_EDIT_PROFILES", "DEFAULT_PRESERVE_CONTROLS", "INTENSITY_LABELS",
     "profile_option", "public_profile_options", "route_ai_edit_intent",
+    "LOCAL_PROFILES_ALLOWLIST", "is_local_profile",
     "suggestions_for_footage", "local_preprocess_plan",
 ]

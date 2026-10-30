@@ -6089,6 +6089,55 @@ def build_product_video_public_final_admission(
         or {}
     )
     freeze_ok = bool(freeze_truth.get("public_final_confirm_allowed", True))
+    series_admission_valid = True
+    series_admission_block_reason = ""
+    if requested_product_type == "multi_scene_film":
+        from services.video_series_planner import validate_series_execution_request
+        ep_count = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1
+
+        sc_per_ep = None
+        for src in (
+            scene_gate,
+            asset_pack,
+            asset_pack.get("uiflow3_series") if isinstance(asset_pack, dict) else None,
+            project,
+        ):
+            if isinstance(src, dict):
+                if "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                    sc_per_ep = src["scenes_per_episode"]
+                    break
+            if sc_per_ep is not None:
+                break
+        if sc_per_ep is None:
+            sc_per_ep = scene_count
+        char_bible = (
+            asset_pack.get("character_bible")
+            or (asset_pack.get("story_bible") or {}).get("characters")
+        )
+        series_val = validate_series_execution_request(
+            episodes_count=ep_count,
+            scenes_per_episode=sc_per_ep,
+            product_type="multi_scene_film",
+            character_bible=char_bible,
+        )
+        if not series_val.get("ok"):
+            series_admission_valid = False
+            series_admission_block_reason = str(series_val.get("reason") or "invalid_series_execution_request")
 
     raw_snapshot = dict(scene_gate.get("provider_eligibility_snapshot") or preflight.get("provider_eligibility_snapshot") or {})
     eligibility_evaluated = False
@@ -6189,6 +6238,8 @@ def build_product_video_public_final_admission(
 
     if not contract_valid_chain:
         allowed = False
+    elif not series_admission_valid:
+        allowed = False
     elif execution_mode == "cloud":
         allowed = bool(
             candidates
@@ -6196,6 +6247,7 @@ def build_product_video_public_final_admission(
             and route_ok
             and handler_ok
             and freeze_ok
+            and series_admission_valid
         )
     else:
         allowed = bool(
@@ -6211,11 +6263,14 @@ def build_product_video_public_final_admission(
             and route_ok
             and handler_ok
             and freeze_ok
+            and series_admission_valid
         )
     snapshot_id = f"pv-admission-{int(project.get('project_id') or 0)}-{uuid.uuid4().hex}"
     checked_at = now_text()
     quote_fingerprint = video_project_queue.product_video_admission_quote_fingerprint(project, int(user_id))
-    if not freeze_ok:
+    if not series_admission_valid:
+        block_reason = series_admission_block_reason
+    elif not freeze_ok:
         block_reason = str(
             freeze_truth.get("blocker_code")
             or freeze_truth.get("public_blocker_code")
@@ -6249,6 +6304,16 @@ def build_product_video_public_final_admission(
         **eligibility_snapshot,
         "provider_eligibility_snapshot_id": snapshot_id,
         "admission_snapshot_id": snapshot_id,
+        "series_id": str(
+            asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
+        "series_hash": str(
+            asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
         "admission_checked_at": checked_at,
         "admission_user_id": int(user_id),
         "admission_project_id": int(project.get("project_id") or 0),
@@ -6325,6 +6390,16 @@ def build_product_video_public_final_admission(
         "worker_capability_version": str(worker.get("worker_capability_version") or ""),
         "worker_admission_block_reason": str(worker.get("worker_admission_block_reason") or ""),
         "duplicate_confirm_handler_detected": bool(diagnostics.get("duplicate_confirm_handler_detected")),
+        "series_id": str(
+            asset_pack.get("series_id")
+            or (asset_pack.get("uiflow3_series") or {}).get("series_id")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
+        "series_hash": str(
+            asset_pack.get("series_hash")
+            or (asset_pack.get("story_bible") or {}).get("series_hash")
+            or ""
+        ) if requested_product_type == "multi_scene_film" else "",
     }
     return video_project_queue.sign_product_video_final_admission_context(admission)
 
@@ -92725,6 +92800,56 @@ def video_ai_edit_prompt_keyboard(lang: str = "vi") -> InlineKeyboardMarkup:
 
 def video_ai_edit_invoice_snapshot(state: dict) -> dict:
     current = dict(state or {})
+    route = dict(current.get("ai_route") or {})
+    if not route and (current.get("user_intent") or current.get("selected_ai_profile")):
+        route = video_ai_edit_route_from_state(current)
+    lane = str(current.get("execution_lane") or route.get("execution_lane") or "local").strip().lower()
+    profile_id = str(current.get("selected_ai_profile") or route.get("profile_id") or "").strip()
+
+    if lane == "generative":
+        return {
+            "ready": False,
+            "reason": "ai_edit_video_to_video_provider_unavailable",
+            "execution_lane": "generative",
+            "profile_id": profile_id,
+            "price_xu": 0,
+            "pricing_source": "fail_closed_unproven_v2v",
+            "provider_call": False,
+            "message_vi": "Tính năng Video-to-Video generative hiện chưa có provider đạt chuẩn hợp đồng wire. Hệ thống chặn fail-closed, không gọi provider và không trừ phí.",
+        }
+
+    if profile_id and (video_ai_edit_router.is_local_profile(profile_id) or profile_id in video_ai_edit_router.LOCAL_PROFILES_ALLOWLIST):
+        local_plan = dict(current.get("local_edit_plan") or route.get("local_preprocess_plan") or {})
+        try:
+            video_ai_edit_validation.validate_aiedit_local_plan(local_plan)
+        except video_ai_edit_validation.AiEditValidationError:
+            return {
+                "ready": False,
+                "reason": "unsupported_local_edit_operation",
+                "execution_lane": "local",
+                "profile_id": profile_id,
+                "price_xu": 0,
+                "pricing_source": "free_local_tool",
+                "provider_call": False,
+                "message_vi": "Yêu cầu chứa thao tác cục bộ chưa được hỗ trợ.",
+            }
+        return {
+            "ready": True,
+            "reason": "local_edit_ready",
+            "execution_lane": "local",
+            "profile_id": profile_id,
+            "price_xu": 0,
+            "pricing_source": "free_local_tool",
+            "selected_provider": "local_ffmpeg",
+            "selected_model": "local_enhancement",
+            "selected_interface": "local_ffmpeg",
+            "provider_call": False,
+            "local_edit_plan": local_plan,
+            "manual_edit_plan": local_plan,
+            "plan_patch": local_plan,
+            "message_vi": "Đã sẵn sàng xử lý bằng công cụ cục bộ FFmpeg; 0 Xu.",
+        }
+
     compiled = video_edit_capabilities.compile_local_intent(
         str(current.get("user_intent") or ""),
         base_plan=dict(current.get("manual_edit_plan") or {}),
@@ -92733,6 +92858,8 @@ def video_ai_edit_invoice_snapshot(state: dict) -> dict:
         return {
             "ready": False,
             "reason": str(compiled.get("reason") or "local_capability_unavailable"),
+            "execution_lane": "local",
+            "profile_id": profile_id,
             "price_xu": 0,
             "pricing_source": "free_local_tool",
             "provider_call": False,
@@ -92741,6 +92868,8 @@ def video_ai_edit_invoice_snapshot(state: dict) -> dict:
     return {
         "ready": True,
         "reason": "local_edit_ready",
+        "execution_lane": "local",
+        "profile_id": profile_id,
         "price_xu": 0,
         "pricing_source": "free_local_tool",
         "selected_provider": "local_ffmpeg",
@@ -92749,6 +92878,7 @@ def video_ai_edit_invoice_snapshot(state: dict) -> dict:
         "provider_call": False,
         "plan_patch": dict(compiled.get("plan_patch") or {}),
         "manual_edit_plan": dict(compiled.get("manual_edit_plan") or {}),
+        "local_edit_plan": dict(compiled.get("plan_patch") or compiled.get("manual_edit_plan") or {}),
         "message_vi": str(compiled.get("message_vi") or "Đã lập kế hoạch cục bộ; 0 Xu."),
     }
 
@@ -264427,8 +264557,9 @@ async def submit_video_ai_edit_job(update: Update, context: ContextTypes.DEFAULT
     lang = get_user_language(uid) or "vi"
     state = dict(state or {})
     lane = str(state.get("execution_lane") or (state.get("ai_route") or {}).get("execution_lane") or "local")
+    step_name = str(state.get("step") or "")
     if (
-        str(state.get("step") or "") != "ai_invoice"
+        step_name not in {"ai_invoice", "review", "confirmation"}
         or not state.get("inspection_complete")
         or not str(state.get("source_file_id") or "").strip()
     ):
@@ -264458,16 +264589,27 @@ async def submit_video_ai_edit_job(update: Update, context: ContextTypes.DEFAULT
     prompt_payload = dict(state.get("prompt_payload") or {})
     route = dict(state.get("ai_route") or {})
     price = safe_int(invoice.get("price_xu"), 0)
+    req_id = str(state.get("request_id") or f"req_aiedit_{uid}_{int(time.time())}")
+    trace_id = str(state.get("trace_id") or f"trace_{req_id}")
+    output_spec = {
+        "aspect_ratio": str(state.get("target_aspect_ratio") or route.get("target_aspect_ratio") or "9:16"),
+        "duration_seconds": safe_int(state.get("target_duration_seconds") or route.get("target_duration_seconds"), 0),
+        "format": "mp4",
+    }
+    resolved_local_plan = dict(invoice.get("local_edit_plan") or route.get("local_preprocess_plan") or {})
     payload = {
         "aiedit1_contract": 1,
+        "request_id": req_id,
+        "trace_id": trace_id,
         "user_id": str(uid),
         "chat_id": str(message.chat_id),
+        "source_file": str(state.get("source_file_id") or ""),
         "source_file_id": str(state.get("source_file_id") or ""),
         "source_file_name": str(state.get("source_file_name") or "video.mp4")[:180],
         "source_file_size": safe_int(state.get("source_file_size"), 0),
         "source_metadata": dict(state.get("source_metadata") or {}),
         "user_intent": str(state.get("user_intent") or "")[:1200],
-        "profile_id": str(route.get("profile_id") or ""),
+        "profile_id": str(route.get("profile_id") or invoice.get("profile_id") or ""),
         "profile_title": str(route.get("profile_title") or "")[:180],
         "intensity": str(state.get("intensity") or route.get("intensity") or "medium"),
         "preserve_constraints": list(route.get("preserve_constraints") or []),
@@ -264475,11 +264617,15 @@ async def submit_video_ai_edit_job(update: Update, context: ContextTypes.DEFAULT
         "preserve_source_audio": bool((state.get("preserve_controls") or {}).get("preserve_source_audio", True)),
         "target_aspect_ratio": str(state.get("target_aspect_ratio") or route.get("target_aspect_ratio") or "9:16"),
         "target_duration_seconds": safe_int(state.get("target_duration_seconds") or route.get("target_duration_seconds"), 0),
+        "output_spec": output_spec,
         "professional_prompt": str(prompt_payload.get("prompt") or "")[:12_000],
         "negative_prompt": str(prompt_payload.get("negative_prompt") or "")[:8_000],
         "prompt_hash": str(prompt_payload.get("prompt_hash") or ""),
-        "local_preprocess_plan": dict(route.get("local_preprocess_plan") or {}),
+        "local_edit_plan": resolved_local_plan,
+        "local_preprocess_plan": dict(route.get("local_preprocess_plan") or resolved_local_plan),
         "execution_lane": lane,
+        "execution_engine": "local_worker_ffmpeg",
+        "provider_call_required": lane == "generative",
         "submit_source": video_ai_edit_provider.PUBLIC_FINAL_CONFIRM_SOURCE,
         "public_user_confirmed": True,
         "provider_name": str(invoice.get("selected_provider") or "local_ffmpeg"),
@@ -273773,6 +273919,8 @@ async def handle_video_editor_callback(
                 "Nút xác nhận đã cũ. Hãy mở lại Xem lại rồi xác nhận lần nữa.",
                 show_alert=True,
             )
+        if state.get("edit_mode") == "ai_edit" or state.get("entry_context") == "ai":
+            return await submit_video_ai_edit_job(update, context, state)
         return await submit_video_edit_local_free_job(update, context, state)
     if action == "start":
         if (

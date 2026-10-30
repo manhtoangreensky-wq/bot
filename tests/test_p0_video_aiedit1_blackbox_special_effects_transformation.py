@@ -2,6 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -142,7 +143,16 @@ def valid_env(**overrides):
 
 
 def valid_config():
-    return provider.provider_config_from_env("key4u_video", valid_env())
+    return provider.provider_config_from_env(
+        "fal_video",
+        {
+            **valid_env(),
+            "FAL_VIDEO_TO_VIDEO_ENABLED": "true",
+            "FAL_VIDEO_TO_VIDEO_API_KEY": "Key mock-credential",
+            "FAL_VIDEO_TO_VIDEO_SUBMIT_URL": "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video",
+            "FAL_VIDEO_TO_VIDEO_POLL_URL": "https://queue.fal.run/fal-ai/wan/v2.2-a14b/video-to-video/requests/{task_id}/status",
+        },
+    )
 
 
 class JsonResponse:
@@ -349,7 +359,23 @@ def test_aiedit1_public_confirm_calls_mock_provider_once(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"fixture-video")
     calls = []
-    result = provider.submit_video_edit(valid_config(), source_video_path=str(source), prompt="edit", negative_prompt="bad", aspect_ratio="9:16", duration_seconds=8, job_id="1", submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE, public_user_confirmed=True, opener=lambda req, timeout=0: calls.append(req) or JsonResponse({"data": {"task_id": "task-1", "status": "IN_PROGRESS"}}))
+    mock_spend = MagicMock(allowed=True, blocker="", reservation_id="mock_spend_res_1")
+    with patch("services.provider_spend_guard.reserve_provider_spend", return_value=mock_spend), \
+         patch("services.provider_spend_guard.mark_submitted_pending_settlement"):
+        result = provider.submit_video_edit(
+            valid_config(),
+            source_video_path="https://storage.test/source.mp4",
+            prompt="edit",
+            negative_prompt="bad",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            job_id="1",
+            submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            bot_confirm_authority="mock_bot_auth_1",
+            bot_originated_action=True,
+            opener=lambda req, timeout=0: calls.append(req) or JsonResponse({"data": {"task_id": "task-1", "status": "IN_PROGRESS"}}),
+        )
     assert len(calls) == 1 and result["accepted"] is True
 
 
@@ -386,7 +412,23 @@ def test_aiedit1_provider_submit_once(tmp_path):
         nonlocal calls
         calls += 1
         return JsonResponse({"data": {"task_id": "only-once", "status": "PENDING"}})
-    provider.submit_video_edit(valid_config(), source_video_path=str(source), prompt="x", negative_prompt="y", aspect_ratio="16:9", duration_seconds=8, job_id="2", submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE, public_user_confirmed=True, opener=opener)
+    mock_spend = MagicMock(allowed=True, blocker="", reservation_id="mock_spend_res_2")
+    with patch("services.provider_spend_guard.reserve_provider_spend", return_value=mock_spend), \
+         patch("services.provider_spend_guard.mark_submitted_pending_settlement"):
+        provider.submit_video_edit(
+            valid_config(),
+            source_video_path="https://storage.test/source.mp4",
+            prompt="x",
+            negative_prompt="y",
+            aspect_ratio="16:9",
+            duration_seconds=8,
+            job_id="2",
+            submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            bot_confirm_authority="mock_bot_auth_2",
+            bot_originated_action=True,
+            opener=opener,
+        )
     assert calls == 1
 
 
@@ -416,23 +458,28 @@ def test_aiedit1_provider_network_calls_use_the_shared_remaining_deadline(
     source.write_bytes(b"video")
     observed_timeouts = []
 
-    provider.submit_video_edit(
-        valid_config(),
-        source_video_path=str(source),
-        prompt="edit",
-        negative_prompt="",
-        aspect_ratio="9:16",
-        duration_seconds=8,
-        job_id="deadline-job",
-        submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE,
-        public_user_confirmed=True,
-        deadline_monotonic=105.0,
-        monotonic=lambda: 100.0,
-        opener=lambda _request, timeout=0: (
-            observed_timeouts.append(float(timeout))
-            or JsonResponse({"data": {"task_id": "task-1", "status": "PENDING"}})
-        ),
-    )
+    mock_spend = MagicMock(allowed=True, blocker="", reservation_id="mock_spend_res_3")
+    with patch("services.provider_spend_guard.reserve_provider_spend", return_value=mock_spend), \
+         patch("services.provider_spend_guard.mark_submitted_pending_settlement"):
+        provider.submit_video_edit(
+            valid_config(),
+            source_video_path="https://storage.test/source.mp4",
+            prompt="edit",
+            negative_prompt="",
+            aspect_ratio="9:16",
+            duration_seconds=8,
+            job_id="deadline-job",
+            submit_source=provider.PUBLIC_FINAL_CONFIRM_SOURCE,
+            public_user_confirmed=True,
+            bot_confirm_authority="mock_bot_auth_3",
+            bot_originated_action=True,
+            deadline_monotonic=105.0,
+            monotonic=lambda: 100.0,
+            opener=lambda _request, timeout=0: (
+                observed_timeouts.append(float(timeout))
+                or JsonResponse({"data": {"task_id": "task-1", "status": "PENDING"}})
+            ),
+        )
     provider.poll_video_edit(
         valid_config(),
         "task-1",
@@ -496,8 +543,8 @@ def test_aiedit1_no_fallback_while_primary_alive():
 
 
 def test_aiedit1_controlled_fallback_max_once():
-    allowed = provider.controlled_fallback_decision(public_confirm_provenance=True, primary_status="failed", primary_task_alive=False, fallback_count=0, candidate=valid_config())
-    blocked = provider.controlled_fallback_decision(public_confirm_provenance=True, primary_status="failed", primary_task_alive=False, fallback_count=1, candidate=valid_config())
+    allowed = provider.controlled_fallback_decision(public_confirm_provenance=True, primary_status="failed", primary_task_alive=False, primary_terminal_failure_proven=True, fallback_count=0, candidate=valid_config())
+    blocked = provider.controlled_fallback_decision(public_confirm_provenance=True, primary_status="failed", primary_task_alive=False, primary_terminal_failure_proven=True, fallback_count=1, candidate=valid_config())
     assert allowed["allowed"] is True and blocked["allowed"] is False
 
 

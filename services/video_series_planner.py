@@ -61,6 +61,61 @@ def canonical_scenes_per_episode(value: Any) -> int:
         return DEFAULT_SCENES_PER_EPISODE
 
 
+def validate_series_execution_request(
+    *,
+    episodes_count: Any,
+    scenes_per_episode: Any,
+    product_type: str = "multi_scene_film",
+    character_bible: Any = None,
+) -> dict[str, Any]:
+    """Validate untrusted execution/admission request against strict series bounds.
+
+    Fails closed when parameters are tampered, malformed, or outside supported bounds.
+    Guarantees zero side effects.
+    """
+    blockers: list[str] = []
+    if str(product_type or "").strip() != "multi_scene_film":
+        blockers.append("product_type_not_supported")
+
+    try:
+        ep = int(episodes_count)
+        if not (MIN_EPISODES <= ep <= MAX_EPISODES):
+            blockers.append("invalid_episode_count")
+    except (TypeError, ValueError):
+        blockers.append("malformed_episode_count")
+        ep = 0
+
+    try:
+        sc = int(scenes_per_episode)
+        if not (MIN_SCENES_PER_EPISODE <= sc <= MAX_SCENES_PER_EPISODE):
+            blockers.append("invalid_scene_count")
+    except (TypeError, ValueError):
+        blockers.append("malformed_scene_count")
+        sc = 0
+
+    if ep > 0 and sc > 0:
+        total = ep * sc
+        if total > 20:
+            blockers.append("total_scenes_exceed_capacity")
+
+    if character_bible is not None and not isinstance(character_bible, (list, tuple)):
+        blockers.append("invalid_character_bible")
+
+    return {
+        "ok": not blockers,
+        "blockers": blockers,
+        "reason": blockers[0] if blockers else "",
+        "episodes_count": ep,
+        "scenes_per_episode": sc,
+        "side_effects": {
+            "jobs_created": 0,
+            "outbox_created": 0,
+            "provider_calls": 0,
+            "wallet_mutations": 0,
+        },
+    }
+
+
 def generate_default_character_bible(
     concept: str,
     *,
@@ -101,6 +156,7 @@ def plan_film_series(
     aspect_ratio: str = "9:16",
     character_bible: list[dict[str, Any]] | None = None,
     language: str = "vi",
+    series_id: str = "",
 ) -> dict[str, Any]:
     """Create a fully compiled Film Series Plan across N episodes.
     
@@ -299,7 +355,9 @@ def plan_film_series(
             "jobs_created": 0,
         },
     }
-    manifest["series_hash"] = _sha256_hash(manifest)
+    stable_hash = _sha256_hash(manifest)
+    manifest["series_hash"] = stable_hash
+    manifest["series_id"] = str(series_id or f"series_{stable_hash[:12]}")
     return manifest
 
 
@@ -308,6 +366,10 @@ def convert_series_to_scene_specs(
 ) -> list[dict[str, Any]]:
     """Convert compiled series scenes into format expected by multiscene pipeline."""
     all_scenes = list(series_manifest.get("all_scenes") or [])
+    series_hash = str(series_manifest.get("series_hash") or "")
+    series_id = str(series_manifest.get("series_id") or (f"series_{series_hash[:12]}" if series_hash else ""))
+    series_title = str(series_manifest.get("series_title") or "")
+    episodes_count = int(series_manifest.get("episodes_count") or 1)
     specs: list[dict[str, Any]] = []
     for sc in all_scenes:
         specs.append({
@@ -320,6 +382,12 @@ def convert_series_to_scene_specs(
             "order": int(sc.get("global_scene_index") or 1),
             "characters": list(sc.get("characters") or []),
             "visual_style": str(sc.get("visual_style") or ""),
+            "episode_index": int(sc.get("episode_index") or 1),
+            "scene_index": int(sc.get("scene_index") or 1),
+            "series_id": series_id,
+            "series_hash": series_hash,
+            "series_title": series_title,
+            "episodes_count": episodes_count,
         })
     return specs
 
@@ -341,6 +409,10 @@ def build_multiscene_manifest_for_series(
 ) -> MultisceneManifest:
     """Bridge compiled series plan into MultisceneManifest for execution."""
     all_scenes = list(series_manifest.get("all_scenes") or [])
+    series_hash = str(series_manifest.get("series_hash") or "")
+    series_id = str(series_manifest.get("series_id") or (f"series_{series_hash[:12]}" if series_hash else ""))
+    series_title = str(series_manifest.get("series_title") or "")
+    episodes_count = int(series_manifest.get("episodes_count") or 1)
     scene_specs = [
         {
             "scene_id": int(sc.get("global_scene_index") or idx),
@@ -351,6 +423,14 @@ def build_multiscene_manifest_for_series(
             "target_duration_sec": float(sc.get("duration_seconds") or SCENE_SECONDS),
             "aspect_ratio": str(sc.get("aspect_ratio") or output_profile or "9:16"),
             "transition": str(sc.get("transition_out") or "dissolve"),
+            "episode_index": int(sc.get("episode_index") or 1),
+            "scene_index": int(sc.get("scene_index") or 1),
+            "characters": list(sc.get("characters") or []),
+            "character_bible": list(series_manifest.get("character_bible") or []),
+            "series_title": series_title,
+            "episodes_count": episodes_count,
+            "series_id": series_id,
+            "series_hash": series_hash,
         }
         for idx, sc in enumerate(all_scenes, start=1)
     ]
@@ -369,4 +449,6 @@ def build_multiscene_manifest_for_series(
         bgm_audio_path=music_path or None,
         logo_path=logo_path or None,
         voice_audio_path=voice_audio_path or None,
+        composition_signature=series_hash or series_id,
+        addon_application={"series_id": series_id, "series_hash": series_hash},
     )

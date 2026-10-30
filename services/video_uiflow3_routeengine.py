@@ -17,6 +17,8 @@ import uuid
 
 from services import video_engine_contract
 from services import video_project_queue
+from services import video_series_planner
+from services.video_series_planner import DEFAULT_SCENES_PER_EPISODE
 from services.video_uiflow3_execution_contract import BRIDGE_VERSION, RATIO_GEOMETRY
 
 
@@ -840,6 +842,79 @@ def compile_routeengine_handoff(
         "uiflow3_snapshot_config_hash": _clean(snapshot.get("config_hash"), 64),
     }
     cards = _scene_cards(snapshot, ratio=ratio, geometry=geometry)
+    if public_product_type == "multi_scene_film":
+        from services import video_series_planner
+        series_info = dict(snapshot.get("series") or {})
+        episode_info = dict(snapshot.get("episode") or {})
+        ep_count = series_info.get("episodes_count")
+        if ep_count is None:
+            ep_count = series_info.get("episode_count")
+        if ep_count is None:
+            ep_count = 1 if episode_info else 1
+
+        sc_per_ep = None
+        if "scenes_per_episode" in series_info and series_info["scenes_per_episode"] is not None:
+            sc_per_ep = series_info["scenes_per_episode"]
+        else:
+            ep_int = max(1, _positive_int(ep_count) or 1)
+            sc_per_ep = (scene_count // ep_int) if (ep_int > 0 and scene_count > 0) else DEFAULT_SCENES_PER_EPISODE
+
+        series_val = video_series_planner.validate_series_execution_request(
+            episodes_count=ep_count,
+            scenes_per_episode=sc_per_ep,
+            product_type=public_product_type,
+            character_bible=production_bible.get("characters"),
+        )
+        if not series_val.get("ok"):
+            return _failure(
+                series_val.get("reason") or "invalid_series_execution_request",
+                series_validation=series_val,
+            )
+
+        concept = _clean(
+            content.get("original_intent")
+            or (series_info.get("goal") or "")
+            or "Phim dài tập AI",
+            2000,
+        )
+        title = _clean(
+            (content.get("approved_brief") or {}).get("title")
+            or series_info.get("title")
+            or (content.get("title") or "")
+            or concept[:80],
+            200,
+        ) or "AI Film Series"
+        upstream_series_id = _clean(series_info.get("series_id"), 120)
+
+        planned_series = video_series_planner.plan_film_series(
+            title=title,
+            concept=concept,
+            episodes_count=_positive_int(ep_count) or 1,
+            scenes_per_episode=_positive_int(sc_per_ep) or video_series_planner.DEFAULT_SCENES_PER_EPISODE,
+            genre=_clean(production_bible.get("genre") or "drama", 80),
+            aspect_ratio=ratio,
+            character_bible=production_bible.get("characters"),
+            series_id=upstream_series_id,
+        )
+        series_id = str(planned_series.get("series_id") or upstream_series_id)
+        series_hash = str(planned_series.get("series_hash") or "")
+
+        for idx, card in enumerate(cards):
+            card_ep = card.get("episode_index") or ((idx // max(1, _positive_int(sc_per_ep) or 1)) + 1)
+            card_sc = card.get("scene_index") or ((idx % max(1, _positive_int(sc_per_ep) or 1)) + 1)
+            card["series_id"] = series_id
+            card["series_hash"] = series_hash
+            card["episode_index"] = int(card_ep)
+            card["scene_index"] = int(card_sc)
+            card["series_title"] = title
+            card["episodes_count"] = int(_positive_int(ep_count) or 1)
+
+        story_bible["series_id"] = series_id
+        story_bible["series_hash"] = series_hash
+        story_bible["episodes_count"] = int(_positive_int(ep_count) or 1)
+        story_bible["scenes_per_episode"] = int(_positive_int(sc_per_ep) or 1)
+        story_bible["series_manifest"] = planned_series
+
     selection = _route_selection(
         public_product_type=public_product_type,
         scene_count=scene_count,
@@ -1033,6 +1108,12 @@ def compile_routeengine_handoff(
         "prompt_text": _clean(content.get("original_intent"), 8000),
         "side_effects": dict(ZERO_SIDE_EFFECTS),
     }
+    if public_product_type == "multi_scene_film":
+        result["series_id"] = story_bible.get("series_id", "")
+        result["series_hash"] = story_bible.get("series_hash", "")
+        result["episodes_count"] = story_bible.get("episodes_count", 1)
+        result["scenes_per_episode"] = story_bible.get("scenes_per_episode", scene_count)
+        result["series_manifest"] = story_bible.get("series_manifest", {})
     result["handoff_sha256"] = _handoff_hash(result)
     return result
 
@@ -1144,6 +1225,43 @@ def prepare_commercial_project(
             _clean(engine_contract.get("execution_blocker"), 240)
             or "uiflow3_product_engine_disabled"
         )
+    if public_product_type == "multi_scene_film":
+        from services import video_series_planner
+        snapshot = dict(handoff_value.get("approved_snapshot") or {})
+        series_info = dict(snapshot.get("series") or {})
+        episode_info = dict(snapshot.get("episode") or {})
+        story_bible_in = dict(handoff_value.get("story_bible") or {})
+        ep_count = None
+        for src in (story_bible_in, handoff_value, series_info):
+            if isinstance(src, dict):
+                for k in ("episodes_count", "episode_count"):
+                    if k in src and src[k] is not None:
+                        ep_count = src[k]
+                        break
+            if ep_count is not None:
+                break
+        if ep_count is None:
+            ep_count = 1 if episode_info else 1
+
+        sc_per_ep = None
+        for src in (story_bible_in, handoff_value, series_info):
+            if isinstance(src, dict) and "scenes_per_episode" in src and src["scenes_per_episode"] is not None:
+                sc_per_ep = src["scenes_per_episode"]
+                break
+        if sc_per_ep is None:
+            ep_int = max(1, _positive_int(ep_count) or 1)
+            sc_per_ep = (scene_count // ep_int) if (ep_int > 0 and scene_count > 0) else DEFAULT_SCENES_PER_EPISODE
+        series_val = video_series_planner.validate_series_execution_request(
+            episodes_count=ep_count,
+            scenes_per_episode=sc_per_ep,
+            product_type=public_product_type,
+            character_bible=story_bible_in.get("characters"),
+        )
+        if not series_val.get("ok"):
+            return _failure(
+                series_val.get("reason") or "invalid_series_execution_request",
+                series_validation=series_val,
+            )
     provider_chain = quote_value.get("provider_chain") or video_project_queue.resolve_product_video_provider_chain()
     if isinstance(provider_chain, str):
         provider_chain = video_project_queue.normalize_product_video_provider_chain(provider_chain)
@@ -1199,6 +1317,10 @@ def prepare_commercial_project(
         "uiflow3_route_selection_sha256": _clean(route_selection.get("route_selection_sha256"), 64),
     }
     branding_worker_contract = deepcopy(dict(handoff_value.get("branding_worker_contract") or {}))
+    story_bible = deepcopy(dict(handoff_value.get("story_bible") or {}))
+    scene_cards = deepcopy(list(handoff_value.get("scene_cards") or []))
+    addon_plan = deepcopy(dict(handoff_value.get("addon_plan") or {}))
+    creative_controls = deepcopy(dict(handoff_value.get("creative_controls") or {}))
     asset_pack = {
         **shared,
         **deepcopy(dict(branding_worker_contract.get("asset_pack") or {})),
@@ -1213,6 +1335,12 @@ def prepare_commercial_project(
         "route_selection": route_selection,
         "side_effects_before_confirm": dict(ZERO_SIDE_EFFECTS),
     }
+    if public_product_type == "multi_scene_film":
+        asset_pack["series_id"] = str(story_bible.get("series_id") or handoff_value.get("series_id") or "")
+        asset_pack["series_hash"] = str(story_bible.get("series_hash") or handoff_value.get("series_hash") or "")
+        asset_pack["episodes_count"] = int(story_bible.get("episodes_count") or handoff_value.get("episodes_count") or 1)
+        asset_pack["scenes_per_episode"] = int(story_bible.get("scenes_per_episode") or handoff_value.get("scenes_per_episode") or scene_count)
+        asset_pack["series_manifest"] = deepcopy(dict(story_bible.get("series_manifest") or handoff_value.get("series_manifest") or {}))
     invoice = {
         **quote_value,
         **shared,
@@ -1220,10 +1348,6 @@ def prepare_commercial_project(
         "customer_charge_planned_xu": int(quote_value["customer_charge_planned_xu"]),
         "wallet_charge_amount_xu": int(quote_value["wallet_charge_amount_xu"]),
     }
-    story_bible = deepcopy(dict(handoff_value.get("story_bible") or {}))
-    scene_cards = deepcopy(list(handoff_value.get("scene_cards") or []))
-    addon_plan = deepcopy(dict(handoff_value.get("addon_plan") or {}))
-    creative_controls = deepcopy(dict(handoff_value.get("creative_controls") or {}))
     now = video_project_queue.now_text()
     try:
         conn.execute("BEGIN IMMEDIATE")
