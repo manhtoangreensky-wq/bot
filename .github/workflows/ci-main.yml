@@ -151,6 +151,11 @@ jobs:
         run: |
           python -m pytest -q tests/test_p0_storyboard_dual_tier_routing.py
 
+      - name: Product Video Series Execution Engine Acceptance Matrix
+        run: |
+          python -m pip install pillow uvicorn google-genai openai
+          python -m pytest -q tests/test_p0_video_series_execution_engine.py
+
       - name: Current-main Stale Menu Root Callback Guards
         run: |
           python -m unittest \
@@ -176,6 +181,10 @@ jobs:
 
       - name: Manual Package Admin Ownership Acknowledgement
         run: python -m unittest tests/test_manual_package_choice_ack_only.py
+
+      - name: Realtime Translate & Dub Acceptance Matrix
+        run: |
+          python tests/test_p0_realtime_translate_acceptance_matrix.py
 
       - name: Run Workflow Hygiene Unit Tests
         run: |
