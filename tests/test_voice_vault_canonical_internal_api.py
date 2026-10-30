@@ -19,7 +19,8 @@ from services.subdub_voice_resolution import resolve_subdub_voice_authority
 
 
 @pytest.fixture
-def test_db():
+def test_db(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "test")
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     original_db = bot.DB_FILE

@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import sqlite3
-import sys
 from typing import Any
 import urllib.parse
 
@@ -242,7 +241,7 @@ async def fetch_telegram_file_audio(file_id: str) -> tuple[bool, bytes, str]:
     if fake_transport is not None:
         return await fake_transport(clean_id)
 
-    if os.environ.get("APP_ENV") == "test" or "pytest" in sys.modules:
+    if os.environ.get("APP_ENV") == "test":
         if clean_id.startswith("stale_") or clean_id.startswith("missing_") or clean_id == "invalid_id":
             return False, b"", ""
         return True, b"\xFF\xFB\x90\x44" + b"\x00" * 256, "audio/mpeg"
