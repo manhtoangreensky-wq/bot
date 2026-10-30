@@ -153,7 +153,7 @@ jobs:
 
       - name: Product Video Series Execution Engine Acceptance Matrix
         run: |
-          python -m pip install pillow uvicorn
+          python -m pip install pillow uvicorn google-genai openai
           python -m pytest -q tests/test_p0_video_series_execution_engine.py
 
       - name: Current-main Stale Menu Root Callback Guards
