@@ -1,11 +1,11 @@
-"""Canonical Bot Core Realtime Translation Adapter (RT-01).
+"""Canonical Bot Core Realtime Translation Adapter (RT-01 / RT-FIX1).
 
 Governed by owner-governed-codex, locked-focus-engineering.
 Enforces:
 1. Low-latency sentence translation with rolling context window (last 3 segments).
-2. Clean subtitle formatting (no AI preambles, direct translation).
-3. Pluggable provider routing (LLM / DeepL / Mock for tests).
-4. Zero-cost testing guard: respects test environment mocks without touching paid APIs.
+2. Canonical binding to Bot translation primitive (bot.translate_subtitle_text) WITHOUT requiring request-time context dictionary.
+3. Zero-cost testing guard: supports dependency injection / mock hook without external provider network calls.
+4. Clean subtitle formatting.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ class RealtimeTranslationResult:
 
 
 _TEST_MOCK_TRANSLATION_HANDLER: Optional[Callable[[str, str], RealtimeTranslationResult]] = None
+_CANONICAL_TRANSLATION_PRIMITIVE: Optional[Callable] = None
 
 
 def set_test_translation_mock_handler(
@@ -38,6 +39,26 @@ def set_test_translation_mock_handler(
     _TEST_MOCK_TRANSLATION_HANDLER = handler
 
 
+def set_canonical_translation_primitive(primitive: Optional[Callable]) -> None:
+    """Dependency injection hook for binding the canonical translation primitive."""
+    global _CANONICAL_TRANSLATION_PRIMITIVE
+    _CANONICAL_TRANSLATION_PRIMITIVE = primitive
+
+
+def get_canonical_translation_primitive() -> Optional[Callable]:
+    """Resolves and returns the canonical translation primitive without blocking on cold module imports."""
+    global _CANONICAL_TRANSLATION_PRIMITIVE
+    if _CANONICAL_TRANSLATION_PRIMITIVE is not None:
+        return _CANONICAL_TRANSLATION_PRIMITIVE
+    import sys
+    if "bot" in sys.modules:
+        bot_mod = sys.modules["bot"]
+        if hasattr(bot_mod, "translate_subtitle_text"):
+            _CANONICAL_TRANSLATION_PRIMITIVE = bot_mod.translate_subtitle_text
+            return _CANONICAL_TRANSLATION_PRIMITIVE
+    return None
+
+
 class RealtimeTranslationAdapter:
     """Translates incoming speech segments with rolling conversation context."""
 
@@ -46,11 +67,13 @@ class RealtimeTranslationAdapter:
         target_language: str = "vi",
         max_context_segments: int = 3,
         provider: str = "auto",
+        translation_primitive: Optional[Callable] = None,
     ):
         self.target_language = target_language
         self.max_context_segments = max_context_segments
         self.provider = provider
-        self.context_history: List[Tuple[str, str]] = []  # List of (source, target)
+        self.context_history: List[Tuple[str, str]] = []
+        self._primitive = translation_primitive
 
     async def translate(
         self,
@@ -78,14 +101,16 @@ class RealtimeTranslationAdapter:
                 self._record_context(clean_text, res.translated_text)
             return res
 
-        # Try Bot core translate helper if provided in context
-        bot_translate = None
-        if context and "bot_translate_func" in context:
-            bot_translate = context["bot_translate_func"]
+        # Resolve canonical translation primitive
+        trans_func = self._primitive
+        if trans_func is None and context and "bot_translate_func" in context:
+            trans_func = context["bot_translate_func"]
+        if trans_func is None:
+            trans_func = get_canonical_translation_primitive()
 
-        if bot_translate:
+        if trans_func is not None:
             try:
-                res = await bot_translate(clean_text, target_lang=target_lang)
+                res = await trans_func(clean_text, target_lang=target_lang)
                 trans_text = str(res.get("text") or res.get("translated") or "").strip()
                 if trans_text:
                     self._record_context(clean_text, trans_text)
@@ -97,7 +122,7 @@ class RealtimeTranslationAdapter:
                     provider=str(res.get("provider") or self.provider),
                 )
             except Exception as e:
-                logger.warning(f"Bot translate error: {e}")
+                logger.warning(f"Canonical translation execution error: {e}")
                 return RealtimeTranslationResult(
                     ok=False,
                     source_text=clean_text,
@@ -107,7 +132,6 @@ class RealtimeTranslationAdapter:
                     provider=self.provider,
                 )
 
-        # Default fallback if no provider is configured
         return RealtimeTranslationResult(
             ok=False,
             source_text=clean_text,
