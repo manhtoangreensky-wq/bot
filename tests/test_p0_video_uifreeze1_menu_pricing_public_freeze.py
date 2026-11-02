@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from services import video_long_planning, video_uifreeze1
+from services import video_long_planning, video_tail9, video_uifreeze1
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,12 +38,21 @@ def test_public_video_menu_order_is_frozen_without_callback_changes() -> None:
     assert "callback_data=str(route.get(\"entry_callback\")" in menu_builder
 
 
-def test_long_video_opens_catalog_but_keeps_execution_locked() -> None:
+def test_video_long_stays_locked_while_multi_scene_film_is_enabled() -> None:
     assert video_long_planning.PUBLIC_ENABLED is False
-    assert "multi_scene_film" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
-    report = video_uifreeze1.catalog_report("multi_scene_film", scene_count=1)
+    assert "video_long" in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+    assert "multi_scene_film" not in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
+
+    film_contract = video_tail9.commercial_contract("multi_scene_film")
+    long_contract = video_tail9.commercial_contract("video_long")
+    assert film_contract["execution_enabled"] is True
+    assert film_contract["execution_blocker"] == ""
+    assert long_contract["execution_enabled"] is False
+    assert long_contract["execution_blocker"] == "long_video_under_upgrade"
+
+    report = video_uifreeze1.catalog_report("video_long", scene_count=2)
     assert report["ok"] is True
-    assert report["tier_ids"] == [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
+    assert report["tier_ids"] == [300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700]
 
 
 def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> None:
@@ -61,8 +70,12 @@ def test_storyboard_catalog_keeps_compatible_image_video_packages_visible() -> N
     )
     assert image_to_video["ok"] is True
     assert first_last["ok"] is True
-    assert image_to_video["tier_ids"] == [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
-    assert first_last["tier_ids"] == image_to_video["tier_ids"]
+    assert image_to_video["tier_ids"] == [400, 800]
+    assert first_last["tier_ids"] == [400, 800]
+    kling = next(item for item in image_to_video["offers"] if item["tier_id"] == 800)
+    assert kling["seconds"] == 8
+    assert kling["unit_xu"] == 1714
+    assert kling["name"] == "Video Chuyển Động Chuyên Nghiệp Kling 8s"
     package_source = _function_source("storyboard2_package_resolutions")
     assert "video_uifreeze1.catalog_report" in package_source
     assert "video_provider_catalog" not in package_source
@@ -91,7 +104,12 @@ def test_canonical_products_share_one_tier_identity_and_order() -> None:
         assert report["tier_ids"] == sorted(report["tier_ids"], key=video_uifreeze1.QUALITY_TIER_ORDER.index)
         for offer in report["offers"]:
             canonical = video_uifreeze1.tier_spec(offer["tier_id"])
-            assert offer["name"] == canonical["name"]
+            if product == "storyboard_prompt" and offer["tier_id"] == 800:
+                assert offer["name"] == "Video Chuyển Động Chuyên Nghiệp Kling 8s"
+                assert offer["seconds"] == 8
+                assert offer["unit_xu"] == 1714
+            else:
+                assert offer["name"] == canonical["name"]
             assert offer["public_level"] == canonical["public_level"]
             assert offer["public_detail"] == canonical["public_detail"]
     description_source = _function_source("video_scene3_public_quality_spec")

@@ -324,3 +324,11 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | ID | Bước kiểm thử | PASS bắt buộc / bằng chứng |
 |---|---|---|
 | `PV-CATALOG-TAIL-CURRENT-01` | Chạy đầy đủ 3 file test trong `docs/reports/PRODUCT_VIDEO_CATALOG_TAIL_TEST_RECONCILIATION_20261102.md`, không gọi provider hoặc production. | 148 case PASS; Storyboard nhận 400/800 và chặn 8 tier khác; Long Series confirm chống lặp; `video_long` vẫn không confirm được. Không dùng kết quả contract này để đóng live gate #1155/#1460. |
+
+## Product Video S01 - 03/11/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc / giới hạn |
+|---|---|---|
+| `PV-CATALOG-S01-01` | Chạy đủ ba suite catalog trong report `PRODUCT_VIDEO_REMAINING_CONTRACTS_20261103.md` với guard, không deselect callback. | 122/122; Storyboard/Self-shot đúng tier và modality, Local/Film enabled, video_long blocked, giá theo config hiện hữu. Không provider/job/production write. |
+| `PV-CALLBACK-S01-02` | Fixture chọn Reference500 bằng callback phát từ keyboard; thử Reference400 và Trend9999. | Hợp lệ lưu package/invoice và render invoice một lần; không hợp lệ có đúng ValueError quality_tier_not_supported, không lưu tier sai, render quality. Lỗi bất kỳ hoặc DB access không được tính PASS. |
+| `PV-ENGINE-S02-01` | Offline: chạy engine matrix cùng native Self-shot I2V và Storyboard dual-tier với guard. | 82/82; kiểm tra route/capability/executor riêng, Storyboard2x8s, model sai bị chặn; resolver delta theo từng product và payload thật từ encoder. Không gọi provider hay tính là MP4 live. |
