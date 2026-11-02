@@ -198,7 +198,8 @@ jobs:
             tests/test_p0_product_video_pv04_capability_quality_catalog_truth.py \
             tests/test_p0_product_video_pv08_product_adapters_product_specific_quality.py \
             tests/test_p0_video_real_engine_output_matrix.py \
-            tests/test_p0_video_tailflow15_order_tier200_status_idea_parity.py
+            tests/test_p0_video_tailflow15_order_tier200_status_idea_parity.py \
+            tests/test_p0_product_video_explicit_product_storyboard_plan.py
 
       - name: PayOS Package Ownership Acknowledgement
         run: python -m unittest tests/test_package_choice_ack_only.py

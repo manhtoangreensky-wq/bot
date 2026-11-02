@@ -1819,3 +1819,7 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 ## Product Video S03 - 03/11/2026
 
 - Tail15 fixture chạy keyboard/invoice thật thay vì tách hàm thiếu dependency; kỳ vọng theo Tail18, giá hiện hữu và trạng thái không báo giao khi chưa có artifact/delivery. Tail15 + Tail18 + manual-entry đạt37/37; không sửa navigation/engine production. Chi tiết: `docs/reports/PRODUCT_VIDEO_TAIL_FIXTURES_S03_20261103.md`.
+
+## Product Video: giữ product khi có kế hoạch cảnh - 03/11/2026
+
+- Owner duyệt sửa riêng hai điều kiện Storyboard của B14. Kế hoạch cảnh chung không còn tự ghi đè product đã chọn; phiên Storyboard cũ không có product rõ ràng vẫn giữ contract cũ. RED4 lỗi/3 đạt -> GREEN58 và393 regression trên Python3.11; compile/source, AST và py_compile đạt. Chưa merge/deploy/live; không đổi bảng giá hoặc ví. Báo cáo: `docs/reports/PRODUCT_VIDEO_EXPLICIT_IDENTITY_20261103.md`.
