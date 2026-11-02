@@ -918,3 +918,12 @@ Các trạng thái trên là bằng chứng fixture/source của batch; CI, merg
 - Diff local có thay đổi trong `bot.py` ở các nhánh UI/callback và các test/CI/tài liệu; không có module service/provider/worker/engine. Không suy từ test điều hướng rằng engine hoặc mọi terminal nghiệp vụ đã được kiểm thử.
 - Owner loại S12.35.106 (áp dụng lựa chọn tỉ lệ vào prompt pack Image Story) khỏi batch; không giữ thay đổi đầu ra prompt. Vì vậy bảng so sánh chức năng Product Video/SubDub phía trên không được cập nhật thành “đã sửa” bởi đợt UI này.
 - Trạng thái cập nhật 09/10/2026 04:32 +07: sau rebase lên main `96dd9020…`, regression chuẩn-library chạy lại `Ran 53 tests in 25.490s — OK`; một lệnh mở rộng không import được `tests.test_core` vì local thiếu `fastapi`, và Voice Settings thiếu `pytest`, nên hai cổng đó chờ CI. Full `bot.py` local compile vẫn `NOT_VERIFIED` sau lần chạy hơn 6 phút không có output. Main/VPS hiện cùng `96dd90201a89465555871276cf687fdebfff8cb0`; batch UI chưa push/PR/merge/deploy. Chi tiết A7 và các giới hạn Telegram-client nằm trong checklist và báo cáo closure.
+
+## Product Video: đối chiếu kỳ vọng test lịch sử - 02/11/2026
+
+| Kỳ vọng lịch sử | Contract source đã được chấp nhận | Bằng chứng sửa test |
+|---|---|---|
+| Storyboard nhận mọi tier trong catalog chung | Chỉ 400/800, theo PR #1445 | Giữ 10 input: 2 hợp lệ xác nhận được, 8 không hợp lệ bị chặn trước thay đổi selection/invoice |
+| `multi_scene_film` luôn bị khóa upgrade | Đã mở riêng sản phẩm này theo PR #1455; `video_long` vẫn khóa | 10 quality case và menu-to-status kiểm tra confirm/idempotency; thêm negative confirm cho `video_long` |
+
+Ma trận đầy đủ đạt 148/148 offline; đây không phải bằng chứng output/provider/delivery live. Không sửa runtime hoặc mở lại sản phẩm/lane đã khóa trong batch test này.
