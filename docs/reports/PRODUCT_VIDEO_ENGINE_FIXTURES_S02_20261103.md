@@ -32,6 +32,8 @@ Tester acceptance: exact Self-shot route/capability/executor identity, Storyboar
 
 ## Limits and rollback
 
+First CI run41493301221 failed at the existing real image-sequence/logo test (153 pass,1 fail). Its old assertion hid the encoder error payload. This follow-up preserves that real artifact test, includes its diagnostic in assertions and explicitly provisions/checks ffmpeg+ffprobe in the test runner when absent. A fresh exact-head CI must prove the result; missing-tool provision is not claimed to be the proven root cause until the log confirms it. No render/runtime filter is changed.
+
 PR now builds on S01 merge `33dca4befea912facd0cd5bc6ee72e593172f675`, whose exact-head CI `41490636426` succeeded (including full122 catalog cases and bot compile). Runtime remains unchanged. CI selection extends S01 by this engine matrix file; no old suite is removed.
 
 No runtime, provider, config, worker, wallet, ENV, deployed checkout or locked SubDub changes. Tail15 draft remains separate. Local/CI evidence is not MP4/Telegram live acceptance. #1155/#1460 remain open.

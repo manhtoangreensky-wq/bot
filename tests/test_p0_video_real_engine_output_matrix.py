@@ -626,7 +626,7 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
         str(tmp_path / "base.mp4"),
         duration_per_image=0.5,
     )
-    assert base["ok"] is True
+    assert base["ok"] is True, base
     output = multiscene_video_pipeline.mux_final_multiscene_video(
         master_video_path=str(tmp_path / "base.mp4"),
         output_path=str(tmp_path / "logo.mp4"),
@@ -637,7 +637,7 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
         path=output,
         result={"renderer": "provider_scene_video", "visual_classification": "final_ai_video"},
     )
-    assert validation["ok"] is True
+    assert validation["ok"] is True, validation
 
 
 def test_long_video_remains_execution_locked() -> None:
