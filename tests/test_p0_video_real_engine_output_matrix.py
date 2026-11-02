@@ -49,11 +49,11 @@ def test_each_public_product_has_a_distinct_engine_capability_contract() -> None
         "video_ai_real": ("video_ai_prompt", "video_ai_canonical", "text_to_video"),
         "script_image_video": ("script_to_video", "script_to_video", "text_to_video_or_scene_video"),
         "storyboard_prompt": ("storyboard_prompt", "storyboard_to_video", "image_to_video"),
-        "self_shot_scene_change": ("self_shot_scene_change", "self_shot_scene_change", "video_to_video"),
+        "self_shot_scene_change": ("self_shot_scene_change", "controlled_keyframe_image_to_video", "image_to_video"),
         "self_shot_cinematic_transform": (
             "self_shot_cinematic_transform",
-            "self_shot_cinematic_transform",
-            "video_to_video",
+            "controlled_keyframe_image_to_video",
+            "image_to_video",
         ),
     }
     for product, (executor, route, capability) in expected.items():
@@ -75,8 +75,8 @@ def test_connector_resolves_capability_from_the_product_engine_contract() -> Non
         "video_ai_prompt": "text_to_video",
         "script_to_video": "text_to_video_or_scene_video",
         "storyboard_prompt": "image_to_video",
-        "self_shot_scene_change": "video_to_video",
-        "self_shot_cinematic_transform": "video_to_video",
+        "self_shot_scene_change": "image_to_video",
+        "self_shot_cinematic_transform": "image_to_video",
     }
     for product_type, capability in expected.items():
         assert video_real_render_connector.product_video_required_capability(
@@ -126,19 +126,25 @@ def test_storyboard_key4u_contract_keeps_image_inputs_after_model_resolution() -
             "product_video": True,
             "scene_index": 1,
             "orchestration_mode": "per_scene_8s",
-            "provider_model_map": {"key4u_video": "kling-3.0-turbo"},
+            "provider_model_map": {"key4u_video": "kling-v3"},
         },
     )
     payload = video_generic_http_provider.build_key4u_video_payload(
         request,
         {
-            "KEY4U_KLING_VIDEO_ENDPOINT": "https://provider.invalid/kling/image-to-video",
+            "KEY4U_KLING_I2V_ENDPOINT": "https://api.key4u.shop/kling/v1/videos/image2video",
         },
     )
     assert payload["storyboard"] == request.storyboard
     assert payload["image_paths"] == request.image_paths
     assert "scenes" not in payload
     assert "source_video_path" not in payload
+
+    request.metadata["provider_model_map"] = {"key4u_video": "kling-3.0-turbo"}
+    with pytest.raises(video_generic_http_provider.VideoProviderContractError):
+        video_generic_http_provider.build_key4u_video_payload(
+            request, {"KEY4U_KLING_VIDEO_ENDPOINT": "https://provider.invalid/kling/image-to-video"},
+        )
 
 
 def test_selfshot_key4u_contract_keeps_source_video_after_model_resolution() -> None:
@@ -388,20 +394,24 @@ def test_storyboard_entry_owner_and_confirm_audit_see_the_real_handler() -> None
     assert 'if action == "b14_confirm"' in handler_section
 
 
-def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "tier,provider,model,unit,total",
+    ((400, "shopaikey_video", "veo3.1-fast", 371, 668), (800, "key4u_video", "kling-v3", 1714, 3086)),
+)
+def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch, tier, provider, model, unit, total) -> None:
     captured: dict[str, object] = {}
 
     def fake_resolve(**kwargs):
         captured.update(kwargs)
-        return {"ok": True, "selected_provider": "fixture", "selected_model": "fixture", "supports_concat": True}
+        return {"ok": True, "selected_provider": provider, "selected_model": model, "supports_concat": True}
 
     monkeypatch.setattr(video_project_queue, "resolve_product_video_model", fake_resolve)
     project = {
         "project_id": 71,
         "profile_id": "storyboard_prompt",
         "scene_count": 2,
-        "quality_tier": 300,
-        "total_xu_estimated": 300,
+        "quality_tier": tier,
+        "total_xu_estimated": total,
         "asset_pack_json": json.dumps(
             {
                 "source": "product_video",
@@ -409,7 +419,8 @@ def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch) -> 
                 "product_type": "storyboard_prompt",
                 "provider_call": True,
                 "public_user": True,
-                "preconfirm_candidate_keys": ["fixture"],
+                "preconfirm_candidate_keys": [provider],
+                "quality_tier": tier,
             }
         ),
         "invoice_json": json.dumps(
@@ -418,27 +429,31 @@ def test_confirm_kickoff_resolves_the_parent_product_capability(monkeypatch) -> 
                 "render_mode": "real",
                 "product_type": "storyboard_prompt",
                 "scene_count": 2,
-                "scene_seconds": 5,
-                "scene_duration_seconds": 5,
-                "duration_seconds": 10,
-                "total_xu": 300,
-                "customer_charge_planned_xu": 300,
-                "persisted_quoted_price_xu": 300,
-                "user_visible_price_xu": 300,
+                "quality_tier": tier,
+                "quality_xu": unit,
+                "scene_seconds": 8,
+                "scene_duration_seconds": 8,
+                "duration_seconds": 16,
+                "total_xu": total,
+                "customer_charge_planned_xu": total,
+                "persisted_quoted_price_xu": total,
+                "user_visible_price_xu": total,
             }
         ),
         "scene_cards_json": "[]",
     }
     job = {"id": 71, "result_json": "{}"}
 
-    payload = video_project_queue.build_product_video_confirm_kickoff_payload(job, project, provider_chain=["fixture"])
+    payload = video_project_queue.build_product_video_confirm_kickoff_payload(job, project, provider_chain=[provider])
 
     assert captured["required_capability"] == "image_to_video"
     assert payload["product_type"] == "storyboard_prompt"
     assert payload["required_capability"] == "image_to_video"
-    assert payload["scene_duration_seconds"] == 5
-    assert payload["duration_seconds"] == 10
-    assert [item["scene_duration_seconds"] for item in payload["scene_tasks"]] == [5, 5]
+    assert payload["selected_provider"] == provider
+    assert payload["selected_model"] == model
+    assert payload["scene_duration_seconds"] == 8
+    assert payload["duration_seconds"] == 16
+    assert [item["scene_duration_seconds"] for item in payload["scene_tasks"]] == [8, 8]
 
 
 def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatch) -> None:
@@ -447,8 +462,8 @@ def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatc
         "video_ai_real": "text_to_video",
         "script_image_video": "text_to_video_or_scene_video",
         "storyboard_prompt": "image_to_video",
-        "self_shot_scene_change": "video_to_video",
-        "self_shot_cinematic_transform": "video_to_video",
+        "self_shot_scene_change": "image_to_video",
+        "self_shot_cinematic_transform": "image_to_video",
     }
     captured: list[str] = []
 
@@ -465,6 +480,9 @@ def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatc
 
     monkeypatch.setattr(remote_worker_api, "resolve_product_video_model", fake_resolve)
     for index, (product_type, capability) in enumerate(expected.items(), start=1):
+        before = len(captured)
+        tier = 400 if product_type == "storyboard_prompt" else (500 if product_type.startswith("self_shot") else 300)
+        count = 5 if product_type == "script_image_video" else 2
         contract = video_project_queue.product_video_engine_contract(product_type)
         asset_pack = {
             "source": "product_video",
@@ -480,15 +498,15 @@ def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatc
             {
                 "id": index,
                 "job_type": video_project_queue.VIDEO_RENDER_JOB_TYPE,
-                "quality_tier": 300,
+                "quality_tier": tier,
                 "result_json": "{}",
                 "project": {
                     "project_id": index,
                     "user_id": 42,
                     "profile_id": product_type,
                     "ratio": "9:16",
-                    "scene_count": 2,
-                    "quality_tier": 300,
+                    "scene_count": count,
+                    "quality_tier": tier,
                     "scene_cards_json": json.dumps(
                         [
                             {"scene_index": 1, "video_prompt": "scene one"},
@@ -496,12 +514,17 @@ def test_remote_worker_model_resolution_keeps_each_product_capability(monkeypatc
                         ]
                     ),
                     "asset_pack_json": json.dumps(asset_pack),
-                    "invoice_json": json.dumps({"product_type": product_type, "scene_count": 2}),
+                    "invoice_json": json.dumps({"product_type": product_type, "scene_count": count, "quality_tier": tier}),
                     "addon_plan_json": "{}",
                 },
             }
         )
-        assert captured[-1] == capability
+        if product_type == "storyboard_prompt":
+            assert len(captured) == before
+            assert payload["selected_provider"] == "shopaikey_video"
+            assert payload["selected_model"] == "veo3.1-fast"
+        else:
+            assert captured[before:] == [capability]
         assert payload["required_capability"] == capability
         assert payload["engine_route"] == contract["engine_route"]
         assert payload["engine_adapter"] == contract["engine_adapter"]
@@ -603,7 +626,7 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
         str(tmp_path / "base.mp4"),
         duration_per_image=0.5,
     )
-    assert base["ok"] is True
+    assert base["ok"] is True, base
     output = multiscene_video_pipeline.mux_final_multiscene_video(
         master_video_path=str(tmp_path / "base.mp4"),
         output_path=str(tmp_path / "logo.mp4"),
@@ -614,7 +637,7 @@ def test_multiscene_logo_overlay_ends_with_the_master_and_validates_mp4(tmp_path
         path=output,
         result={"renderer": "provider_scene_video", "visual_classification": "final_ai_video"},
     )
-    assert validation["ok"] is True
+    assert validation["ok"] is True, validation
 
 
 def test_long_video_remains_execution_locked() -> None:

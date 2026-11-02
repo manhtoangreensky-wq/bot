@@ -937,3 +937,7 @@ Ma trận đầy đủ đạt 148/148 offline; đây không phải bằng chứn
 | Test từ chối không lưu tier là đủ dù handler gặp lỗi bất kỳ | Phải chứng minh đúng lỗi quality_tier_not_supported và đúng màn phục hồi | Fixture không nuốt lỗi; DB bị chặn; supported500 lưu invoice và render đúng một lần |
 
 Kết quả gộp với 148 regression:270/270 offline, không deselection. Không suy từ kết quả này rằng mọi sản phẩm đã live-pass.
+
+## Product Video S02 - 03/11/2026
+
+- Fixture Storyboard cũ dùng provider/model giả và thời lượng5s; positive hiện dùng hai binding đã chấp nhận400/800,8s mỗi cảnh/16s tổng, vẫn chặn model/endpoint chưa chứng minh. Fixture worker không lấy nhầm lời gọi resolver của sản phẩm trước. Engine matrix32 case và comparator gộp82 case đều đạt; không sửa production engine.

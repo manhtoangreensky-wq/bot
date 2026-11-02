@@ -27,10 +27,10 @@ prohibited: paid calls; wallet or ENV changes; production data writes; live bypa
 stop_condition: A real runtime defect needs its own evidenced narrow spec
 checklist:
   S00: COMPLETE
-  S01: LOCAL_122_PASS_PLUS_148_REGRESSION_CI_PENDING
-  S02: PENDING
+  S01: MERGED_PR1462_33dca4be_CI_SUCCESS_41490636426
+  S02: LOCAL_82_PASS_CI_PENDING
   S03: PENDING
-  S04: PENDING
+  S04: INTEGRATED_336_PASS_WIDER_MANIFEST_BLOCKED_MISSING_LOCAL_CV2
   S05: PENDING
   S06: NOT_READY
   S07: NOT_READY
