@@ -183,6 +183,21 @@ jobs:
             tests/test_main_docs_root_suffix_guard_current_main.py \
             tests/test_admin_submenu_root_suffix_guards_current_main.py
 
+      - name: Product Video Product-Specific Catalog and Callback Contracts
+        env:
+          APP_ENV: test
+          TELEGRAM_TOKEN: "123456:offline-test-placeholder"
+          DB_FILE: ${{ runner.temp }}/pv-catalog.sqlite
+          DB_PATH: ${{ runner.temp }}/pv-catalog.sqlite
+          DB_BACKUP_DIR: ${{ runner.temp }}/pv-catalog-backups
+          DATA_DIR: ${{ runner.temp }}
+          VOICE_ASSET_STORAGE_DIR: ${{ runner.temp }}/pv-catalog-voice-assets
+        run: |
+          python -m pytest -q --noconftest -p tests.pv_provider_free_guard \
+            tests/test_p0_video_uifreeze1_menu_pricing_public_freeze.py \
+            tests/test_p0_product_video_pv04_capability_quality_catalog_truth.py \
+            tests/test_p0_product_video_pv08_product_adapters_product_specific_quality.py
+
       - name: PayOS Package Ownership Acknowledgement
         run: python -m unittest tests/test_package_choice_ack_only.py
 

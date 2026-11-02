@@ -927,3 +927,13 @@ Các trạng thái trên là bằng chứng fixture/source của batch; CI, merg
 | `multi_scene_film` luôn bị khóa upgrade | Đã mở riêng sản phẩm này theo PR #1455; `video_long` vẫn khóa | 10 quality case và menu-to-status kiểm tra confirm/idempotency; thêm negative confirm cho `video_long` |
 
 Ma trận đầy đủ đạt 148/148 offline; đây không phải bằng chứng output/provider/delivery live. Không sửa runtime hoặc mở lại sản phẩm/lane đã khóa trong batch test này.
+
+## Product Video: catalog/callback S01 - 03/11/2026
+
+| Kỳ vọng test cũ | Contract được đối chiếu | Cách kiểm chứng |
+|---|---|---|
+| Self-shot dùng V2V và Storyboard có 10 tier | Self-shot video nguồn -> keyframe I2V; Storyboard chỉ 400/800 | Giữ các case phủ định tier không hỗ trợ và source/route riêng từng sản phẩm |
+| Tier400 giá80 Xu, Film/Local bị khóa | Bảng giá hiện hữu371 Xu; Film/Local bật, video_long vẫn khóa | Sửa test, không thay đổi runtime/giá/ví; 122 case đầy đủ |
+| Test từ chối không lưu tier là đủ dù handler gặp lỗi bất kỳ | Phải chứng minh đúng lỗi quality_tier_not_supported và đúng màn phục hồi | Fixture không nuốt lỗi; DB bị chặn; supported500 lưu invoice và render đúng một lần |
+
+Kết quả gộp với 148 regression:270/270 offline, không deselection. Không suy từ kết quả này rằng mọi sản phẩm đã live-pass.

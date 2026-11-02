@@ -1805,3 +1805,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Source contract hiện tại: Storyboard chỉ nhận tier 400/800; `multi_scene_film` đã mở execution sau PR #1455; `video_long` vẫn khóa `long_video_under_upgrade`.
 - Sửa 19 kỳ vọng test cũ, giữ đủ 144 case ban đầu và 3 case Tail18; thêm 1 case chặn confirm `video_long`: 148/148 PASS trong harness offline chặn external sockets, 0 provider calls.
 - Đây là cập nhật test/CI/tài liệu, không thay đổi runtime hoặc xác nhận live. Chi tiết và giới hạn: `docs/reports/PRODUCT_VIDEO_CATALOG_TAIL_TEST_RECONCILIATION_20261102.md`.
+
+## Product Video S01 - 03/11/2026
+
+- Ba bộ catalog/callback được đối chiếu lại với contract đã chấp nhận: Storyboard 400/800, hai Self-shot dùng controlled-keyframe I2V, Film/Local đang bật, `video_long` vẫn khóa; không sửa engine hoặc giá production.
+- Bỏ nuốt ngoại lệ trong hai test callback từ chối; fixture chặn DB, kiểm tra đúng lỗi và state được lưu. Giữ đủ 122 case của ba bộ; chạy cùng 148 regression đạt 270/270, không deselect, external socket attempts=0.
+- Đây vẫn là kiểm thử không trả phí, không phải nghiệm thu MP4/Telegram live. S02/S03 và các receipt live chưa hoàn tất. Báo cáo: `docs/reports/PRODUCT_VIDEO_REMAINING_CONTRACTS_20261103.md`.
