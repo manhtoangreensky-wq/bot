@@ -32,6 +32,8 @@ Tester acceptance: exact Self-shot route/capability/executor identity, Storyboar
 
 ## Limits and rollback
 
+PR now builds on S01 merge `33dca4befea912facd0cd5bc6ee72e593172f675`, whose exact-head CI `41490636426` succeeded (including full122 catalog cases and bot compile). Runtime remains unchanged. CI selection extends S01 by this engine matrix file; no old suite is removed.
+
 No runtime, provider, config, worker, wallet, ENV, deployed checkout or locked SubDub changes. Tail15 draft remains separate. Local/CI evidence is not MP4/Telegram live acceptance. #1155/#1460 remain open.
 
 Revert only this test/CI/documentation PR if required. Keep runtime checkpoint and live acceptance checkpoint separate; no deploy/restart is needed for fixture corrections. Exact-head CI, PR and merge evidence are recorded after terminal results.

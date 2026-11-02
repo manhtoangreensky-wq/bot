@@ -1811,3 +1811,7 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 - Ba bộ catalog/callback được đối chiếu lại với contract đã chấp nhận: Storyboard 400/800, hai Self-shot dùng controlled-keyframe I2V, Film/Local đang bật, `video_long` vẫn khóa; không sửa engine hoặc giá production.
 - Bỏ nuốt ngoại lệ trong hai test callback từ chối; fixture chặn DB, kiểm tra đúng lỗi và state được lưu. Giữ đủ 122 case của ba bộ; chạy cùng 148 regression đạt 270/270, không deselect, external socket attempts=0.
 - Đây vẫn là kiểm thử không trả phí, không phải nghiệm thu MP4/Telegram live. S02/S03 và các receipt live chưa hoàn tất. Báo cáo: `docs/reports/PRODUCT_VIDEO_REMAINING_CONTRACTS_20261103.md`.
+
+## Product Video S02 - 03/11/2026
+
+- S01 đã merge PR #1462 tại `33dca4be`, CI exact-head `41490636426` SUCCESS. S02 chỉ sửa fixture engine: đúng route Self-shot I2V, Storyboard 400/800 và resolver/payload từng sản phẩm; 82/82 test cùng comparator đạt, không đổi runtime. Chi tiết: `docs/reports/PRODUCT_VIDEO_ENGINE_FIXTURES_S02_20261103.md`.
