@@ -103099,8 +103099,13 @@ def video_b14_invoice_for_session(session: dict, user_id=0) -> dict:
     product_type = video_engine_product_type_for_session(session)
     is_storyboard = bool(
         product_type in {"storyboard_prompt", "storyboard_to_video"}
-        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
-        or bool(draft.get("b14_storyboard_plan"))
+        or (
+            not str((session or {}).get("product_id") or draft.get("product_id") or "").strip()
+            and (
+                str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+                or bool(draft.get("b14_storyboard_plan"))
+            )
+        )
     )
     if is_storyboard and routing_quality == 800:
         billing_unit = 1714
@@ -107618,8 +107623,13 @@ def video_b14_prepare_project_for_invoice(user_id, session: dict) -> dict:
     selected_family = ""
     is_storyboard = bool(
         product_type in {"storyboard_prompt", "storyboard_to_video"}
-        or str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
-        or bool(draft.get("b14_storyboard_plan"))
+        or (
+            not str((session or {}).get("product_id") or draft.get("product_id") or "").strip()
+            and (
+                str((session or {}).get("flow_kind") or "").strip().lower() == "storyboard"
+                or bool(draft.get("b14_storyboard_plan"))
+            )
+        )
     )
     if is_storyboard:
         raw_cards = (

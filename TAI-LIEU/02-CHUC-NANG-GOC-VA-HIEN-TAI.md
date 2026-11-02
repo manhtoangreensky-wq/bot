@@ -945,3 +945,7 @@ Kết quả gộp với 148 regression:270/270 offline, không deselection. Khô
 ## Product Video S03 - 03/11/2026
 
 - Test cũ yêu cầu Logo/Summary trước Quality và tier200 chỉ1 cảnh; contract hiện tại Add-on/Review trước Quality, AI Real nhận tier200 cho2 cảnh, Self-shot không nhận200. Sửa đúng test; giữ snapshot hóa đơn lịch sử khi migrate, chặn9999 thay vì chặn tier hợp lệ. 37/37 cùng comparator đạt, chưa phải Telegram live.
+
+## B14: kế hoạch cảnh không phải định danh Storyboard - 03/11/2026
+
+- Trước sửa: có `b14_storyboard_plan` là đủ để áp Storyboard, dù product là Trend/AI Prompt. Offline đã thấy asset pack bị đổi sang Storyboard và thiếu panel. Sau sửa được duyệt: product rõ ràng có ưu tiên; chỉ dùng suy luận plan/flow-kind cho phiên không có product_id. Giữ nguyên contract và giá Storyboard thật/cũ, không refactor engine; 393 regression đạt, chưa triển khai production.

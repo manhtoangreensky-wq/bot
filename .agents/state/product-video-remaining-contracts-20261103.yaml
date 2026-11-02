@@ -5,6 +5,8 @@ branch: test/product-video-remaining-contracts-20261102
 authority: Owner approved execution on 2026-11-03; keep changes narrow
 scope: Product Video provider-free test contracts and acceptance evidence
 allowed_files:
+  - bot.py (only two Owner-approved Storyboard classification predicates)
+  - tests/test_p0_product_video_explicit_product_storyboard_plan.py
   - tests/test_p0_video_uifreeze1_menu_pricing_public_freeze.py
   - tests/test_p0_product_video_pv04_capability_quality_catalog_truth.py
   - tests/test_p0_product_video_pv08_product_adapters_product_specific_quality.py
@@ -16,7 +18,7 @@ allowed_files:
   - KIEM-THU/DANH-SACH-CASE.md
   - docs/reports/PRODUCT_VIDEO_REMAINING_CONTRACTS_20261103.md
 protected:
-  - bot.py
+  - all other bot.py functions and all other lines in the two approved functions
   - services/
   - providers/
   - config/
@@ -37,6 +39,13 @@ checklist:
   S08: NOT_READY
   S09: SEPARATE_SCOPE_GATE
   S10: PENDING
+runtime_defect:
+  scope: explicit product identity must override generic scene-plan inference
+  owner_approved: true
+  red: 4 failed, 3 passed
+  compile: Python3.11 compile/source and AST and py_compile bot/worker PASS
+  green: 58 targeted and 393 wide regression PASS on Python3.11; CI pending
+  deploy_authorized: false
 baseline:
   expanded: 31 failed, 128 passed, 6 deselected
   catalog_selected: 18 failed, 101 passed, 3 deselected
