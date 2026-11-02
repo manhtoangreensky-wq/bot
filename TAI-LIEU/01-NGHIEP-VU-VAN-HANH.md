@@ -1799,3 +1799,9 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
   Account → Quay lại, nên chưa được kết luận nguyên nhân do bot, Telegram,
   mạng, thiết bị hay VPS và chưa được tuyên bố mọi nút đều mượt. Chỉ đóng A7
   khi có click timestamp + route event tương ứng hoặc Owner quyết định hoãn.
+
+## Product Video contract verification - 02/11/2026
+
+- Source contract hiện tại: Storyboard chỉ nhận tier 400/800; `multi_scene_film` đã mở execution sau PR #1455; `video_long` vẫn khóa `long_video_under_upgrade`.
+- Sửa 19 kỳ vọng test cũ, giữ đủ 144 case ban đầu và 3 case Tail18; thêm 1 case chặn confirm `video_long`: 148/148 PASS trong harness offline chặn external sockets, 0 provider calls.
+- Đây là cập nhật test/CI/tài liệu, không thay đổi runtime hoặc xác nhận live. Chi tiết và giới hạn: `docs/reports/PRODUCT_VIDEO_CATALOG_TAIL_TEST_RECONCILIATION_20261102.md`.

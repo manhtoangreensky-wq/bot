@@ -339,14 +339,14 @@ def test_script_image_video_supports_all_ten_tiers(tier_id: int) -> None:
 
 
 # ==============================================================================
-# LANE 4: storyboard_prompt (Storyboard + Prompt điện ảnh) All 10 Tiers
+# LANE 4: Storyboard accepts only its two product-specific tiers.
 # ==============================================================================
 
 
 @pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
-def test_storyboard_prompt_supports_all_ten_tiers(tier_id: int) -> None:
+def test_storyboard_prompt_accepts_only_dual_tier_contract(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("storyboard_prompt")
-    assert tier_id in contract["supported_quality_tiers"]
+    assert set(contract["supported_quality_tiers"]) == {400, 800}
 
     catalog = video_uifreeze1.catalog_report(
         "storyboard_prompt",
@@ -355,7 +355,7 @@ def test_storyboard_prompt_supports_all_ten_tiers(tier_id: int) -> None:
         required_capability="image_to_video",
     )
     assert catalog["ok"] is True
-    assert tier_id in catalog["tier_ids"]
+    assert set(catalog["tier_ids"]) == {400, 800}
 
     state = video_tail9.new_state(
         product_type="storyboard_prompt",
@@ -376,7 +376,35 @@ def test_storyboard_prompt_supports_all_ten_tiers(tier_id: int) -> None:
             "plan_status": "ready",
         },
     )
-    pricing = _pricing_snapshot(tier_id, scene_count=2)
+    if tier_id not in {400, 800}:
+        compatibility = video_tail9.package_compatibility(
+            "storyboard_prompt", scene_count=2, ratio="9:16", quality_tier_id=tier_id,
+        )
+        assert compatibility["ok"] is False
+        assert compatibility["reason"] == "quality_tier_not_supported"
+        with pytest.raises(ValueError, match="^quality_tier_not_supported$"):
+            video_tail9.select_package(
+                state,
+                quality_tier_id=str(tier_id),
+                package_id=f"product_video_{tier_id}",
+                pricing_snapshot=_pricing_snapshot(tier_id),
+                capability_snapshot={"ok": True, "required_capability": "image_to_video"},
+            )
+        assert state["quality_tier_id"] == ""
+        assert state["invoice_id"] == ""
+        assert state["final_confirmed"] is False
+        return
+
+    offer = next(item for item in catalog["offers"] if item["tier_id"] == tier_id)
+    assert offer["seconds"] == 8
+    if tier_id == 800:
+        assert offer["unit_xu"] == 1714
+    quote = video_ai_real_pricing.video_multiscene_price(int(offer["unit_xu"]), 2)
+    pricing = {
+        "routing_quality_tier": tier_id,
+        "quality_xu": int(offer["unit_xu"]),
+        **quote,
+    }
     invoiced = video_tail9.select_package(
         state,
         quality_tier_id=str(tier_id),
@@ -506,6 +534,8 @@ def test_self_shot_cinematic_transform_supports_all_ten_tiers(tier_id: int) -> N
 def test_multi_scene_film_supports_all_ten_tiers(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("multi_scene_film")
     assert tier_id in contract["supported_quality_tiers"]
+    assert contract["execution_enabled"] is True
+    assert contract["execution_blocker"] == ""
 
     catalog = video_uifreeze1.catalog_report("multi_scene_film", scene_count=2, ratio="9:16")
     assert catalog["ok"] is True
@@ -540,8 +570,13 @@ def test_multi_scene_film_supports_all_ten_tiers(tier_id: int) -> None:
     )
     assert invoiced["status_stage"] == "invoice"
     assert video_tail9.invoice_allowed(invoiced) == (True, "ok")
-    with pytest.raises(ValueError, match="multi_scene_film_under_upgrade"):
-        video_tail9.confirm_once(invoiced, f"confirm-film-{tier_id}")
+    confirmed, created = video_tail9.confirm_once(invoiced, f"confirm-film-{tier_id}")
+    assert created is True
+    assert confirmed["final_confirmed"] is True
+    assert confirmed["video_product_type"] == "multi_scene_film"
+    replayed, created_again = video_tail9.confirm_once(confirmed, f"confirm-film-{tier_id}")
+    assert created_again is False
+    assert replayed == confirmed
 
 
 # ==============================================================================
@@ -550,9 +585,11 @@ def test_multi_scene_film_supports_all_ten_tiers(tier_id: int) -> None:
 
 
 @pytest.mark.parametrize("tier_id", ALL_CANONICAL_TIERS)
-def test_video_long_supports_all_ten_tiers(tier_id: int) -> None:
+def test_video_long_catalog_does_not_unlock_execution(tier_id: int) -> None:
     contract = video_tail9.commercial_contract("video_long")
     assert tier_id in contract["supported_quality_tiers"]
+    assert contract["execution_enabled"] is False
+    assert contract["execution_blocker"] == "long_video_under_upgrade"
 
     catalog = video_uifreeze1.catalog_report("video_long", scene_count=2, ratio="9:16")
     assert catalog["ok"] is True
@@ -590,7 +627,27 @@ def test_video_long_supports_all_ten_tiers(tier_id: int) -> None:
 
 
 # ==============================================================================
-# LANE 8: video_idea (Ý tưởng video) All 10 Tiers
+def test_video_long_confirm_remains_blocked_after_invoice() -> None:
+    state = video_tail9.new_state(
+        product_type="video_long",
+        execution_product_type="multi_scene_film",
+        session_id="video-long-locked-confirm",
+        scene_count=2,
+        ratio="9:16",
+    )
+    invoiced = video_tail9.select_package(
+        state,
+        quality_tier_id="400",
+        package_id="product_video_400",
+        pricing_snapshot=_pricing_snapshot(400),
+        capability_snapshot={"ok": True, "required_capability": "text_to_video"},
+    )
+    with pytest.raises(ValueError, match="^long_video_under_upgrade$"):
+        video_tail9.confirm_once(invoiced, "locked-video-long")
+    assert invoiced["final_confirmed"] is False
+
+
+# LANE 8: video_idea legacy adapter contract, not standalone live acceptance.
 # ==============================================================================
 
 

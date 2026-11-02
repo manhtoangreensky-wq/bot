@@ -318,3 +318,9 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | `UI-BUTTON-LATENCY-OWNER-DEFERRED-01` | Sau deploy, ghi vài vòng Account/Admin/product landing menu-only; gửi HH:MM:SS +07 và click-to-screen từng nút, kèm cách đo. | Ghép được với anonymous server phases; phân biệt wait/ACK/build/render/client. Chưa PASS; hoãn cho Owner S12.35.79 theo chỉ đạo |
 | `UI-FREEHUB-MEMORY-ORIGIN-01` | Trên bot test/menu-only: `/start` → Free Tools → Notes/Docs → Create Note → Back → Memory root → Back; lặp khi vào Memory từ Main. Re-enter Free Tools rồi chạy `/menu`, `/start`, hoặc `/memory` trước khi mở Memory lại. Không lưu/xóa note hay mở công cụ tài liệu. | Free Tools-origin Back về Free Tools; Main-origin hoặc fresh-command Back về Main. `/menu` phải xóa origin vì alias `cmd_start`. Không thay đổi dữ liệu. Fixture RED/GREEN S12.35.103; tester chỉ xác nhận Telegram-client rendering sau delivery. |
 | `STORAGE-ADDON-EXPIRED-CUSTOM-01` | Fixture: phát `storage|custom`, để pending hết TTL rồi gửi text thường; lặp với `/start`, nhập hợp lệ khi TTL còn hạn, và pending của user khác. Không xác nhận mua hàng. | Text thường sau expiry nhận thông báo đã hết hạn/chưa trừ Xu và menu Storage Add-on; handler tiêu thụ text để không rơi sang flow khác; chỉ xóa state của đúng user. Slash command tiếp tục tới command handler; input còn hạn vẫn đi tới xác nhận hiện hữu. Không gọi PayOS/provider, tạo đơn/job, trừ Xu, ghi DB production hoặc gửi Telegram thật. Regression S12.35.147: 6 tests GREEN. |
+
+## Product Video catalog/Tail contract - 02/11/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc / bằng chứng |
+|---|---|---|
+| `PV-CATALOG-TAIL-CURRENT-01` | Chạy đầy đủ 3 file test trong `docs/reports/PRODUCT_VIDEO_CATALOG_TAIL_TEST_RECONCILIATION_20261102.md`, không gọi provider hoặc production. | 148 case PASS; Storyboard nhận 400/800 và chặn 8 tier khác; Long Series confirm chống lặp; `video_long` vẫn không confirm được. Không dùng kết quả contract này để đóng live gate #1155/#1460. |

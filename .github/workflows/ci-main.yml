@@ -142,6 +142,13 @@ jobs:
             tests/test_customer_stale_ticket_action_id_single_ack.py \
             tests/test_knowledge_vault_callback_single_ack.py
 
+      - name: Product Video Catalog and Shared Tail Contract Matrix
+        run: |
+          python -m pytest -q --noconftest \
+            tests/test_p0_product_video_all_quality_tiers_multi_product_matrix.py \
+            tests/test_p0_product_video_full_menu_tail_to_status_matrix.py \
+            tests/test_p0_video_tailflow18_locked_order.py
+
       - name: Product Video R17 Provider-Free Prelive Technical Acceptance Matrix
         run: |
           python -m pip install "python-telegram-bot>=20.0" fastapi pydantic httpx numpy python-multipart
