@@ -3,19 +3,25 @@
 Validates:
 - Canonical Modality Matrix:
     T2V = {400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500}
-    I2V = {400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500}
-    V2V = {500, 600, 700, 800}
+    AI Image I2V = all 10; Storyboard I2V = {400, 800}
+    Reference V2V and Self-shot keyframe I2V = {500, 600, 700, 800}
     V2V remaining 6 tiers = unsupported
-- Trend Tier 400 Protection (80 Xu, visible)
+- Trend Tier 400 Protection (371 Xu, visible; approved price-route map)
 - Capability != Provider Availability separation
 - Global commercial pricing catalog preservation
 - Product adapter modality consistency & PV02 aliases
 - UI Keyboard & Callback tier defense (valid vs unsupported vs tampered vs stale)
+
+The nine-adapter inventory retains the legacy video_idea compatibility contract;
+it is not a complete live product list or authority to render library jobs.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
+import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
@@ -39,22 +45,16 @@ PV04_ACTIVE_T2V_PRODUCT_IDS = frozenset({
 PV04_ACTIVE_I2V_PRODUCT_IDS = frozenset({
     "video_ai_image",
     "storyboard_prompt",
-})
-PV04_ACTIVE_V2V_PRODUCT_IDS = frozenset({
-    "video_ai_video_reference",
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
 })
+PV04_ACTIVE_V2V_PRODUCT_IDS = frozenset({"video_ai_video_reference"})
 PV04_ACTIVE_PRODUCT_IDS = (
     PV04_ACTIVE_T2V_PRODUCT_IDS
     | PV04_ACTIVE_I2V_PRODUCT_IDS
     | PV04_ACTIVE_V2V_PRODUCT_IDS
 )
-DEFERRED_PRODUCT_IDS = frozenset({
-    "video_local_edit",
-    "multi_scene_film",
-    "video_long",
-})
+DEFERRED_PRODUCT_IDS = frozenset({"video_long"})
 
 
 
@@ -83,20 +83,24 @@ def test_t2v_modality_supports_all_ten_tiers(product_type: str) -> None:
     "video_ai_image",
     "storyboard_prompt",
 ])
-def test_i2v_modality_supports_all_ten_tiers(product_type: str) -> None:
+def test_i2v_modality_uses_product_specific_tiers(product_type: str) -> None:
     contract = video_tail9.commercial_contract(product_type)
     assert contract.get("required_capability") == "image_to_video"
     cat = video_uifreeze1.catalog_report(product_type, scene_count=2, ratio="9:16")
     assert cat["ok"] is True
     tier_set = frozenset(cat["tier_ids"])
-    assert tier_set == I2V_EXPECTED_TIERS
-    assert len(tier_set) == 10
+    expected = frozenset({400, 800}) if product_type == "storyboard_prompt" else I2V_EXPECTED_TIERS
+    assert tier_set == expected
+    for unsupported in set(ALL_CANONICAL_TIERS) - expected:
+        compatibility = video_tail9.package_compatibility(
+            product_type, scene_count=2, ratio="9:16", quality_tier_id=unsupported,
+        )
+        assert compatibility["ok"] is False
+        assert "quality_tier_not_supported" in compatibility["blockers"]
 
 
 @pytest.mark.parametrize("product_type", [
     "video_ai_video_reference",
-    "self_shot_scene_change",
-    "self_shot_cinematic_transform",
 ])
 def test_v2v_modality_supports_only_exact_four_tiers(product_type: str) -> None:
     contract = video_tail9.commercial_contract(product_type)
@@ -115,19 +119,21 @@ def test_v2v_modality_supports_only_exact_four_tiers(product_type: str) -> None:
 # ==============================================================================
 
 
-def test_trend_tier_400_visible_and_80_xu() -> None:
+def test_trend_tier_400_visible_at_approved_price() -> None:
     contract = video_tail9.commercial_contract("video_trend")
     assert 400 in contract["supported_quality_tiers"]
 
     cat = video_uifreeze1.catalog_report("video_trend", scene_count=2, ratio="9:16")
     assert cat["ok"] is True
     assert 400 in cat["tier_ids"]
-    assert cat["tier_ids"][0] == 400
+    assert [offer["unit_xu"] for offer in cat["offers"]] == sorted(
+        offer["unit_xu"] for offer in cat["offers"]
+    )
 
     tier400 = next(item for item in cat["offers"] if item["tier_id"] == 400)
-    assert tier400["unit_xu"] == 80
+    assert tier400["unit_xu"] == 371
     assert tier400["seconds"] == 8
-    assert "Nhanh gọn" in tier400["name"] or tier400["tier_id"] == 400
+    assert tier400["name"] == "Video Veo Cân Bằng Chi Tiết 8s"
 
 
 # ==============================================================================
@@ -178,8 +184,8 @@ def test_temporary_provider_outage_does_not_mutate_catalog() -> None:
 def test_product_adapter_aliases_and_modality_consistency() -> None:
     aliases = {
         "storyboard_video": ("storyboard_prompt", "image_to_video"),
-        "selfshot_scene_change": ("self_shot_scene_change", "video_to_video"),
-        "selfshot_cinematic": ("self_shot_cinematic_transform", "video_to_video"),
+        "selfshot_scene_change": ("self_shot_scene_change", "image_to_video"),
+        "selfshot_cinematic": ("self_shot_cinematic_transform", "image_to_video"),
         "video_edit": ("video_local_edit", "video_to_video"),
         "trend_video": ("video_trend", "text_to_video"),
         "script_to_video": ("script_image_video", "text_to_video"),
@@ -189,6 +195,26 @@ def test_product_adapter_aliases_and_modality_consistency() -> None:
         resolved_contract = video_tail9.commercial_contract(alias)
         assert resolved_contract["product_type"] == expected_target
         assert resolved_contract["required_capability"] == expected_modality
+
+
+@pytest.mark.parametrize(
+    "product_type",
+    ("self_shot_scene_change", "self_shot_cinematic_transform"),
+)
+def test_selfshot_keeps_video_input_but_uses_controlled_keyframe_i2v(product_type: str) -> None:
+    contract = video_tail9.commercial_contract(product_type)
+    assert contract["input_type"] == "source_video"
+    assert contract["engine_route"] == "controlled_keyframe_image_to_video"
+    assert contract["required_capability"] == "image_to_video"
+    catalog = video_uifreeze1.catalog_report(product_type, scene_count=2, ratio="keep")
+    assert catalog["ok"] is True
+    assert set(catalog["tier_ids"]) == {500, 600, 700, 800}
+    for unsupported in V2V_UNSUPPORTED_TIERS:
+        compatibility = video_tail9.package_compatibility(
+            product_type, scene_count=2, ratio="keep", quality_tier_id=unsupported,
+        )
+        assert compatibility["ok"] is False
+        assert "quality_tier_not_supported" in compatibility["blockers"]
 
 
 # ==============================================================================
@@ -210,7 +236,7 @@ def test_quality_keyboard_v2v_only_renders_supported_tiers() -> None:
         if btn.callback_data and btn.callback_data.startswith("video_tail|quality|select|")
     ]
     offered_tiers = [int(cb.split("|")[-1]) for cb in rendered_callbacks]
-    assert offered_tiers == [500, 600, 700, 800]
+    assert offered_tiers == [500, 600, 800, 700]
     assert 400 not in offered_tiers
     assert 200 not in offered_tiers
 
@@ -238,125 +264,87 @@ def test_quality_keyboard_t2v_renders_all_ten_tiers() -> None:
 # ==============================================================================
 
 
-def test_v2v_callback_rejects_unsupported_tier_400() -> None:
-    """Selecting Tier 400 on a V2V product must be rejected and NOT persisted to draft."""
-    async def _test():
-        uid = 999101
-        initial_tail = video_tail9.new_state(
-            product_type="video_ai_video_reference",
-            execution_product_type="video_ai_video_reference",
-            session_id="v2v-test-cb",
-            scene_count=1,
-            ratio="9:16",
-        )
-        initial_tail["quality_tier_id"] = ""
+@pytest.fixture
+def quality_callback(monkeypatch):
+    saved = []
+    errors = []
+    render = AsyncMock()
+    db_access = MagicMock(side_effect=AssertionError("Unexpected DB access in quality fixture"))
+    monkeypatch.setattr(bot, "db_connect", db_access)
+    monkeypatch.setattr(bot, "video_tail9_render", render)
+    monkeypatch.setattr(bot, "video_tail9_answer_best_effort", AsyncMock())
+    monkeypatch.setattr(bot, "save_video_tail9_state", lambda _uid, _ctx, tail, *_: saved.append(deepcopy(tail)))
+    monkeypatch.setattr(bot.logger, "exception", lambda *_, **__: errors.append(sys.exc_info()[1]))
+    monkeypatch.setattr(bot, "video_tail9_preflight", lambda *_: {"ok": True, "blockers": []})
+    monkeypatch.setattr(bot, "video_tail9_apply_to_session", lambda _uid, _ctx, tail, *_: deepcopy(tail))
 
-        update = MagicMock()
-        query = AsyncMock()
-        query.from_user.id = uid
-        query.id = "cb-query-test-1"
-        query.data = "video_tail|quality|select|400"
-        update.callback_query = query
+    def invoice(session, _uid):
+        unit = video_uifreeze1.tier_spec(int(session["quality_tier_id"]))["unit_xu"]
+        return {"quality_xu": unit, "total_xu": unit * session["scene_count"]}
 
-        context = MagicMock()
-        context.user_data = {}
+    monkeypatch.setattr(bot, "video_b14_invoice_for_session", invoice)
 
-        with patch("bot.video_tail9_context", return_value=(deepcopy(initial_tail), "scene3", {})):
-            with patch("bot.save_video_tail9_state") as mock_save:
-                with patch("bot.video_tail9_answer_best_effort", new_callable=AsyncMock) as mock_answer:
-                    try:
-                        await bot.handle_video_tail_callback(update, context)
-                    except Exception:
-                        pass
-
-                    # Verify draft state was NOT updated to tier 400
-                    for call_args in mock_save.call_args_list:
-                        saved_tail = call_args[0][2]
-                        assert str(saved_tail.get("quality_tier_id") or "") != "400", "Tier 400 must NOT be persisted for V2V"
-
-    import asyncio
-    asyncio.run(_test())
-
-
-def test_v2v_callback_accepts_supported_tier_500() -> None:
-    """Selecting Tier 500 on a V2V product must be accepted."""
-    async def _test():
-        uid = 999102
-        initial_tail = video_tail9.new_state(
-            product_type="video_ai_video_reference",
-            execution_product_type="video_ai_video_reference",
-            session_id="v2v-test-cb-500",
-            scene_count=1,
-            ratio="9:16",
-        )
-        initial_tail = video_tail9.apply_content_contract(
-            initial_tail,
+    def run(product, tier):
+        tail = video_tail9.apply_content_contract(
+            video_tail9.new_state(product_type=product, session_id=f"quality-{product}-{tier}", scene_count=2),
             {
-                "content_source": "source_video",
-                "selected_prompt_text": "V2V prompt",
-                "per_scene_content": [{"scene_index": 1, "provider_prompt": "prompt 1"}],
+                "content_source": "manual",
+                "selected_prompt_text": "Preserve both approved scenes.",
+                "per_scene_content": [
+                    {"scene_index": i, "provider_prompt": f"Scene {i}"} for i in (1, 2)
+                ],
                 "plan_status": "ready",
             },
         )
+        callback = f"video_tail|quality|select|{tier}"
+        if tier in video_tail9.commercial_contract(product)["supported_quality_tiers"]:
+            emitted = [
+                button.callback_data
+                for row in bot.video_tail9_quality_keyboard(tail).inline_keyboard
+                for button in row
+            ]
+            assert callback in emitted
+        query = SimpleNamespace(from_user=SimpleNamespace(id=999101), id=f"quality-{tier}", data=callback, answer=AsyncMock())
+        monkeypatch.setattr(bot, "video_tail9_context", lambda *_: (deepcopy(tail), "scene3", {}))
+        asyncio.run(asyncio.wait_for(
+            bot.handle_video_tail_callback(SimpleNamespace(callback_query=query), SimpleNamespace(user_data={})),
+            timeout=5,
+        ))
+        db_access.assert_not_called()
+        return SimpleNamespace(saved=saved, errors=errors, render=render)
 
-        update = MagicMock()
-        query = AsyncMock()
-        query.from_user.id = uid
-        query.id = "cb-query-test-2"
-        query.data = "video_tail|quality|select|500"
-        update.callback_query = query
-
-        context = MagicMock()
-        context.user_data = {}
-
-        with patch("bot.video_tail9_context", return_value=(deepcopy(initial_tail), "scene3", {})):
-            with patch("bot.save_video_tail9_state") as mock_save:
-                with patch("bot.video_tail9_render", new_callable=AsyncMock) as mock_render:
-                    await bot.handle_video_tail_callback(update, context)
-                    # Verify tier 500 was accepted and render was called with invoice
-                    mock_render.assert_called_once()
-                    assert mock_render.call_args[0][3] == "invoice"
-
-    import asyncio
-    asyncio.run(_test())
+    return run
 
 
-def test_callback_rejects_unknown_tampered_tier() -> None:
-    """Tampered tier (e.g. 9999 or invalid string) must be rejected without mutating state."""
-    async def _test():
-        uid = 999103
-        initial_tail = video_tail9.new_state(
-            product_type="video_trend",
-            execution_product_type="video_trend",
-            session_id="tamper-test",
-            scene_count=1,
-            ratio="9:16",
-        )
-        initial_tail["quality_tier_id"] = ""
+def test_v2v_callback_rejects_unsupported_tier_400(quality_callback) -> None:
+    result = quality_callback("video_ai_video_reference", 400)
+    assert result.saved
+    assert all(not state.get("quality_tier_id") for state in result.saved)
+    assert len(result.errors) == 1
+    assert isinstance(result.errors[0], ValueError)
+    assert str(result.errors[0]) == "quality_tier_not_supported"
+    assert result.render.call_args.args[3] == "quality"
 
-        update = MagicMock()
-        query = AsyncMock()
-        query.from_user.id = uid
-        query.id = "cb-query-tamper"
-        query.data = "video_tail|quality|select|9999"
-        update.callback_query = query
 
-        context = MagicMock()
-        context.user_data = {}
+def test_v2v_callback_accepts_supported_tier_500(quality_callback) -> None:
+    result = quality_callback("video_ai_video_reference", 500)
+    assert not result.errors
+    final = result.saved[-1]
+    assert final["quality_tier_id"] == "500"
+    assert final["package_id"] == "product_video_500"
+    assert final["pricing_snapshot"]["total_xu"] == 1608
+    result.render.assert_awaited_once()
+    assert result.render.call_args.args[3] == "invoice"
 
-        with patch("bot.video_tail9_context", return_value=(deepcopy(initial_tail), "trend", {})):
-            with patch("bot.save_video_tail9_state") as mock_save:
-                try:
-                    await bot.handle_video_tail_callback(update, context)
-                except Exception:
-                    pass
 
-                for call_args in mock_save.call_args_list:
-                    saved_tail = call_args[0][2]
-                    assert str(saved_tail.get("quality_tier_id") or "") != "9999"
-
-    import asyncio
-    asyncio.run(_test())
+def test_callback_rejects_unknown_tampered_tier(quality_callback) -> None:
+    result = quality_callback("video_trend", 9999)
+    assert result.saved
+    assert all(not state.get("quality_tier_id") for state in result.saved)
+    assert len(result.errors) == 1
+    assert isinstance(result.errors[0], ValueError)
+    assert str(result.errors[0]) == "quality_tier_not_supported"
+    assert result.render.call_args.args[3] == "quality"
 
 
 # ==============================================================================
@@ -367,8 +355,8 @@ def test_callback_rejects_unknown_tampered_tier() -> None:
 def test_pv04_active_product_matrix_contains_only_exact_nine_products() -> None:
     assert len(PV04_ACTIVE_PRODUCT_IDS) == 9
     assert len(PV04_ACTIVE_T2V_PRODUCT_IDS) == 4
-    assert len(PV04_ACTIVE_I2V_PRODUCT_IDS) == 2
-    assert len(PV04_ACTIVE_V2V_PRODUCT_IDS) == 3
+    assert len(PV04_ACTIVE_I2V_PRODUCT_IDS) == 4
+    assert len(PV04_ACTIVE_V2V_PRODUCT_IDS) == 1
     # Explicit constant requirement: PV04_ACTIVE_PRODUCT_IDS count = 9
     pv04_active_count = len(PV04_ACTIVE_PRODUCT_IDS)
     assert pv04_active_count == 9
@@ -389,13 +377,13 @@ def test_deferred_products_are_not_in_pv04_active_v2v_matrix() -> None:
         assert deferred_id not in PV04_ACTIVE_PRODUCT_IDS
 
 
-def test_video_local_edit_contract_has_zero_delta_against_parent() -> None:
-    """Zero delta on video_local_edit commercial contract against parent commit 24a94ee7."""
+def test_video_local_edit_contract_keeps_protected_route_and_current_catalog() -> None:
+    """Protect Local Edit routing without restoring pre-price-map tier order."""
     contract = video_tail9.commercial_contract("video_local_edit")
     assert contract["flow_owner"] == "video_edit"
     assert contract["engine_route"] == "local_worker_ffmpeg"
     assert contract["required_capability"] == "video_to_video"
-    assert contract["supported_quality_tiers"] == (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500)
+    assert contract["supported_quality_tiers"] == (300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700)
     assert contract["worker_owner"] == "video_edit"
     assert contract["public_planning_enabled"] is True
     assert contract["execution_enabled"] is True
@@ -408,14 +396,15 @@ def test_video_local_edit_contract_has_zero_delta_against_parent() -> None:
         "executor_product_type": "video_local_edit",
         "pricing_mode": "canonical",
         "required_capability": "video_to_video",
+        "fallback_capabilities": (),
         "input_type": "source_video",
         "output_type": "mp4",
         "worker_owner": "video_edit",
         "minimum_scene_count": 1,
         "maximum_scene_count": 20,
         "supports_single_scene": True,
-        "supported_quality_tiers": (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500),
-        "supported_package_tiers": (400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500),
+        "supported_quality_tiers": (300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700),
+        "supported_package_tiers": (300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700),
         "scene_duration_seconds": 8,
         "public_planning_enabled": True,
         "execution_enabled": True,
@@ -431,7 +420,7 @@ def test_video_local_edit_contract_has_zero_delta_against_parent() -> None:
 
 
 def test_video_local_edit_behavioral_differential_and_tamper_rejection() -> None:
-    """Empirical differential proof for video_local_edit behavior against parent semantics.
+    """Protect Local Edit capabilities and the accepted price-sorted catalog.
 
     Validates:
     - required_capability="": returns all 10 canonical tiers.
@@ -443,7 +432,7 @@ def test_video_local_edit_behavioral_differential_and_tamper_rejection() -> None
     - VIDEO_LOCAL_EDIT_BEHAVIOR_DELTA = 0.
     - UNKNOWN_LOCAL_EDIT_CAPABILITY_REJECTED = YES.
     """
-    LEGACY_DEFAULT_TIERS = [400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500]
+    LEGACY_DEFAULT_TIERS = [300, 200, 1000, 400, 500, 600, 1200, 800, 1500, 700]
     UNKNOWN_CAPABILITY_TIERS = []
 
     # 1. Default / video_to_video

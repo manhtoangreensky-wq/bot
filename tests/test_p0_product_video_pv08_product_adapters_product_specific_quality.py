@@ -1,22 +1,23 @@
 """Focused test matrix for P0.PRODUCT_VIDEO.PV08.PRODUCT.ADAPTERS.PRODUCT.SPECIFIC.QUALITY.
 
 Validates:
-1. Exact Active Product Matrix (9 products):
+1. Legacy nine-adapter audit matrix (not the complete live product inventory):
    - T2V (4): video_trend, video_ai_prompt, video_idea, script_image_video
-   - I2V (2): video_ai_image, storyboard_prompt
-   - V2V (3): video_ai_video_reference, self_shot_scene_change, self_shot_cinematic_transform
-   - Deferred (3): video_local_edit, multi_scene_film, video_long -> DEFERRED_PRODUCTS_EXECUTED=0
+   - I2V (4): video_ai_image, storyboard_prompt, self_shot_scene_change, self_shot_cinematic_transform
+   - Direct V2V (1): video_ai_video_reference
+   - video_idea is a library compatibility adapter, not a standalone product
+   - Additional contracts: multi_scene_film enabled; video_long locked; video_local_edit protected local lane
 2. Canonical Identity Lock:
    - Unknown product rejected (fail-closed, no default fallback adapter)
    - Product A never silently executes Product B
    - Tampered aliases rejected
    - CANONICAL_EXECUTOR_MISMATCH=0, SILENT_PRODUCT_FALLBACK=0
 3. Quality / Modality Contract:
-   - T2V & I2V support 10 tiers: {400, 500, 600, 200, 300, 700, 800, 1000, 1200, 1500}
-   - V2V supports ONLY 4 tiers: {500, 600, 700, 800}
+   - T2V and AI Image I2V support 10 tiers; Storyboard supports 400/800
+   - Reference V2V and Self-shot keyframe I2V support 500/600/700/800
    - V2V rejects remaining 6 tiers: {400, 200, 300, 1000, 1200, 1500}
    - Unsupported, unknown, tampered, and missing tiers fail closed (UNSUPPORTED_TIER_ACCEPTED=0, UNKNOWN_TIER_ACCEPTED=0)
-   - Trend Tier 400 visible and exactly 80 Xu
+   - Trend Tier 400 visible at 371 Xu from the accepted price-route map
 4. Product-Specific Input Truth:
    - Missing required input -> JOB_DELTA=0, OUTBOX_DELTA=0, PROVIDER_TASK_DELTA=0
 5. Product-Specific Payload Truth:
@@ -73,17 +74,18 @@ ACTIVE_I2V_PRODUCTS = (
     "video_ai_image",
     "storyboard_prompt",
 )
-ACTIVE_V2V_PRODUCTS = (
-    "video_ai_video_reference",
+ACTIVE_V2V_PRODUCTS = ("video_ai_video_reference",)
+CONTROLLED_KEYFRAME_I2V_PRODUCTS = (
     "self_shot_scene_change",
     "self_shot_cinematic_transform",
 )
-ALL_ACTIVE_PRODUCTS = ACTIVE_T2V_PRODUCTS + ACTIVE_I2V_PRODUCTS + ACTIVE_V2V_PRODUCTS
-DEFERRED_PRODUCTS = (
-    "video_local_edit",
-    "multi_scene_film",
-    "video_long",
+ALL_ACTIVE_PRODUCTS = (
+    ACTIVE_T2V_PRODUCTS
+    + ACTIVE_I2V_PRODUCTS
+    + ACTIVE_V2V_PRODUCTS
+    + CONTROLLED_KEYFRAME_I2V_PRODUCTS
 )
+DEFERRED_PRODUCTS = ("video_long",)
 
 EXPECTED_EXECUTOR_MAP = {
     "video_trend": "video_trend",
@@ -105,8 +107,8 @@ EXPECTED_MODALITY_MAP = {
     "video_ai_image": "image_to_video",
     "storyboard_prompt": "image_to_video",
     "video_ai_video_reference": "video_to_video",
-    "self_shot_scene_change": "video_to_video",
-    "self_shot_cinematic_transform": "video_to_video",
+    "self_shot_scene_change": "image_to_video",
+    "self_shot_cinematic_transform": "image_to_video",
 }
 
 LEGITIMATE_PV02_ALIASES = {
@@ -147,7 +149,11 @@ def test_pv08_active_product_matrix_audit() -> None:
     assert len(ALL_ACTIVE_PRODUCTS) == 9
     assert len(ACTIVE_T2V_PRODUCTS) == 4
     assert len(ACTIVE_I2V_PRODUCTS) == 2
-    assert len(ACTIVE_V2V_PRODUCTS) == 3
+    assert len(ACTIVE_V2V_PRODUCTS) == 1
+    assert len(CONTROLLED_KEYFRAME_I2V_PRODUCTS) == 2
+    assert video_tail9.commercial_contract("multi_scene_film")["execution_enabled"] is True
+    assert video_tail9.commercial_contract("video_long")["execution_enabled"] is False
+    assert video_tail9.commercial_contract("video_local_edit")["execution_enabled"] is True
 
     # Deferred products must NOT be in active set
     for deferred in DEFERRED_PRODUCTS:
@@ -261,17 +267,23 @@ def test_pv08_t2v_supports_all_10_tiers(product_id: str) -> None:
 
 
 @pytest.mark.parametrize("product_id", ACTIVE_I2V_PRODUCTS)
-def test_pv08_i2v_supports_all_10_tiers(product_id: str) -> None:
+def test_pv08_i2v_supports_product_specific_tiers(product_id: str) -> None:
     contract = video_tail9.commercial_contract(product_id)
     assert contract["required_capability"] == "image_to_video"
     tiers = frozenset(contract["supported_quality_tiers"])
-    assert tiers == I2V_EXPECTED_TIERS
-    assert len(tiers) == 10
+    expected = frozenset({400, 800}) if product_id == "storyboard_prompt" else I2V_EXPECTED_TIERS
+    assert tiers == expected
 
     min_scenes = contract["minimum_scene_count"]
     cat = video_uifreeze1.catalog_report(product_id, scene_count=min_scenes, ratio="9:16")
     assert cat["ok"] is True
-    assert frozenset(cat["tier_ids"]) == I2V_EXPECTED_TIERS
+    assert frozenset(cat["tier_ids"]) == expected
+    for unsupported in set(ALL_CANONICAL_TIERS) - expected:
+        compat = video_tail9.package_compatibility(
+            product_id, scene_count=min_scenes, ratio="9:16", quality_tier_id=unsupported,
+        )
+        assert compat["ok"] is False
+        assert "quality_tier_not_supported" in compat["blockers"]
 
 
 @pytest.mark.parametrize("product_id", ACTIVE_V2V_PRODUCTS)
@@ -297,6 +309,24 @@ def test_pv08_v2v_supports_only_4_tiers_and_rejects_6(product_id: str) -> None:
             scene_count=1,
             ratio="9:16",
             quality_tier_id=bad_tier,
+        )
+        assert compat["ok"] is False
+        assert "quality_tier_not_supported" in compat["blockers"]
+
+
+@pytest.mark.parametrize("product_id", CONTROLLED_KEYFRAME_I2V_PRODUCTS)
+def test_pv08_selfshot_video_input_uses_controlled_keyframe_i2v_quality(product_id: str) -> None:
+    contract = video_tail9.commercial_contract(product_id)
+    assert contract["input_type"] == "source_video"
+    assert contract["engine_route"] == "controlled_keyframe_image_to_video"
+    assert contract["required_capability"] == "image_to_video"
+    assert set(contract["supported_quality_tiers"]) == V2V_EXPECTED_TIERS
+    catalog = video_uifreeze1.catalog_report(product_id, scene_count=2, ratio="keep")
+    assert catalog["ok"] is True
+    assert set(catalog["tier_ids"]) == V2V_EXPECTED_TIERS
+    for unsupported in V2V_UNSUPPORTED_TIERS:
+        compat = video_tail9.package_compatibility(
+            product_id, scene_count=2, ratio="keep", quality_tier_id=unsupported,
         )
         assert compat["ok"] is False
         assert "quality_tier_not_supported" in compat["blockers"]
@@ -343,14 +373,14 @@ def test_pv08_tier_spec_unknown_tier_fails_closed() -> None:
 # 5. TREND TIER 400 VISIBILITY & 80 XU INVARIANT
 # ==============================================================================
 
-def test_pv08_trend_tier400_visible_and_80_xu() -> None:
-    """video_trend tier 400 must be visible and cost exactly 80 Xu."""
+def test_pv08_trend_tier400_visible_at_approved_price() -> None:
+    """Tier 400 matches the accepted price-route map; this is not a wallet mutation."""
     cat = video_uifreeze1.catalog_report("video_trend", scene_count=1, ratio="9:16")
     assert cat["ok"] is True
     assert 400 in cat["tier_ids"]
 
     tier400_spec = next(o for o in cat["offers"] if int(o["tier_id"]) == 400)
-    assert int(tier400_spec.get("unit_xu", tier400_spec.get("total_xu", 0))) == 80
+    assert int(tier400_spec["unit_xu"]) == 371
 
     # Pricing calculation for 1 scene of video_trend at tier 400
     conn = _create_isolated_db()
@@ -373,17 +403,17 @@ def test_pv08_trend_tier400_visible_and_80_xu() -> None:
         "tier_key": "basic",
         "quality_tier": 400,
         "scene_count": 1,
-        "quality_xu": 80,
-        "package_xu": 80,
-        "total_xu": 80,
-        "user_visible_price_xu": 80,
-        "persisted_quoted_price_xu": 80,
-        "customer_charge_planned_xu": 80,
+        "quality_xu": 371,
+        "package_xu": 371,
+        "total_xu": 371,
+        "user_visible_price_xu": 371,
+        "persisted_quoted_price_xu": 371,
+        "customer_charge_planned_xu": 371,
     }
     quote = queue._product_video_quote_consistency(invoice, project)
     assert quote["quote_consistent"] is True
-    assert quote["customer_charge_planned_xu"] == 80
-    assert quote["user_visible_price_xu"] == 80
+    assert quote["customer_charge_planned_xu"] == 371
+    assert quote["user_visible_price_xu"] == 371
 
 
 # ==============================================================================
@@ -391,8 +421,8 @@ def test_pv08_trend_tier400_visible_and_80_xu() -> None:
 # ==============================================================================
 
 @pytest.mark.parametrize("deferred_id", DEFERRED_PRODUCTS)
-def test_pv08_deferred_products_execution_blocked(deferred_id: str) -> None:
-    """Deferred products (video_local_edit, multi_scene_film, video_long) must NOT execute."""
+def test_pv08_video_long_execution_remains_blocked(deferred_id: str) -> None:
+    """video_long is execution-disabled; other scoped products have separate contracts."""
     contract = video_tail9.commercial_contract(deferred_id)
     # Execution must not be freely enabled without blocker
     assert contract["execution_enabled"] is False or bool(contract["execution_blocker"]) or deferred_id in video_uifreeze1.PUBLIC_EXECUTION_LOCKED_PRODUCTS
@@ -400,6 +430,15 @@ def test_pv08_deferred_products_execution_blocked(deferred_id: str) -> None:
     # In engine contract, execution_enabled must be False
     eng = queue.product_video_engine_contract(deferred_id)
     assert eng["execution_enabled"] is False or bool(eng["execution_blocker"])
+
+
+@pytest.mark.parametrize("product_id", ("multi_scene_film", "video_local_edit"))
+def test_pv08_enabled_film_and_protected_local_contracts(product_id: str) -> None:
+    contract = video_tail9.commercial_contract(product_id)
+    assert contract["execution_enabled"] is True
+    assert contract["execution_blocker"] == ""
+    if product_id == "video_local_edit":
+        assert contract["engine_route"] == "local_worker_ffmpeg"
 
 
 # ==============================================================================
