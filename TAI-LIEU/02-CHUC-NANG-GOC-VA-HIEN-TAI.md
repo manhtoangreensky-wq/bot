@@ -941,3 +941,7 @@ Kết quả gộp với 148 regression:270/270 offline, không deselection. Khô
 ## Product Video S02 - 03/11/2026
 
 - Fixture Storyboard cũ dùng provider/model giả và thời lượng5s; positive hiện dùng hai binding đã chấp nhận400/800,8s mỗi cảnh/16s tổng, vẫn chặn model/endpoint chưa chứng minh. Fixture worker không lấy nhầm lời gọi resolver của sản phẩm trước. Engine matrix32 case và comparator gộp82 case đều đạt; không sửa production engine.
+
+## Product Video S03 - 03/11/2026
+
+- Test cũ yêu cầu Logo/Summary trước Quality và tier200 chỉ1 cảnh; contract hiện tại Add-on/Review trước Quality, AI Real nhận tier200 cho2 cảnh, Self-shot không nhận200. Sửa đúng test; giữ snapshot hóa đơn lịch sử khi migrate, chặn9999 thay vì chặn tier hợp lệ. 37/37 cùng comparator đạt, chưa phải Telegram live.
