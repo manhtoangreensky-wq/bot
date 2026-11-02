@@ -1819,3 +1819,7 @@ Batch approval/reject/risk sau sửa đo được `48 passed, 2 warnings in 33.0
 ## Product Video S02 - 03/11/2026
 
 - S01 đã merge PR #1462 tại `33dca4be`, CI exact-head `41490636426` SUCCESS. S02 chỉ sửa fixture engine: đúng route Self-shot I2V, Storyboard 400/800 và resolver/payload từng sản phẩm; 82/82 test cùng comparator đạt, không đổi runtime. Chi tiết: `docs/reports/PRODUCT_VIDEO_ENGINE_FIXTURES_S02_20261103.md`.
+
+## Product Video S03 - 03/11/2026
+
+- Tail15 fixture chạy keyboard/invoice thật thay vì tách hàm thiếu dependency; kỳ vọng theo Tail18, giá hiện hữu và trạng thái không báo giao khi chưa có artifact/delivery. Tail15 + Tail18 + manual-entry đạt37/37; không sửa navigation/engine production. Chi tiết: `docs/reports/PRODUCT_VIDEO_TAIL_FIXTURES_S03_20261103.md`.
