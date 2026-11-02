@@ -193,6 +193,12 @@ jobs:
           DATA_DIR: ${{ runner.temp }}
           VOICE_ASSET_STORAGE_DIR: ${{ runner.temp }}/pv-catalog-voice-assets
         run: |
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get update -qq
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
           python -m pytest -q --noconftest -p tests.pv_provider_free_guard \
             tests/test_p0_video_uifreeze1_menu_pricing_public_freeze.py \
             tests/test_p0_product_video_pv04_capability_quality_catalog_truth.py \
