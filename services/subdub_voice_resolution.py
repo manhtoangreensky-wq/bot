@@ -92,7 +92,7 @@ def get_owner_voice_profiles_safe(
                 SELECT id, display_name, status, is_default, consent_status,
                        preview_audio_ref, provider_voice_id, created_at, updated_at
                 FROM voice_profiles
-                WHERE user_id=? AND deleted_at IS NULL
+                WHERE user_id=? AND deleted_at IS NULL AND status NOT IN ('deleted')
                 ORDER BY is_default DESC, id DESC
                 LIMIT ? OFFSET ?
                 """,
@@ -153,6 +153,20 @@ def resolve_subdub_voice_authority(
     target_lang = str(data.get("target_language") or "").strip()
     speed = parse_safe_speed(data.get("voice_speed") or data.get("speed"))
 
+    raw_auto_lane = data.get("auto_speaker_lane")
+    has_auto_lane = raw_auto_lane is not None and str(raw_auto_lane).strip() != ""
+    clean_auto_lane = str(raw_auto_lane or "").strip().lower() if has_auto_lane else ""
+
+    smart_opt_in = data.get("auto_smart_multivoice_opt_in") is True or data.get("auto_smart_multivoice") is True
+
+    valid_auto_lanes = {
+        "auto_2", "auto_two", "two_speaker", "auto_speaker",
+        "auto_multi_3_8", "auto_multi", "multi",
+        "smart_multi", "auto_smart_multivoice", "smart",
+    }
+    if has_auto_lane and clean_auto_lane not in valid_auto_lanes:
+        return False, "INVALID_AUTO_SPEAKER_LANE", 422, {"detail": f"Unrecognized auto_speaker_lane: '{raw_auto_lane}'"}
+
     # 1. Non-dubbing modes: do not require voice
     if mode in {"subtitle_create", "subtitle_translate"}:
         return True, "OK", 200, {
@@ -161,6 +175,7 @@ def resolve_subdub_voice_authority(
             "needs_voice": False,
             "voice_selection_mode": "none",
             "voice_profile_id": None,
+            "auto_speaker_lane": "",
             "resolved_voice_name": "",
             "resolved_gender": "",
             "target_language": target_lang,
@@ -179,7 +194,77 @@ def resolve_subdub_voice_authority(
         except (ValueError, TypeError):
             return False, "INVALID_VOICE_PROFILE_ID", 422, {"detail": "voice_profile_id must be a positive integer"}
 
-    # 2A. Custom Voice Vault profile requested
+    if profile_id is not None and has_auto_lane:
+        return False, "CONFLICTING_VOICE_CONFIGURATION", 422, {
+            "detail": "Cannot specify both voice_profile_id and auto_speaker_lane"
+        }
+
+    # 2A. Auto speaker lane requested
+    if has_auto_lane:
+        if clean_auto_lane in {"auto_2", "auto_two", "two_speaker", "auto_speaker"}:
+            if smart_opt_in:
+                return False, "UNKNOWN_SMART_MARKER", 422, {
+                    "detail": "Smart MultiVoice markers not permitted on Auto 2 lane"
+                }
+            return True, "OK", 200, {
+                "ok": True,
+                "mode": mode,
+                "needs_voice": True,
+                "voice_selection_mode": "auto_speaker",
+                "voice_kind": "auto_speaker_gender",
+                "auto_speaker_lane": "auto_2",
+                "voice_profile_id": None,
+                "resolved_voice_name": "Tự động 2 người (Auto 2)",
+                "resolved_gender": "auto",
+                "target_language": target_lang or "vi",
+                "voice_speed": speed,
+                "resolved_voice_id_masked": "auto:two_speaker",
+                "_internal_provider_voice_id": "auto:two_speaker",
+            }
+        elif clean_auto_lane in {"auto_multi_3_8", "auto_multi", "multi"}:
+            if smart_opt_in:
+                return False, "UNKNOWN_SMART_MARKER", 422, {
+                    "detail": "Smart MultiVoice markers not permitted on Auto Multi lane"
+                }
+            return True, "OK", 200, {
+                "ok": True,
+                "mode": mode,
+                "needs_voice": True,
+                "voice_selection_mode": "auto_speaker",
+                "voice_kind": "auto_speaker_gender",
+                "auto_speaker_lane": "multi",
+                "voice_profile_id": None,
+                "resolved_voice_name": "Tự động nhiều người (Auto Multi 3–8)",
+                "resolved_gender": "auto",
+                "target_language": target_lang or "vi",
+                "voice_speed": speed,
+                "resolved_voice_id_masked": "auto:multi_speaker",
+                "_internal_provider_voice_id": "auto:multi_speaker",
+            }
+        elif clean_auto_lane in {"smart_multi", "auto_smart_multivoice", "smart"}:
+            return True, "OK", 200, {
+                "ok": True,
+                "mode": mode,
+                "needs_voice": True,
+                "voice_selection_mode": "auto_speaker",
+                "voice_kind": "auto_speaker_gender",
+                "auto_speaker_lane": "auto_smart_multivoice",
+                "auto_smart_multivoice_opt_in": True,
+                "voice_profile_id": None,
+                "resolved_voice_name": "Tự động thông minh (Smart Multi)",
+                "resolved_gender": "auto",
+                "target_language": target_lang or "vi",
+                "voice_speed": speed,
+                "resolved_voice_id_masked": "auto:smart_multi",
+                "_internal_provider_voice_id": "auto:smart_multi",
+            }
+
+    if smart_opt_in:
+        return False, "UNKNOWN_SMART_MARKER", 422, {
+            "detail": "Smart MultiVoice markers not permitted without smart_multi lane"
+        }
+
+    # 2B. Custom Voice Vault profile requested
     if profile_id is not None:
         try:
             with bot.db_connect() as conn:
@@ -189,7 +274,7 @@ def resolve_subdub_voice_authority(
                     (profile_id,),
                 ).fetchone()
 
-                if not row or row["deleted_at"] is not None:
+                if not row or row["deleted_at"] is not None or str(row["status"]).lower() == "deleted":
                     return False, "PROFILE_NOT_FOUND", 422, {"detail": f"Voice profile #{profile_id} not found"}
 
                 record = dict(row)
