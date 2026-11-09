@@ -200,6 +200,7 @@ jobs:
           ffmpeg -version
           ffprobe -version
           python -m pytest -q --noconftest -p tests.pv_provider_free_guard \
+            tests/test_p0_product_video_shopaikey_veo_i2v_reference_wire_r13_1.py \
             tests/test_p0_video_uifreeze1_menu_pricing_public_freeze.py \
             tests/test_p0_product_video_pv04_capability_quality_catalog_truth.py \
             tests/test_p0_product_video_pv08_product_adapters_product_specific_quality.py \

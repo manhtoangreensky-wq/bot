@@ -319,6 +319,12 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | `UI-FREEHUB-MEMORY-ORIGIN-01` | Trên bot test/menu-only: `/start` → Free Tools → Notes/Docs → Create Note → Back → Memory root → Back; lặp khi vào Memory từ Main. Re-enter Free Tools rồi chạy `/menu`, `/start`, hoặc `/memory` trước khi mở Memory lại. Không lưu/xóa note hay mở công cụ tài liệu. | Free Tools-origin Back về Free Tools; Main-origin hoặc fresh-command Back về Main. `/menu` phải xóa origin vì alias `cmd_start`. Không thay đổi dữ liệu. Fixture RED/GREEN S12.35.103; tester chỉ xác nhận Telegram-client rendering sau delivery. |
 | `STORAGE-ADDON-EXPIRED-CUSTOM-01` | Fixture: phát `storage|custom`, để pending hết TTL rồi gửi text thường; lặp với `/start`, nhập hợp lệ khi TTL còn hạn, và pending của user khác. Không xác nhận mua hàng. | Text thường sau expiry nhận thông báo đã hết hạn/chưa trừ Xu và menu Storage Add-on; handler tiêu thụ text để không rơi sang flow khác; chỉ xóa state của đúng user. Slash command tiếp tục tới command handler; input còn hạn vẫn đi tới xác nhận hiện hữu. Không gọi PayOS/provider, tạo đơn/job, trừ Xu, ghi DB production hoặc gửi Telegram thật. Regression S12.35.147: 6 tests GREEN. |
 
+## Product Video reference lifecycle S04 - 03/11/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc / giới hạn |
+|---|---|---|
+| `PV-REFERENCE-S04-01` | Chạy full wire + reference transport/security + native Self-shot I2V với guard. | 46/46; task đang chạy được2 GET, terminal đúng1 GET; không POST, reference giữ/xóa đúng trạng thái. Gửi mới thiếu quyền bị chặn trước HTTP; TTL giữ trước hạn/xóa sau hạn. Không coi đây là provider/Telegram live proof. |
+
 ## Product Video catalog/Tail contract - 02/11/2026
 
 | ID | Bước kiểm thử | PASS bắt buộc / bằng chứng |

@@ -1,7 +1,7 @@
 task: product-video-remaining-contracts-20261103
 phase: VERIFY
 base_sha: 054b08bee78bca45506645a39342b87495011d88
-branch: test/product-video-remaining-contracts-20261102
+branch: test/product-video-reference-lifecycle-fixtures-20261103
 authority: Owner approved execution on 2026-11-03; keep changes narrow
 scope: Product Video provider-free test contracts and acceptance evidence
 allowed_files:
@@ -12,6 +12,7 @@ allowed_files:
   - tests/test_p0_product_video_pv08_product_adapters_product_specific_quality.py
   - tests/test_p0_video_real_engine_output_matrix.py
   - tests/test_p0_video_tailflow15_order_tier200_status_idea_parity.py
+  - tests/test_p0_product_video_shopaikey_veo_i2v_reference_wire_r13_1.py
   - .github/workflows/ci-main.yml
   - TAI-LIEU/01-NGHIEP-VU-VAN-HANH.md
   - TAI-LIEU/02-CHUC-NANG-GOC-VA-HIEN-TAI.md
@@ -30,9 +31,9 @@ stop_condition: A real runtime defect needs its own evidenced narrow spec
 checklist:
   S00: COMPLETE
   S01: MERGED_PR1462_33dca4be_CI_SUCCESS_41490636426
-  S02: LOCAL_82_PASS_CI_PENDING
-  S03: LOCAL_37_PASS_CI_PENDING
-  S04: INTEGRATED_336_PASS_WIDER_MANIFEST_BLOCKED_MISSING_LOCAL_CV2
+  S02: MERGED_PR1463_44b5fc87_CI_SUCCESS_41499443789
+  S03: MERGED_PR1464_5354b544_CI_SUCCESS_41502517658
+  S04: REFERENCE_46_PASS_CI_PENDING_WIDER_MANIFEST_INCOMPLETE_PV10_RECORDED
   S05: PENDING
   S06: NOT_READY
   S07: NOT_READY
