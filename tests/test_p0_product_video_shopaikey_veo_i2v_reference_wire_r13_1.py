@@ -14,7 +14,8 @@ Invariants & Guardrails:
    - Poll-only recovery: reference preserved, zero duplicate submits.
    - Terminal success: reference cleaned up.
    - Terminal failure: reference cleaned up.
-   - Ambiguous submit: reference retained (no premature cleanup).
+   - Unauthorized new submit: no HTTP and no premature reference cleanup.
+   - Unresolved reference: retained until bounded TTL, then removed.
 7. Zero live provider calls during all tests.
 """
 
@@ -237,6 +238,20 @@ def test_selfshot3_reference_wire_contract(dummy_keyframe, mock_storage_env):
 # 4. EXECUTION SEAM: ACTIVE TASK REFERENCE PRESERVATION & POLL-ONLY RECOVERY
 # ==============================================================================
 
+def _existing_task_reference(request, task_id, env):
+    # Fixture an accepted task without authorizing a new paid submit.
+    wire = _shopaikey_wire_payload(build_shopaikey_video_payload(request, env=env), env=env)
+    assert wire["metadata"]["images"]
+    request.metadata.update({
+        "provider_pending_provider": "shopaikey_video",
+        "provider_pending_task_id": task_id,
+        "provider_task_id": task_id,
+        "provider_pending_request_job_id": str(request.job_id),
+        "submit_source": "worker_poll_existing_task",
+        "provider_submit_source": "worker_poll_existing_task",
+    })
+
+
 def test_active_task_reference_preservation_and_poll_only_recovery(dummy_keyframe, mock_storage_env, tmp_path):
     """Active provider task preserves reference file; poll-only recovery does not submit duplicate."""
     storage_root = Path(mock_storage_env["PROVIDER_REFERENCE_STORAGE_DIR"])
@@ -253,19 +268,16 @@ def test_active_task_reference_preservation_and_poll_only_recovery(dummy_keyfram
         },
     )
 
-    fake_submit_body = {"code": 0, "data": {"task_id": "task_active_sak_123", "status": "SUBMITTED"}}
+    _existing_task_reference(req, "task_active_sak_123", mock_storage_env)
     fake_pending_poll_body = {"code": 0, "data": {"status": "PROCESSING", "progress": "50%"}}
 
     with patch("urllib.request.urlopen") as spy_http:
         mock_resp = MagicMock()
-        mock_resp.read.side_effect = [
-            json.dumps(fake_submit_body).encode("utf-8"),
-            json.dumps(fake_pending_poll_body).encode("utf-8"),
-        ]
+        mock_resp.read.return_value = json.dumps(fake_pending_poll_body).encode("utf-8")
         mock_resp.status = 200
         spy_http.return_value.__enter__.return_value = mock_resp
 
-        # Step 1: Initial submission and first poll
+        # Recover an already accepted task; never perform a new paid submit.
         res = video_provider_router.render_video_payload(
             req,
             env=mock_storage_env,
@@ -287,7 +299,9 @@ def test_active_task_reference_preservation_and_poll_only_recovery(dummy_keyfram
             product_type="self_shot_scene_change",
             required_capability="image_to_video",
             prompt="smooth camera movement",
+            image_paths=list(req.image_paths),
             metadata={
+                **req.metadata,
                 "required_capability": "image_to_video",
                 "selected_model": "veo3.1-fast",
                 "provider_task_id": "task_active_sak_123",
@@ -310,8 +324,11 @@ def test_active_task_reference_preservation_and_poll_only_recovery(dummy_keyfram
         )
 
         # Confirm reference file is STILL available
+        assert res_recovery.get("provider_poll_called") is True
         active_files_after = [f for f in storage_root.glob("*.jpg")]
         assert len(active_files_after) == 1, "Reference must still exist after poll-only recovery"
+        assert spy_http.call_count == 2
+        assert all(call.args[0].get_method() == "GET" for call in spy_http.call_args_list)
 
 
 # ==============================================================================
@@ -334,7 +351,8 @@ def test_terminal_success_cleans_up_reference(dummy_keyframe, mock_storage_env, 
         },
     )
 
-    fake_submit_body = {"code": 0, "data": {"task_id": "task_success_123", "status": "SUBMITTED"}}
+    _existing_task_reference(req, "task_success_123", mock_storage_env)
+    assert len(list(storage_root.glob("*.jpg"))) == 1
     fake_success_poll_body = {"code": 0, "data": {"status": "SUCCESS", "result_url": "https://cdn.example.com/output.mp4"}}
 
     dummy_mp4 = tmp_path / "result.mp4"
@@ -342,10 +360,7 @@ def test_terminal_success_cleans_up_reference(dummy_keyframe, mock_storage_env, 
 
     with patch("urllib.request.urlopen") as spy_http:
         mock_resp = MagicMock()
-        mock_resp.read.side_effect = [
-            json.dumps(fake_submit_body).encode("utf-8"),
-            json.dumps(fake_success_poll_body).encode("utf-8"),
-        ]
+        mock_resp.read.return_value = json.dumps(fake_success_poll_body).encode("utf-8")
         mock_resp.status = 200
         spy_http.return_value.__enter__.return_value = mock_resp
 
@@ -374,6 +389,8 @@ def test_terminal_success_cleans_up_reference(dummy_keyframe, mock_storage_env, 
             assert len(active_images) == 0, "Reference image must be cleaned up on terminal success"
             active_meta = [f for f in storage_root.glob("*.meta.json")]
             assert len(active_meta) == 0
+            assert spy_http.call_count == 1
+            assert all(call.args[0].get_method() == "GET" for call in spy_http.call_args_list)
 
 
 def test_terminal_failure_cleans_up_reference(dummy_keyframe, mock_storage_env):
@@ -392,15 +409,13 @@ def test_terminal_failure_cleans_up_reference(dummy_keyframe, mock_storage_env):
         },
     )
 
-    fake_submit_body = {"code": 0, "data": {"task_id": "task_fail_123", "status": "SUBMITTED"}}
+    _existing_task_reference(req, "task_fail_123", mock_storage_env)
+    assert len(list(storage_root.glob("*.jpg"))) == 1
     fake_fail_poll_body = {"code": 0, "data": {"status": "FAILURE", "fail_reason": "render_error"}}
 
     with patch("urllib.request.urlopen") as spy_http:
         mock_resp = MagicMock()
-        mock_resp.read.side_effect = [
-            json.dumps(fake_submit_body).encode("utf-8"),
-            json.dumps(fake_fail_poll_body).encode("utf-8"),
-        ]
+        mock_resp.read.return_value = json.dumps(fake_fail_poll_body).encode("utf-8")
         mock_resp.status = 200
         spy_http.return_value.__enter__.return_value = mock_resp
 
@@ -415,14 +430,16 @@ def test_terminal_failure_cleans_up_reference(dummy_keyframe, mock_storage_env):
         # Reference file MUST be cleaned up on terminal failure
         active_images = [f for f in storage_root.glob("*.jpg")]
         assert len(active_images) == 0, "Reference image must be cleaned up on terminal failure"
+        assert spy_http.call_count == 1
+        assert all(call.args[0].get_method() == "GET" for call in spy_http.call_args_list)
 
 
 # ==============================================================================
 # 6. AMBIGUOUS SUBMIT: PRESERVES REFERENCE (NO PREMATURE CLEANUP)
 # ==============================================================================
 
-def test_ambiguous_submit_preserves_reference_until_ttl(dummy_keyframe, mock_storage_env):
-    """Ambiguous submit (timeout) does NOT clean up reference immediately; retains for polling."""
+def test_unauthorized_submit_cannot_reach_http_or_delete_existing_reference(dummy_keyframe, mock_storage_env):
+    """A fake HTTP timeout cannot authorize a new submit through the real spend gate."""
     storage_root = Path(mock_storage_env["PROVIDER_REFERENCE_STORAGE_DIR"])
     req = VideoGenerationRequest(
         job_id="job_ambiguous_submit_01",
@@ -437,18 +454,35 @@ def test_ambiguous_submit_preserves_reference_until_ttl(dummy_keyframe, mock_sto
         },
     )
 
-    # HTTP submit raises TimeoutError
-    with patch("urllib.request.urlopen", side_effect=TimeoutError("Connection timed out after write")):
+    _shopaikey_wire_payload(build_shopaikey_video_payload(req, env=mock_storage_env), env=mock_storage_env)
+    assert len(list(storage_root.glob("*.jpg"))) == 1
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("Connection timed out after write")) as http:
         res = video_provider_router.render_video_payload(
             req,
             env=mock_storage_env,
         )
 
         assert res.get("ok") is False
-        assert res.get("blocker") == "provider_submit_outcome_ambiguous_no_charge"
-        assert res.get("auto_resubmit_allowed") is False
-        assert res.get("fallback_allowed") is False
+        assert res.get("external_provider_spend_prevented") is True
+        assert res.get("provider_submit_called") is False
+        assert res.get("charged_xu") == 0
+        http.assert_not_called()
 
         # Reference MUST still exist (retained until polling resolution or TTL)
         active_images = [f for f in storage_root.glob("*.jpg")]
-        assert len(active_images) == 1, "Ambiguous submit must NOT clean up reference prematurely"
+        assert len(active_images) == 1, "Blocked submit must not discard a pre-existing reference"
+
+
+def test_unresolved_reference_is_retained_only_until_its_ttl(dummy_keyframe, mock_storage_env):
+    reference = transport.prepare_provider_image_reference(
+        dummy_keyframe, job_id="unresolved-reference", ttl_seconds=60, env=mock_storage_env,
+    )
+    assert Path(reference["file_path"]).is_file()
+    assert transport.cleanup_expired_provider_references(
+        env=mock_storage_env, now=reference["expires_at"] - 1,
+    ) == 0
+    assert Path(reference["file_path"]).is_file()
+    assert transport.cleanup_expired_provider_references(
+        env=mock_storage_env, now=reference["expires_at"] + 1,
+    ) == 1
+    assert not Path(reference["file_path"]).exists()
