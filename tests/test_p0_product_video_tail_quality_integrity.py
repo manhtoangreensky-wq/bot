@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from services import video_ai_real_pricing
+from services import video_storyboard2
 from services import video_tail9
 from services import video_uiflow3
 from services import video_uiflow3_routeengine
@@ -56,6 +57,7 @@ NAMESPACE = {
     "safe_int": _safe_int,
     "video_ai_real_apply_quality_product": _apply_ai_quality,
     "video_ai_real_pricing": video_ai_real_pricing,
+    "video_storyboard2": video_storyboard2,
     "video_tail9": video_tail9,
     "video_uiflow3": video_uiflow3,
     "VIDEO_TAIL9_STATE_KEY": "video_tail9",
@@ -156,7 +158,11 @@ def _tail(state: dict, tier_id: int) -> dict:
         ("video_ai_real", 2, 400, 8),
         ("video_trend", 2, 300, 5),
         ("script_image_video", 5, 400, 8),
-        ("storyboard_prompt", 2, 500, 5),
+        ("storyboard_prompt", 2, 400, 8),
+        ("storyboard_prompt", 2, 800, 8),
+        ("video_ai_real", 2, 800, 10),
+        ("video_trend", 2, 800, 10),
+        ("script_image_video", 5, 800, 10),
     ),
 )
 def test_selected_quality_builds_one_hashed_execution_snapshot(
@@ -190,6 +196,25 @@ def test_selected_quality_builds_one_hashed_execution_snapshot(
     assert handoff["scene_duration_seconds"] == [seconds] * scene_count
     if product != "video_ai_real":
         assert prepared["format"]["seconds_per_scene"] == planning_seconds == 8
+
+
+@pytest.mark.parametrize(
+    "tier_id",
+    (200, 300, 500, 600, 700, 1000, 1200, 1500),
+)
+def test_storyboard_unsupported_quality_tiers_rejected_without_mutating_inputs(
+    tier_id: int,
+) -> None:
+    planning_state = _ready_state("storyboard_prompt", 2)
+    selected_tail = _tail(planning_state, tier_id)
+    saved_planning_state = deepcopy(planning_state)
+    saved_selected_tail = deepcopy(selected_tail)
+
+    with pytest.raises(ValueError, match="quality_tier_not_supported"):
+        apply_quality_contract(planning_state, selected_tail)
+
+    assert planning_state == saved_planning_state
+    assert selected_tail == saved_selected_tail
 
 
 def test_tier_400_repairs_the_exact_live_drift_without_weakening_the_gate() -> None:

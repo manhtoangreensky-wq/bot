@@ -77897,7 +77897,11 @@ def video_uiflow3_apply_tail_quality_contract(
         snapshot = video_uiflow3.approved_snapshot(state)
     else:
         quality = video_ai_real_pricing.public_quality_by_tier(tier_id)
-        seconds = max(1, safe_int(quality.get("seconds"), 1))
+        seconds = (
+            video_storyboard2.SCENE_SECONDS
+            if product_id == "storyboard_prompt"
+            else max(1, safe_int(quality.get("seconds"), 1))
+        )
         if product_id == "video_ai_real":
             state = video_ai_real_apply_quality_product(state, tier_id)
             snapshot = video_uiflow3.approved_snapshot(state)
