@@ -340,3 +340,9 @@ hoặc hết timeout mà không fail-closed/cleanup.
 | `PV-ENGINE-S02-01` | Offline: chạy engine matrix cùng native Self-shot I2V và Storyboard dual-tier với guard. | 82/82; kiểm tra route/capability/executor riêng, Storyboard2x8s, model sai bị chặn; resolver delta theo từng product và payload thật từ encoder. Không gọi provider hay tính là MP4 live. |
 | `PV-TAIL-S03-01` | Offline: Tail15 hiện hành + Tail18 + manual-entry với guard. | 37/37; Add-on/Review đúng thứ tự, Back đúng owner/version, tier/giá hiện hữu, prompt giữ nguyên, unknown9999 bị chặn; status cần artifact + delivery mới hoàn tất. Không tác động bot/worker thật. |
 | `PV-IDENTITY-B14-01` | Offline: gọi invoice/project B14 bằng Trend/AI Prompt rõ ràng kèm generic plan và flow-kind cũ; đối chiếu Storyboard rõ ràng và legacy không product. | Giữ product và generic tier8002143 Xu; Storyboard thật/cũ1714 Xu, tổng3086/2 cảnh. Không tạo job/outbox. RED4/3 -> regression393 đạt; chỉ2 predicate được Owner duyệt, chưa deploy/live. |
+
+## Product Video Storyboard Tail duration - 10/11/2026
+
+| ID | Bước kiểm thử | PASS bắt buộc / giới hạn |
+|---|---|---|
+| `PV-STORYBOARD-TAIL-DURATION-01` | Offline: chạy quality integrity cùng current menu/pricing và Tail18 với guard; chọn Storyboard400/800, đối chiếu AI Real/Trend/Script800 và thử đủ8 tier Storyboard không hỗ trợ. | Storyboard400/800 giữ8s/cảnh trong snapshot/hash/handoff; generic800 giữ10s;8 tier sai bị chặn trước mutation. RED33 đạt/1 lỗi -> GREEN34/34; outbound0, không import Bot, không provider/job/DB production/ví. Full compile/CI là gate riêng; chưa deploy/live, không tính là MP4 hoặc Telegram delivery. Xem PRODUCT_VIDEO_STORYBOARD_TAIL_DURATION_20261110.md. |
