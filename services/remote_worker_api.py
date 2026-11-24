@@ -6288,6 +6288,18 @@ def fail_remote_worker_job(
                 conn, int(job_id)
             )
         return deferred
+    # Terminal fail clears the lock (locked_by/locked_at) in fail_video_job,
+    # which would erase who owned the job. Preserve the worker id in the
+    # durable result payload so admin status can still report it.
+    latest = video_project_queue.get_video_render_job(conn, int(job_id))
+    latest_payload = _json_loads((latest or {}).get("result_json"), {})
+    if isinstance(latest_payload, dict):
+        latest_payload["last_worker_id"] = worker
+        conn.execute(
+            "UPDATE video_jobs SET result_json=? WHERE id=?",
+            (_json_dumps(latest_payload), int(job_id)),
+        )
+        conn.commit()
     return video_project_queue.fail_video_job(
         conn,
         job_id=int(job_id),
@@ -6379,7 +6391,11 @@ def get_remote_worker_canary_status(
             uploaded_bytes = 0
     result_uploaded = bool(uploaded_bytes > 0 or final_path or project.get("final_video_file_id"))
     status = str(job.get("status") or "")
-    worker_id = sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else ""
+    worker_id = (
+        sanitize_worker_id(str(job.get("locked_by") or result.get("last_worker_id") or ""))
+        if (job.get("locked_by") or result.get("last_worker_id"))
+        else ""
+    )
     claimed_at = str(job.get("locked_at") or job.get("started_at") or "")
     worker_had_claim = bool(worker_id or claimed_at or _safe_int(job.get("attempts"), 0) > 0)
     failure_diag = classify_remote_worker_error(job.get("last_error") or project.get("error_log") or "", status=status, worker_id=worker_id)
@@ -6466,7 +6482,11 @@ def get_remote_worker_admin_canary_status(
             uploaded_bytes = 0
     result_uploaded = bool(uploaded_bytes > 0 or final_path or project.get("final_video_file_id"))
     progress_message = scrub_secret_text(job.get("progress_message") or "")
-    worker_id = sanitize_worker_id(str(job.get("locked_by") or "")) if job.get("locked_by") else ""
+    worker_id = (
+        sanitize_worker_id(str(job.get("locked_by") or result.get("last_worker_id") or ""))
+        if (job.get("locked_by") or result.get("last_worker_id"))
+        else ""
+    )
     raw_status = str(job.get("status") or "").strip().lower()
     claimed_at = str(job.get("locked_at") or job.get("started_at") or "")
     worker_had_claim = bool(worker_id or claimed_at or _safe_int(job.get("attempts"), 0) > 0)
@@ -6739,6 +6759,17 @@ def create_product_video_worker_claim_test_job(
     )
     job = video_project_queue.enqueue_video_render_job(conn, project_id=int(project["project_id"]), user_id=admin_id, max_attempts=1)
     video_project_queue.update_video_project(conn, int(project["project_id"]), job_id=int(job.get("id") or 0))
+    # A claim-test job must be claimable like a real confirmed job: the
+    # worker claim requires a dispatch outbox row (the real confirm flow
+    # creates one in _confirm_product_video_invoice_atomic). Without it the
+    # claim loop skips the job and explain_product_video_claimability
+    # reports dispatch_outbox_missing, so the diagnostic could never say YES.
+    video_project_queue.ensure_product_video_dispatch_outbox(
+        conn,
+        job_id=int(job.get("id") or 0),
+        project_id=int(project["project_id"]),
+        scene_indexes=list(range(1, count + 1)),
+    )
     return {"ok": True, "project": video_project_queue.get_video_project(conn, int(project["project_id"])), "job": job}
 
 

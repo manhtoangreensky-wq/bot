@@ -165,14 +165,16 @@ def verify_internal_admin_wallet_auth(
     Returns:
         (is_valid, error_code, http_status)
     """
+    # Wallet admin auth accepts ONLY the dedicated wallet/bridge token/secret.
+    # WEBAPP_LINK_CALLBACK_TOKEN / WEBAPP_LINK_CALLBACK_HMAC_SECRET must never
+    # authorize wallet credit: the link callback credentials belong to the web
+    # link flow and must stay separate from wallet auth.
     bridge_token = (
         token_override
         if token_override is not None
         else (
             os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
-            or os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", "").strip()
             or os.environ.get("INTERNAL_API_SECRET", "").strip()
-            or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
         )
     )
     hmac_secret = (
@@ -180,9 +182,7 @@ def verify_internal_admin_wallet_auth(
         if secret_override is not None
         else (
             os.environ.get("CORE_BRIDGE_HMAC_SECRET", "").strip()
-            or os.environ.get("WEBAPP_LINK_CALLBACK_HMAC_SECRET", "").strip()
             or os.environ.get("INTERNAL_API_SECRET", "").strip()
-            or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
         )
     )
 

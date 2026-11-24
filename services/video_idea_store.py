@@ -65,18 +65,30 @@ def _json_value(value: Any, fallback: Any) -> Any:
         return fallback
 
 
+def _safe_sql_identifier(identifier: str) -> str:
+    # Local copy of the bot.py validator: services must not import the bot
+    # monolith (circular import). Rejects anything but [A-Za-z_][A-Za-z0-9_]*.
+    name = str(identifier or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+
 def _table_columns(conn, table_name: str) -> set[str]:
+    safe_table = _safe_sql_identifier(table_name)
     return {
         str(row[1])
-        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        for row in conn.execute(f"PRAGMA table_info({safe_table})").fetchall()
     }
 
 
 def _ensure_columns(conn, table_name: str, columns: Mapping[str, str]) -> None:
-    existing = _table_columns(conn, table_name)
+    safe_table = _safe_sql_identifier(table_name)
+    existing = _table_columns(conn, safe_table)
     for name, definition in columns.items():
-        if name not in existing:
-            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}")
+        safe_name = _safe_sql_identifier(name)
+        if safe_name not in existing:
+            conn.execute(f"ALTER TABLE {safe_table} ADD COLUMN {safe_name} {definition}")
 
 
 def ensure_schema(conn) -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
@@ -218,10 +219,21 @@ def telegram_delivery_identity(value: Any) -> tuple[str, str]:
     )
 
 
+def _safe_sql_identifier(identifier: str) -> str:
+    # Local copy of the bot.py validator: services must not import the bot
+    # monolith (circular import). Rejects anything but [A-Za-z_][A-Za-z0-9_]*.
+    name = str(identifier or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+
 def _ensure_column(conn, table: str, column: str, definition: str) -> None:
-    columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if column not in columns:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    safe_table = _safe_sql_identifier(table)
+    safe_column = _safe_sql_identifier(column)
+    columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({safe_table})").fetchall()}
+    if safe_column not in columns:
+        conn.execute(f"ALTER TABLE {safe_table} ADD COLUMN {safe_column} {definition}")
 
 
 def ensure_schema(conn) -> None:

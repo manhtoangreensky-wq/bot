@@ -435,7 +435,15 @@ def _parse_time_epoch(value: Any) -> float:
         return float(value) if float(value) > 0 else 0.0
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            return float(value.replace(tzinfo=VIETNAM_TZ).timestamp())
+            # Naive timestamps in this codebase are produced by now_text(),
+            # which formats the host-local datetime.now(). Parsing them as
+            # Vietnam time inflated every elapsed/lease computation by the
+            # host's UTC offset (e.g. +7h on a UTC host), so a job created
+            # seconds ago looked 25200s old and the zero-task watchdog
+            # instantly terminal-failed it as "no_eligible_provider".
+            # Local parsing matches the producer on every host (and is
+            # identical to the old behaviour on a +07 host).
+            return float(value.astimezone().timestamp())
         return float(value.timestamp())
     try:
         numeric = float(value)
@@ -454,7 +462,9 @@ def _parse_time_epoch(value: Any) -> float:
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
         try:
             parsed = datetime.strptime(text.replace("Z", "").split("+", 1)[0], fmt)
-            return parsed.replace(tzinfo=VIETNAM_TZ).timestamp()
+            # See the datetime branch above: naive strings are host-local
+            # (now_text), not Vietnam time.
+            return parsed.astimezone().timestamp()
         except Exception:
             continue
     return 0.0
@@ -881,7 +891,19 @@ def _render_subprogress(
     if alive:
         progress = min(90, progress)
     if source != "indeterminate":
-        progress = max(previous_render_progress, progress)
+        # Monotonicity must not launder an untrusted number: a percent
+        # persisted from fake provider data (e.g. 90 from raw 200) would
+        # otherwise survive every refresh and inflate the overall percent
+        # even though the current provider progress is untrusted. Only
+        # carry a previous value that was trusted (or backed by a result
+        # URL / final output); otherwise restart from the elapsed-based
+        # progress computed above.
+        trusted_previous = (
+            previous_render_progress
+            if (provider_progress_trusted or result_url_present or final_output_ready)
+            else 0
+        )
+        progress = max(trusted_previous, progress)
     if alive:
         progress = min(90, progress)
     return max(0, min(100, progress)), source, estimated, capped
@@ -2840,7 +2862,16 @@ def retry_product_video_dispatch_outbox(
         _as_int(previous_result.get("dispatch_claim_failure_count"), 0),
         max(0, attempt_count - 1) if lease_claim_recorded else 0,
     )
-    claim_failure_count = recorded_failure_count + (1 if lease_claim_recorded else 0)
+    # A lane/filter mismatch ("dispatch_outbox_job_not_claimable": the worker
+    # leased the outbox but the job does not belong to its lane, e.g. a
+    # public worker polling an owner-only job while public is off) is NOT a
+    # failed dispatch attempt — no dispatch was started and another worker
+    # may still claim the job. Counting it as a failure terminal-failed a
+    # valid job on the first mismatched poll (max_attempts=1 diagnostic
+    # jobs died immediately). Release the lease without consuming a retry.
+    not_claimable_release = normalized_error == "dispatch_outbox_job_not_claimable"
+    count_this_failure = bool(lease_claim_recorded and not not_claimable_release)
+    claim_failure_count = recorded_failure_count + (1 if count_this_failure else 0)
     claim_attempt_count = max(
         _as_int(previous_result.get("dispatch_claim_attempt_count"), 0),
         attempt_count if lease_claim_recorded else 0,
@@ -2858,10 +2889,11 @@ def retry_product_video_dispatch_outbox(
             "dispatch_claim_attempt_count": claim_attempt_count,
             "dispatch_claim_failure_count": claim_failure_count,
             "dispatch_first_due_claim_attempted": bool(claim_attempt_count > 0),
-            "dispatch_last_claim_failure_reason": normalized_error if lease_claim_recorded else "",
-            "dispatch_last_claim_failure_at": current if lease_claim_recorded else "",
+            "dispatch_last_claim_failure_reason": normalized_error if count_this_failure else "",
+            "dispatch_last_claim_failure_at": current if count_this_failure else "",
             "dispatch_retry_exhausted": bool(
-                lease_claim_recorded and claim_failure_count >= max_attempts
+                previous_result.get("dispatch_retry_exhausted")
+                or (count_this_failure and claim_failure_count >= max_attempts)
             ),
             "dispatch_outbox_retry_reason": normalized_error,
             "dispatch_outbox_retry_count": claim_failure_count,
@@ -2869,7 +2901,7 @@ def retry_product_video_dispatch_outbox(
     )
     if (
         previous
-        and lease_claim_recorded
+        and count_this_failure
         and claim_failure_count >= max_attempts
         and not has_provider_task
     ):
@@ -2923,9 +2955,15 @@ def retry_product_video_dispatch_outbox(
         return True
     repeated_without_new_failure = bool(previous_error and previous_error == normalized_error)
     available = (
-        previous_available
-        if repeated_without_new_failure and previous_available
-        else product_video_outbox_time_text(current_dt + timedelta(seconds=max(1, int(retry_seconds or 15))))
+        # A lane-mismatch release never started dispatch, so the outbox is
+        # immediately claimable again by the right worker — no backoff.
+        current
+        if not_claimable_release
+        else (
+            previous_available
+            if repeated_without_new_failure and previous_available
+            else product_video_outbox_time_text(current_dt + timedelta(seconds=max(1, int(retry_seconds or 15))))
+        )
     )
     cursor = conn.execute(
         """UPDATE video_dispatch_outbox
