@@ -198,13 +198,25 @@ def _connect(db: str | Path | sqlite3.Connection) -> tuple[sqlite3.Connection, b
     return conn, True
 
 
+def _safe_sql_identifier(identifier: str) -> str:
+    # Local copy of the bot.py validator: admin_broadcast must not import the
+    # bot monolith (circular import). Rejects anything but [A-Za-z_][A-Za-z0-9_]*.
+    name = str(identifier or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+    safe_table = _safe_sql_identifier(table)
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({safe_table})")}
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, name: str, definition: str) -> None:
-    if name not in _table_columns(conn, table):
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    safe_table = _safe_sql_identifier(table)
+    safe_name = _safe_sql_identifier(name)
+    if safe_name not in _table_columns(conn, safe_table):
+        conn.execute(f"ALTER TABLE {safe_table} ADD COLUMN {safe_name} {definition}")
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

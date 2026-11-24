@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import ipaddress
 import math
 import os
 import socket
@@ -1342,13 +1343,50 @@ def telegram_download_file(
         raise RuntimeError("telegram_download_empty")
 
 
-def download_url_file(url: str, destination: str, max_bytes: int = 50 * 1024 * 1024) -> None:
+def _validate_public_http_url(url: str) -> str:
+    """Fail closed unless every resolved address of an http(s) URL is global.
+
+    Blocks SSRF to private / loopback / link-local / reserved addresses
+    (e.g. 127.0.0.1, 10/8, 192.168/16, 169.254.169.254) from provider URLs.
+    """
     clean_url = str(url or "").strip()
     if not clean_url.startswith(("http://", "https://")):
         raise RuntimeError("preview_source_url_invalid")
+    parsed = urllib.parse.urlparse(clean_url)
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        raise RuntimeError("preview_source_url_invalid")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        raise RuntimeError("preview_source_unresolvable")
+    addresses = [str(info[4][0]) for info in infos if len(info) > 4 and info[4]]
+    if not addresses:
+        raise RuntimeError("preview_source_unresolvable")
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            raise RuntimeError("preview_source_unresolvable")
+        if not ip.is_global:
+            raise RuntimeError("preview_source_private_url")
+    return clean_url
+
+
+class _PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects that land on a non-public address (SSRF via redirect)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def download_url_file(url: str, destination: str, max_bytes: int = 50 * 1024 * 1024) -> None:
+    clean_url = _validate_public_http_url(url)
     downloaded = 0
     request = urllib.request.Request(clean_url, headers={"User-Agent": "TOAN-AAS-Local-Worker/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response, open(destination, "wb") as handle:
+    opener = urllib.request.build_opener(_PublicOnlyRedirectHandler())
+    with opener.open(request, timeout=60) as response, open(destination, "wb") as handle:
         while True:
             chunk = response.read(1024 * 256)
             if not chunk:

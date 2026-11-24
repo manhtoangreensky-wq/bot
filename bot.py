@@ -38,6 +38,11 @@ from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_req
 ╔══════════════════════════════════════════════════════════════════╗
 ║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
 ║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
+from services.autopost_engine import (
+    autopost_hub_keyboard,
+    autopost_hub_text,
+    handle_autopost_callback,
+)
 ║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Dynamic QR     ║
 ║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
 ╚══════════════════════════════════════════════════════════════════╝
@@ -52,6 +57,7 @@ import sqlite3
 import httpx
 import math
 import hmac
+import ipaddress
 import hashlib
 import html
 import uvicorn
@@ -68,6 +74,7 @@ import threading
 import mimetypes
 import platform
 import shutil
+import socket
 import traceback
 import zipfile
 from copy import deepcopy
@@ -805,16 +812,39 @@ def build_telegram_application():
     """
     concurrent_workers = int(_env("TELEGRAM_CONCURRENT_UPDATES", "8") or "8")
     builder = Application.builder().token(TELEGRAM_TOKEN).concurrent_updates(concurrent_workers)
+    # NOTE (INFRA.LOCALBOTAPI/T8): httpx parses proxy env vars when building its
+    # client, and a legitimate no_proxy entry such as "[::1]" makes it raise
+    # `httpx.InvalidURL: Invalid port: ':1]'` (it derives a bypass key
+    # "all://*[::1]"). The Telegram client must not depend on the process's
+    # generic proxy env, so every HTTPXRequest built here opts out of env
+    # proxies with trust_env=False; Telegram traffic goes direct to
+    # api.telegram.org or the configured local Bot API base.
+    from telegram.request import HTTPXRequest
+
     if not telegram_local_api_enabled():
-        return builder.build()
+        # PTB builds a default get-updates request of its own at build() time,
+        # so both requests need the opt-out, not just the main one.
+        return (
+            builder.request(HTTPXRequest(httpx_kwargs={"trust_env": False}))
+            .get_updates_request(
+                HTTPXRequest(
+                    connection_pool_size=1, httpx_kwargs={"trust_env": False}
+                )
+            )
+            .build()
+        )
     base_url, base_file_url = telegram_api_urls()
     builder = builder.base_url(base_url).base_file_url(base_file_url)
     headers = telegram_api_proxy_headers()
     if headers:
-        from telegram.request import HTTPXRequest
-        builder = builder.request(HTTPXRequest(httpx_kwargs={"headers": dict(headers)}))
+        builder = builder.request(
+            HTTPXRequest(httpx_kwargs={"headers": dict(headers), "trust_env": False})
+        )
         builder = builder.get_updates_request(
-            HTTPXRequest(connection_pool_size=1, httpx_kwargs={"headers": dict(headers)})
+            HTTPXRequest(
+                connection_pool_size=1,
+                httpx_kwargs={"headers": dict(headers), "trust_env": False},
+            )
         )
     return builder.build()
 
@@ -8849,7 +8879,12 @@ def write_music_canonical_artifact(job: dict | None, audio_bytes: bytes | bytear
         return ""
     try:
         path = music_canonical_artifact_path(job)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        artifact_dir = os.path.dirname(path)
+        os.makedirs(artifact_dir, exist_ok=True)
+        try:
+            os.chmod(artifact_dir, 0o700)
+        except OSError:
+            pass
         with open(path, "wb") as handle:
             handle.write(payload)
         return path if os.path.exists(path) and os.path.getsize(path) > 0 else ""
@@ -14892,6 +14927,7 @@ def get_trial_grant_status(user_id) -> dict:
         conn.close()
 
 def add_credit(user_id, amount, event_type="manual_add", ref_id="", note=""):
+    amount = int(amount or 0)
     get_user(user_id)
     conn = db_connect()
     c = conn.cursor()
@@ -14936,17 +14972,42 @@ def refund_charged_credit(user_id, amount, event_type="refund", ref_id="", note=
     amount = int(amount)
     conn = db_connect()
     c = conn.cursor()
-    c.execute(
-        """UPDATE users
-        SET credits = credits + ?,
-            total_spent = CASE WHEN total_spent >= ? THEN total_spent - ? ELSE 0 END
-        WHERE user_id=?""",
-        (amount, amount, amount, str(user_id))
-    )
-    record_credit_event(conn, user_id, amount, event_type, ref_id, note)
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        # H2 dedupe: a retry (webhook resend, worker retry, double admin
+        # approve, two concurrent processes) with the same ref_id must not
+        # credit twice. Only non-empty ref_id values are deduped: most
+        # callers pass ref_id="" and must keep working as before.
+        # Scope: same user + same ref_id + positive delta + refund-type
+        # event, so debits (delta<0, e.g. idempotent spend reusing a ref)
+        # and deposits (manual_deposit/admin_add) sharing a ref string
+        # are never treated as a prior refund.
+        if str(ref_id or "").strip():
+            duplicate = c.execute(
+                """SELECT 1 FROM credit_events
+                   WHERE user_id=? AND ref_id=? AND delta>0
+                     AND lower(event_type) LIKE '%refund%'
+                   LIMIT 1""",
+                (str(user_id), str(ref_id)),
+            ).fetchone()
+            if duplicate:
+                conn.rollback()
+                return False
+        c.execute(
+            """UPDATE users
+            SET credits = credits + ?,
+                total_spent = CASE WHEN total_spent >= ? THEN total_spent - ? ELSE 0 END
+            WHERE user_id=?""",
+            (amount, amount, amount, str(user_id))
+        )
+        record_credit_event(conn, user_id, amount, event_type, ref_id, note)
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def spend_fixed_credit_info(user_id, amount, event_type, note="", apply_member_discount_flag=True) -> dict:
     base_amount = int(amount or 0)
@@ -22680,6 +22741,9 @@ def operator_channel_router_data(owner_id, platform="", niche="", limit=20):
     }
 
 def create_affiliate_link(owner_id, network, product_name, niche="", url="", commission_note="", price_vnd=0, commission_rate=0, target_audience="", allowed_claims="", blocked_claims="", product_score=0) -> int:
+    # H1: link do non-admin tạo mặc định "pending" (không redirect được cho tới
+    # khi admin/owner duyệt). Link do admin/owner tạo giữ "active" như trước.
+    initial_status = "active" if str(owner_id) in OWNER_IDS or str(owner_id) in ADMIN_IDS else "pending"
     conn = db_connect()
     c = conn.cursor()
     c.execute(
@@ -22690,7 +22754,7 @@ def create_affiliate_link(owner_id, network, product_name, niche="", url="", com
         (
             str(owner_id), network, product_name, niche, url, commission_note,
             int(price_vnd or 0), float(commission_rate or 0), target_audience,
-            allowed_claims, blocked_claims, int(product_score or 0), "active", now_text()
+            allowed_claims, blocked_claims, int(product_score or 0), initial_status, now_text()
         )
     )
     affiliate_id = c.lastrowid
@@ -23693,6 +23757,21 @@ def update_affiliate_profile(owner_id, affiliate_id, **fields):
     conn = db_connect()
     c = conn.cursor()
     c.execute(f"UPDATE affiliate_links SET {', '.join(updates)} WHERE id=? AND owner_id=?", params)
+    changed = c.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+def approve_affiliate_link(affiliate_id, approver_id) -> bool:
+    """H1: chỉ admin/owner mới duyệt link affiliate pending -> active (mọi owner)."""
+    if str(approver_id) not in OWNER_IDS and str(approver_id) not in ADMIN_IDS:
+        return False
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE affiliate_links SET status='active' WHERE id=? AND status='pending'",
+        (affiliate_id,),
+    )
     changed = c.rowcount
     conn.commit()
     conn.close()
@@ -30015,6 +30094,10 @@ async def compose_job_video_with_ffmpeg(owner_id, job_id, include_voice=True, fo
     if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, "invalid_compose_path", {}
     os.makedirs(job_dir, exist_ok=True)
+    try:
+        os.chmod(job_dir, 0o700)
+    except OSError:
+        pass
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     concat_path = os.path.join(job_dir, f"compose_{stamp}.txt")
     output_path = os.path.abspath(os.path.join(job_dir, f"final_{stamp}.mp4"))
@@ -30188,6 +30271,10 @@ async def save_operator_upload_file(upload: UploadFile, job_id: int) -> tuple[bo
     if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, "invalid_upload_path", {}
     os.makedirs(job_dir, exist_ok=True)
+    try:
+        os.chmod(job_dir, 0o700)
+    except OSError:
+        pass
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     local_path = os.path.abspath(os.path.join(job_dir, f"{stamp}_{filename}"))
     max_bytes = max(1, MAX_OPERATOR_UPLOAD_MB) * 1024 * 1024
@@ -30241,6 +30328,10 @@ def crop_storyboard_grid_to_assets(owner_id, job_id, image_path, episode=1, rows
     if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, "invalid_crop_path", {}
     os.makedirs(job_dir, exist_ok=True)
+    try:
+        os.chmod(job_dir, 0o700)
+    except OSError:
+        pass
     scene_assets = []
     try:
         with Image.open(abs_path) as img:
@@ -34131,6 +34222,10 @@ async def create_operator_visual_scene_fallback(owner_id, task, job, duration=6)
     if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, {"reason": "invalid_visual_path"}
     os.makedirs(job_dir, exist_ok=True)
+    try:
+        os.chmod(job_dir, 0o700)
+    except OSError:
+        pass
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     png_path = os.path.abspath(os.path.join(job_dir, f"visual_scene_{int(scene_no or 0)}_task_{int(task_id)}_{stamp}.png"))
     out_path = os.path.abspath(os.path.join(job_dir, f"visual_scene_{int(scene_no or 0)}_task_{int(task_id)}_{stamp}.mp4"))
@@ -34250,6 +34345,10 @@ async def synthesize_operator_voice_task(owner_id, task, job):
     if os.path.commonpath([upload_root, job_dir]) != upload_root:
         return False, {"reason": "invalid_voice_path"}
     os.makedirs(job_dir, exist_ok=True)
+    try:
+        os.chmod(job_dir, 0o700)
+    except OSError:
+        pass
     out_path = os.path.abspath(os.path.join(job_dir, f"voice_task_{int(task_id)}.mp3"))
     used_tool = ""
     fallback_used = False
@@ -49757,7 +49856,13 @@ def video_order_recalculate(order: dict, state: dict | None = None) -> dict:
         "scene_video_xu": scene_video_xu,
         "addon_fee_xu": addon_fee_xu,
         "free_items": video_order_dedupe_items(free_items),
-        "paid_items": video_order_dedupe_items(paid_items),
+        # Tier 200/low hides paid add-ons: a 0-Xu add-on (e.g. free auto
+        # subtitle) must not be listed as a paid item. Higher tiers keep
+        # 0-Xu paid entries (e.g. first voice clone free) by design.
+        "paid_items": video_order_dedupe_items([
+            item for item in paid_items
+            if tier != "low" or int(item.get("price_xu") or 0) > 0
+        ]),
         "discounts": discount_items,
         "total_xu": total,
         "estimated_vnd": total * int(XU_TO_VND or 100),
@@ -65733,11 +65838,54 @@ async def resolve_shopaikey_tts_audio_bytes(payload) -> tuple[bytes, str, int]:
             return audio_bytes, f"bytes={len(audio_bytes)}; encoding={encoding}", 0
     return b"", "no_audio", 0
 
+def _validate_public_download_host(url: str) -> str:
+    """Fail closed unless every resolved address of an http(s) URL is global.
+
+    Blocks SSRF to private / loopback / link-local / reserved addresses
+    (e.g. 127.0.0.1, 10/8, 192.168/16, 169.254.169.254) from provider URLs.
+    """
+    target = str(url or "").strip()
+    if not target.startswith(("http://", "https://")):
+        raise ValueError("invalid_url")
+    parsed = urlparse(target)
+    host = str(parsed.hostname or "").strip()
+    if not host:
+        raise ValueError("invalid_url")
+    try:
+        infos = socket.getaddrinfo(host, parsed.port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("unresolvable_url") from exc
+    addresses = [str(info[4][0]) for info in infos if len(info) > 4 and info[4]]
+    if not addresses:
+        raise ValueError("unresolvable_url")
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError as exc:
+            raise ValueError("unresolvable_url") from exc
+        if not ip.is_global:
+            raise ValueError("private_url_blocked")
+    return target
+
+
+async def _validate_public_download_url(url: str) -> str:
+    return await asyncio.to_thread(_validate_public_download_host, url)
+
+
+async def _reject_private_download_redirect(response: httpx.Response) -> None:
+    # Fires for the initial response and every redirect hop: re-resolve the
+    # effective URL so a redirect to a private address is blocked too.
+    await _validate_public_download_url(str(response.url))
+
+
 async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0, headers: dict | None = None) -> tuple[bytes, str, int]:
     target = str(url or "").strip()
     if not target.startswith(("http://", "https://")):
         return b"", "invalid_url", 0
-    res = None
+    try:
+        target = await _validate_public_download_url(target)
+    except ValueError as exc:
+        return b"", str(exc) or "invalid_url", 0
     attempts = max(1, int(MUSIC_RESULT_DOWNLOAD_MAX_RETRIES or 1))
     attempted = 0
     request_headers = {
@@ -65746,27 +65894,47 @@ async def _download_audio_url_bytes(url: str, timeout_seconds: float = 60.0, hea
         "Referer": "https://suno.com/",
     }
     request_headers.update(dict(headers or {}))
-    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=request_headers) as client:
-        for attempt in range(attempts):
-            attempted = attempt + 1
-            res = await client.get(target)
-            status_code = int(getattr(res, "status_code", 0) or 0)
-            if status_code in {429} or status_code >= 500:
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(float(MUSIC_RESULT_DOWNLOAD_RETRY_SLEEP_SECONDS or 0))
+    status_code = 0
+    content_type = ""
+    body = bytearray()
+    too_large = False
+    try:
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=request_headers, event_hooks={"response": [_reject_private_download_redirect]}) as client:
+            for attempt in range(attempts):
+                attempted = attempt + 1
+                body = bytearray()
+                too_large = False
+                retry = False
+                async with client.stream("GET", target) as res:
+                    status_code = int(getattr(res, "status_code", 0) or 0)
+                    content_type = str(res.headers.get("content-type") or "")
+                    if status_code in {429} or status_code >= 500:
+                        if attempt + 1 < attempts:
+                            await asyncio.sleep(float(MUSIC_RESULT_DOWNLOAD_RETRY_SLEEP_SECONDS or 0))
+                            retry = True
+                    else:
+                        async for chunk in res.aiter_bytes(1024 * 256):
+                            body += chunk
+                            if len(body) > 250 * 1024 * 1024:
+                                too_large = True
+                                break
+                if retry:
                     continue
-            break
-    if res is None:
-        return b"", "download_failed", 0
-    content_type = str(res.headers.get("content-type") or "")
-    if res.status_code < 400 and res.content and (content_type.startswith("audio/") or len(res.content) > 1024):
-        return bytes(res.content), f"http={res.status_code}; bytes={len(res.content)}; content_type={content_type or '-'}; attempts={attempted}", int(res.status_code)
-    downloaded = len(getattr(res, "content", b"") or b"")
-    body_text = str(getattr(res, "text", "") or "")
-    body_class = music_download_error_body_class(body_text[:800], content_type)
-    safe_error = shopaikey_sanitize_error(body_text[:220] if body_text else f"HTTP {res.status_code}")
+                break
+    except ValueError as exc:
+        if str(exc) in {"private_url_blocked", "unresolvable_url"}:
+            return b"", str(exc), 0
+        raise
+    if too_large:
+        return b"", f"http={status_code}; downloaded_bytes={len(body)}; content_type={content_type or '-'}; error=download_too_large; attempts={attempted}", int(status_code)
+    if status_code < 400 and body and (content_type.startswith("audio/") or len(body) > 1024):
+        return bytes(body), f"http={status_code}; bytes={len(body)}; content_type={content_type or '-'}; attempts={attempted}", int(status_code)
+    downloaded = len(body)
+    body_text = bytes(body[:800]).decode("utf-8", "ignore")
+    body_class = music_download_error_body_class(body_text, content_type)
+    safe_error = shopaikey_sanitize_error(body_text[:220] if body_text else f"HTTP {status_code}")
     class_part = f"; error_body_class={body_class}" if body_class else ""
-    return b"", f"http={res.status_code}; downloaded_bytes={downloaded}; content_type={content_type or '-'}{class_part}; error={safe_error}; attempts={attempted}", int(res.status_code)
+    return b"", f"http={status_code}; downloaded_bytes={downloaded}; content_type={content_type or '-'}{class_part}; error={safe_error}; attempts={attempted}", int(status_code)
 
 async def minimax_audio_reference_to_bytes(value) -> tuple[bytes, str]:
     candidates = _minimax_audio_candidates(value if isinstance(value, (dict, list)) else {"audio": value})
@@ -126550,6 +126718,12 @@ def translation_auto_translate_enabled(user_id=None) -> bool:
 def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineKeyboardMarkup:
     lang = normalize_user_language(lang) or "vi"
     copy = public_hub_copy(lang)
+    try:
+        auto_translate_active = translation_auto_translate_enabled(user_id)
+    except Exception:
+        # Session check unavailable (e.g. source-exec harness): keep the
+        # previous behaviour instead of silently dropping the control.
+        auto_translate_active = True
     buttons = [
         (f"📝 {copy['translation_text']}", "menu|translation_text"),
         (f"📄 {copy['translation_file']}", "menu|translation_media_file"),
@@ -126558,8 +126732,9 @@ def translation_language_hub_keyboard(lang: str = "vi", user_id=None) -> InlineK
         (f"🔁 {copy['translation_two_way']}", "menu|translation_two_way"),
         (f"🌐 {copy['translation_auto']}", "menu|translation_auto_target"),
         (f"⚙️ {copy['translation_languages']}", "menu|translation_language"),
-        (f"⏹ {copy['translation_stop']}", "menu|translation_stop_session"),
     ]
+    if auto_translate_active:
+        buttons.append((f"⏹ {copy['translation_stop']}", "menu|translation_stop_session"))
     return build_2col_keyboard(
         buttons,
         nav_back=(f"⬅️ {copy['translation_label']}", "menu|translate"),
@@ -137995,6 +138170,13 @@ def customer_start_surface_audit_data():
 
 
 
+# /linkweb code-attempt rate limit: max 5 attempts per user per 10 minutes.
+# In-memory dict of per-user attempt timestamps, pruned lazily per user.
+_LINKWEB_MAX_ATTEMPTS = 5
+_LINKWEB_ATTEMPT_WINDOW_SECONDS = 600
+_LINKWEB_ATTEMPT_TIMESTAMPS: dict[int, list[float]] = {}
+
+
 async def confirm_webapp_telegram_link(code: str, telegram_uid: int, role: str = "user") -> tuple[bool, str]:
     """Send signed HMAC callback to Web App to confirm Telegram login / link challenge."""
     webapp_base_url = os.environ.get("WEBAPP_BASE_URL", "https://app.toanaas.vn").rstrip("/")
@@ -138002,6 +138184,14 @@ async def confirm_webapp_telegram_link(code: str, telegram_uid: int, role: str =
     hmac_secret = os.environ.get("WEBAPP_LINK_CALLBACK_HMAC_SECRET", os.environ.get("CORE_BRIDGE_CALLBACK_HMAC_SECRET", "")).strip()
     if not bridge_token or not hmac_secret:
         return False, "Cổng kết nối Web App chưa được cấu hình token và HMAC secret trên máy chủ Bot."
+
+    # Brute-force guard: count only real bridge attempts, before calling it.
+    now = time.time()
+    attempts = [ts for ts in _LINKWEB_ATTEMPT_TIMESTAMPS.get(int(telegram_uid), []) if now - ts < _LINKWEB_ATTEMPT_WINDOW_SECONDS]
+    if len(attempts) >= _LINKWEB_MAX_ATTEMPTS:
+        return False, "Bạn đã thử quá 5 lần trong 10 phút. Vui lòng đợi rồi thử lại."
+    attempts.append(now)
+    _LINKWEB_ATTEMPT_TIMESTAMPS[int(telegram_uid)] = attempts
 
     clean_code = code.strip()
     body_dict = {
@@ -138030,6 +138220,7 @@ async def confirm_webapp_telegram_link(code: str, telegram_uid: int, role: str =
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("ok"):
+                    _LINKWEB_ATTEMPT_TIMESTAMPS.pop(int(telegram_uid), None)
                     return True, "Xác thực thành công!"
                 return False, data.get("message", "Mã xác thực không hợp lệ hoặc đã hết hạn.")
             else:
@@ -143083,320 +143274,6 @@ AUTOPOST_NICHES = [
     ("✨ Thương hiệu cá nhân", "ca_nhan"),
 ]
 
-autopost_engine_code = '''
-def autopost_hub_text(lang: str = "vi", user_id: int = 0) -> str:
-    return autopost_main_dashboard_text(lang, user_id)
-
-def autopost_hub_keyboard(lang: str = "vi", is_admin: bool = False) -> InlineKeyboardMarkup:
-    return autopost_main_keyboard(lang)
-
-async def handle_autopost_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    uid = query.from_user.id
-    lang = get_user_language(uid) or "vi"
-    copy = public_hub_copy(lang)
-    parts = str(query.data or "").split("|")
-    action = parts[1] if len(parts) > 1 else "main"
-    value = parts[2] if len(parts) > 2 else ""
-
-    if action in {"main", "hub", "dashboard"}:
-        return await safe_edit_query_message(
-            query,
-            autopost_main_dashboard_text(lang, uid),
-            parse_mode="HTML",
-            reply_markup=autopost_main_keyboard(lang),
-        )
-
-    if action == "content_input_menu":
-        return await safe_edit_query_message(
-            query,
-            autopost_content_input_menu_text(),
-            parse_mode="HTML",
-            reply_markup=autopost_content_input_menu_keyboard(),
-        )
-
-    if action == "input":
-        input_type = value or "topic"
-        context.user_data["awaiting_content_input_type"] = input_type
-        msg = autopost_input_prompt_text(input_type)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|content_input_menu"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "content_plan":
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👗 Thời trang", callback_data="autopost|gen_plan|thoi_trang"), InlineKeyboardButton("💄 Mỹ phẩm", callback_data="autopost|gen_plan|my_pham")],
-            [InlineKeyboardButton("📱 Công nghệ & AI", callback_data="autopost|gen_plan|cong_nghe"), InlineKeyboardButton("🎓 Khóa học", callback_data="autopost|gen_plan|khoa_hoc")],
-            [InlineKeyboardButton("🏡 Bất động sản", callback_data="autopost|gen_plan|bat_dong_san"), InlineKeyboardButton("☕ F&B Ăn uống", callback_data="autopost|gen_plan|an_uong")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, autopost_content_plan_text(), parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "gen_plan":
-        niche = value or "cong_nghe"
-        brand = get_effective_brand_profile(uid)
-        plan = create_content_plan(str(uid), brand, niche, duration_days=7, persist_db=True)
-        context.user_data["active_content_plan"] = plan
-        msg = autopost_plan_result_text(niche, plan["total_posts"], plan["items"][0])
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📅 Xem lịch đăng", callback_data="autopost|calendar"), InlineKeyboardButton("🚀 Xem hàng đợi", callback_data="autopost|queue")],
-            [InlineKeyboardButton("⬅️ Đổi ngành", callback_data="autopost|content_plan"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "brands":
-        brand = get_effective_brand_profile(uid)
-        msg = autopost_brand_view_text(brand)
-        reply_kb = autopost_brand_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "brand_edit_prompt":
-        context.user_data["awaiting_brand_edit"] = True
-        msg = autopost_brand_edit_prompt_text()
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|brands")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "brand_preview":
-        brand = get_effective_brand_profile(uid)
-        draft = generate_single_post_draft(uid, "Bí quyết kinh doanh bứt phá doanh số", brand)
-        msg = autopost_brand_preview_text(draft)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại Thương hiệu", callback_data="autopost|brands")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "affiliate":
-        stats = get_user_affiliate_stats(uid)
-        if stats.get("total", 0) == 0 and is_admin_user(uid):
-            seed_default_curated_vault_for_user(uid)
-            stats = get_user_affiliate_stats(uid)
-        msg = autopost_affiliate_text(uid, stats, lang)
-        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_import_prompt":
-        context.user_data["awaiting_affiliate_import"] = True
-        msg = autopost_affiliate_import_prompt_text(lang)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Quay lại Kho Affiliate", callback_data="autopost|affiliate"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_seed":
-        seed_default_curated_vault_for_user(uid)
-        stats = get_user_affiliate_stats(uid)
-        msg = autopost_aff_seed_success_text(uid, stats, lang)
-        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_clear_confirm":
-        msg = autopost_aff_clear_confirm_text()
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🗑️ Xác nhận xóa sạch", callback_data="autopost|aff_clear_done")],
-            [InlineKeyboardButton("❌ Hủy bỏ", callback_data="autopost|affiliate")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_clear_done":
-        clear_user_affiliate_vault(uid)
-        stats = get_user_affiliate_stats(uid)
-        msg = autopost_aff_clear_done_text(uid, stats, lang)
-        reply_kb = autopost_affiliate_keyboard(uid, stats, lang)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_view":
-        niche = value or "all"
-        page = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
-        total = count_user_affiliate_links(uid, niche=niche)
-        items = get_user_affiliate_links(uid, niche=niche, limit=5, offset=page * 5)
-        msg = autopost_affiliate_list_text(uid, items, total, niche, page, 5, lang)
-        reply_kb = autopost_affiliate_list_keyboard(uid, items, total, niche, page, 5, lang)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "aff_noop":
-        return
-
-    if action == "channels":
-        msg = autopost_channels_text(uid)
-        reply_kb = autopost_channels_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "conn":
-        platform = value or "telegram"
-        if platform == "telegram":
-            context.user_data["awaiting_telegram_channel_id"] = True
-            msg = autopost_conn_telegram_prompt_text()
-            return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
-        else:
-            msg = autopost_conn_oauth_prompt_text(platform)
-            return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|channels")]]))
-
-    if action == "test_tg_conn":
-        accounts = get_user_social_accounts(uid)
-        tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
-        v = await TelegramAdapter.validate(tg_acc["account_id"] if tg_acc else "", bot_instance=context.bot) if tg_acc else {"valid": False}
-        msg = autopost_test_tg_conn_text(tg_acc, v)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Channels", callback_data="autopost|channels")]]))
-
-    if action == "calendar":
-        msg = autopost_calendar_text(uid)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧠 Lập kế hoạch mới", callback_data="autopost|content_plan")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "queue":
-        msg = autopost_queue_text(uid)
-        reply_kb = autopost_queue_keyboard(uid)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "job_publish_now":
-        job_id = int(value) if value.isdigit() else 0
-        queue = get_user_publish_queue(uid)
-        job = next((q for q in queue if q["id"] == job_id), None)
-        if not job:
-            msg = "⚠️ Không tìm thấy bài đăng trong hàng đợi."
-        else:
-            res = await execute_publish_job(job, bot_instance=context.bot)
-            msg = autopost_job_publish_result_text(res, job)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
-            [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "published_history":
-        msg = autopost_published_history_text(uid)
-        reply_kb = autopost_published_history_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "metrics":
-        msg = autopost_metrics_text(uid)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📣 Quản trị quảng cáo", callback_data="autopost|ads_center")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "ads_center":
-        env = DEFAULT_OWNER_BUDGET_ENVELOPE
-        msg = autopost_ads_center_text(env)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛑 Dừng toàn bộ quảng cáo (Kill Switch)", callback_data="autopost|kill_switch")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|main"), InlineKeyboardButton(f"🏠 {copy['main_menu']}", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "kill_switch":
-        DEFAULT_OWNER_BUDGET_ENVELOPE["emergency_kill_switch"] = True
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🟢 Bật lại", callback_data="autopost|resume_ads")],
-            [InlineKeyboardButton("⬅️ Quay lại", callback_data="autopost|ads_center"), InlineKeyboardButton("🏠 Menu chính", callback_data="menu|main")],
-        ])
-        return await safe_edit_query_message(query, autopost_kill_switch_text(), parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "resume_ads":
-        DEFAULT_OWNER_BUDGET_ENVELOPE["emergency_kill_switch"] = False
-        return await safe_edit_query_message(query, autopost_resume_ads_text(), parse_mode="HTML", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Quay lại Ads", callback_data="autopost|ads_center")]]))
-
-    if action == "settings":
-        msg = autopost_settings_text(uid)
-        reply_kb = autopost_settings_keyboard(uid)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "set_mode":
-        set_user_publish_mode(uid, value or "MANUAL")
-        msg = autopost_set_mode_text(value, uid)
-        reply_kb = autopost_settings_keyboard(uid)
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "draft_publish_now":
-        draft = context.user_data.get("current_draft")
-        if not draft:
-            msg = "⚠️ Không tìm thấy bản nháp để phát hành."
-        else:
-            accounts = get_user_social_accounts(uid)
-            tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
-            target_chat = tg_acc["account_id"] if tg_acc else f"@{query.from_user.username}" if query.from_user.username else str(uid)
-            now_str = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            
-            job_id = create_publish_job(None, uid, "telegram", target_chat, now_str)
-            res = await execute_publish_job({
-                "id": job_id, "owner_user_id": uid, "platform": "telegram",
-                "channel_id": target_chat, "payload": {"caption": draft["caption"]}
-            }, bot_instance=context.bot)
-            msg = autopost_draft_publish_result_text(res)
-                
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Xem lịch sử đã đăng", callback_data="autopost|published_history"), InlineKeyboardButton("🚀 Hàng đợi", callback_data="autopost|queue")],
-            [InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "draft_approve":
-        draft = context.user_data.get("current_draft")
-        if not draft:
-            msg = "⚠️ Không tìm thấy bản nháp để lên lịch."
-        else:
-            accounts = get_user_social_accounts(uid)
-            tg_acc = next((a for a in accounts if a["platform"] == "telegram"), None)
-            target_chat = tg_acc["account_id"] if tg_acc else str(uid)
-            sched_time = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)).isoformat()
-            job_id = create_publish_job(None, uid, "telegram", target_chat, sched_time)
-            msg = autopost_draft_approved_text(job_id, sched_time, target_chat)
-        reply_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚀 Xem hàng đợi", callback_data="autopost|queue"), InlineKeyboardButton("⬅️ Quay lại Hub", callback_data="autopost|main")],
-        ])
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide":
-        msg = autopost_guide_text()
-        reply_kb = autopost_guide_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_single":
-        msg = autopost_guide_single_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_plan":
-        msg = autopost_guide_plan_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_telegram":
-        msg = autopost_guide_telegram_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide":
-        msg = autopost_guide_text()
-        reply_kb = autopost_guide_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_single":
-        msg = autopost_guide_single_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_plan":
-        msg = autopost_guide_plan_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    if action == "guide_telegram":
-        msg = autopost_guide_telegram_text()
-        reply_kb = autopost_guide_sub_keyboard()
-        return await safe_edit_query_message(query, msg, parse_mode="HTML", reply_markup=reply_kb)
-
-    return await safe_edit_query_message(query, autopost_main_dashboard_text(lang, uid), parse_mode="HTML", reply_markup=autopost_main_keyboard(lang))
-'''
-exec(compile(autopost_engine_code, f"{__file__}:autopost_engine", "exec"), globals())
 
 
 
@@ -181232,17 +181109,28 @@ def frame_video_runtime_guard(state: dict, user_id=0) -> dict:
         str(media_lane.get("lane") or "") == "short_media"
         and str(preflight.get("execution_owner") or "") == "local_ffmpeg"
     ):
-        return {
-            "ok": True,
-            "action": "direct_render",
-            "reason": "railway_ffmpeg_ready" if is_railway_runtime() else "local_ffmpeg_ready",
-            "message": "",
-            "worker_connected": worker_connected,
-            "ffmpeg_path": str(preflight.get("ffmpeg_path") or ""),
-            "ffprobe_path": str(preflight.get("ffprobe_path") or ""),
-            "preflight": preflight,
-            "media_lane": media_lane,
-        }
+        if FRAME_VIDEO_REQUIRE_LOCAL_WORKER and not worker_connected:
+            return {
+                "ok": False,
+                "action": "blocked",
+                "reason": "worker_unavailable",
+                "message": frame_video_maintenance_text(),
+                "worker_connected": worker_connected,
+                "preflight": preflight,
+                "media_lane": media_lane,
+            }
+        if FRAME_VIDEO_DIRECT_RENDER_ENABLED:
+            return {
+                "ok": True,
+                "action": "direct_render",
+                "reason": "railway_ffmpeg_ready" if is_railway_runtime() else "local_ffmpeg_ready",
+                "message": "",
+                "worker_connected": worker_connected,
+                "ffmpeg_path": str(preflight.get("ffmpeg_path") or ""),
+                "ffprobe_path": str(preflight.get("ffprobe_path") or ""),
+                "preflight": preflight,
+                "media_lane": media_lane,
+            }
     worker_admission = frame_video_public_seam.frame_video_worker_queue_admission(
         local_worker_status_payload(),
         expected_worker_sha=str(APP_BUILD_SHA or APP_BUILD or "").strip(),
@@ -221382,6 +221270,10 @@ async def cmd_film(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_addlink(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    # H1: /addlink chỉ admin/owner được tạo link (defense-in-depth ngoài
+    # admin_internal_command ở lúc đăng ký handler).
+    if not is_admin_user(uid):
+        return await update.message.reply_text("⛔ Lệnh /addlink chỉ dành cho admin/owner.")
     raw = " ".join(context.args).strip()
     if not raw:
         return await update.message.reply_text(
@@ -222320,6 +222212,28 @@ async def cmd_affiliate_profile(update: Update, context: ContextTypes.DEFAULT_TY
         f"• Claim OK: {html.escape(allowed_claims or '-')}\n"
         f"• Claim cấm: {html.escape(blocked_claims or '-')}",
         parse_mode="HTML"
+    )
+
+async def cmd_affiliate_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """H1: admin/owner duyệt link affiliate pending -> active để /r/{id} redirect được."""
+    if not is_admin_user(update.effective_user.id):
+        return
+    data = parse_key_value_args(" ".join(context.args))
+    try:
+        affiliate_id = int(data.get("id") or data.get("aff") or context.args[0])
+    except (IndexError, TypeError, ValueError):
+        return await update.message.reply_text(
+            "⚠️ Cú pháp: <code>/affiliate_approve id=1</code>",
+            parse_mode="HTML",
+        )
+    if approve_affiliate_link(affiliate_id, update.effective_user.id):
+        return await update.message.reply_text(
+            f"✅ <b>Đã duyệt affiliate #{affiliate_id}</b> — link <code>/r/{affiliate_id}</code> đã active.",
+            parse_mode="HTML",
+        )
+    return await update.message.reply_text(
+        f"❌ Không duyệt được affiliate #{affiliate_id} (không tồn tại, đã active, hoặc bạn không phải admin/owner).",
+        parse_mode="HTML",
     )
 
 async def cmd_affiliate_match(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -246824,6 +246738,10 @@ def create_subtitle_dub_pipeline_workspace(job_id: str) -> str:
     if not workspace.startswith(root + os.sep):
         raise RuntimeError("unsafe_pipeline_workspace")
     os.makedirs(workspace, exist_ok=True)
+    try:
+        os.chmod(workspace, 0o700)
+    except OSError:
+        pass
     return workspace
 
 def cleanup_subtitle_dub_pipeline_workspace(workspace: str) -> bool:
@@ -273924,7 +273842,7 @@ async def handle_video_editor_callback(
             state.get("review_revision"),
         )
         supplied_confirmation_token = str(parts[2] if len(parts) > 2 else "")
-        if not supplied_confirmation_token or supplied_confirmation_token != expected_confirmation_token:
+        if not supplied_confirmation_token or not hmac.compare_digest(supplied_confirmation_token, expected_confirmation_token):
             return await query.answer(
                 "Nút xác nhận đã cũ. Hãy mở lại Xem lại rồi xác nhận lần nữa.",
                 show_alert=True,
@@ -276229,6 +276147,7 @@ async def lifespan(app: FastAPI):
     tg_app.add_handler(CommandHandler("admin_import_affiliate_inventory", admin_internal_command(cmd_admin_import_affiliate_inventory)))
     tg_app.add_handler(CommandHandler("affiliates",  admin_internal_command(cmd_affiliates)))
     tg_app.add_handler(CommandHandler("affiliate_profile", admin_internal_command(cmd_affiliate_profile)))
+    tg_app.add_handler(CommandHandler("affiliate_approve", admin_internal_command(cmd_affiliate_approve)))
     tg_app.add_handler(CommandHandler("affiliate_match", admin_internal_command(cmd_affiliate_match)))
     tg_app.add_handler(CommandHandler("affiliate_ideas", admin_internal_command(cmd_affiliate_ideas)))
     tg_app.add_handler(CommandHandler("affiliate_related", admin_internal_command(cmd_affiliate_related)))
@@ -279839,30 +279758,34 @@ async def api_telegram_takeover(request: Request, drop_pending_updates: bool = T
 
 @fastapi_app.post(TELEGRAM_WEBHOOK_PATH)
 async def telegram_webhook(request: Request):
-    if TELEGRAM_WEBHOOK_SECRET:
-        token = request.headers.get("x-telegram-bot-api-secret-token", "")
-        if not token:
-            record_security_event(
-                "telegram_webhook_secret_missing",
-                "medium",
-                "Telegram webhook request missing secret token header",
-                request=request,
-                user_id="telegram",
-                username="telegram",
-                action="telegram_webhook",
-            )
-            raise HTTPException(status_code=401, detail="Invalid request")
-        if not hmac.compare_digest(token, TELEGRAM_WEBHOOK_SECRET):
-            record_security_event(
-                "telegram_webhook_secret_invalid",
-                "medium",
-                "Telegram webhook request had an invalid secret token header",
-                request=request,
-                user_id="telegram",
-                username="telegram",
-                action="telegram_webhook",
-            )
-            raise HTTPException(status_code=401, detail="Invalid request")
+    # H3 (fail-closed, như PayOS webhook): chưa cấu hình secret thì từ chối mọi
+    # update, không xử lý như update thật.
+    if not TELEGRAM_WEBHOOK_SECRET:
+        logger.warning("Telegram webhook rejected: TELEGRAM_WEBHOOK_SECRET is not configured")
+        raise HTTPException(status_code=503, detail="webhook secret not configured")
+    token = request.headers.get("x-telegram-bot-api-secret-token", "")
+    if not token:
+        record_security_event(
+            "telegram_webhook_secret_missing",
+            "medium",
+            "Telegram webhook request missing secret token header",
+            request=request,
+            user_id="telegram",
+            username="telegram",
+            action="telegram_webhook",
+        )
+        raise HTTPException(status_code=401, detail="Invalid request")
+    if not hmac.compare_digest(token, TELEGRAM_WEBHOOK_SECRET):
+        record_security_event(
+            "telegram_webhook_secret_invalid",
+            "medium",
+            "Telegram webhook request had an invalid secret token header",
+            request=request,
+            user_id="telegram",
+            username="telegram",
+            action="telegram_webhook",
+        )
+        raise HTTPException(status_code=401, detail="Invalid request")
     if not tg_app:
         raise HTTPException(status_code=503, detail="Telegram app is not ready")
     payload = await request.json()
@@ -283321,11 +283244,12 @@ async def api_internal_admin_wallet_credit(request: Request):
     )
 
     raw_auth = str(request.headers.get("authorization") or "").strip()
+    # Wallet admin auth accepts ONLY the dedicated wallet/bridge token.
+    # WEBAPP_LINK_CALLBACK_TOKEN must never authorize wallet credit: the link
+    # callback token is exposed to the web link flow and must stay separate.
     bridge_token = (
         os.environ.get("CORE_BRIDGE_TOKEN", "").strip()
-        or os.environ.get("WEBAPP_LINK_CALLBACK_TOKEN", "").strip()
         or os.environ.get("INTERNAL_API_SECRET", "").strip()
-        or os.environ.get("BOT_INTERNAL_SECRET", "").strip()
     )
     if not bridge_token:
         raise HTTPException(
