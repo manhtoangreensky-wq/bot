@@ -117,7 +117,7 @@ def test_telegram_webhook_secret_rejects_missing_bad_token_and_logs_ip_user_agen
     assert "telegram-webhook-secret-c4" not in joined_details
 
 
-def test_telegram_webhook_secret_accepts_valid_token_and_dev_without_secret(monkeypatch, tmp_path):
+def test_telegram_webhook_secret_accepts_valid_token_and_rejects_without_secret(monkeypatch, tmp_path):
     _init_db(monkeypatch, tmp_path)
     fake = FakeTelegramApp()
     monkeypatch.setattr(bot, "tg_app", fake)
@@ -133,12 +133,14 @@ def test_telegram_webhook_secret_accepts_valid_token_and_dev_without_secret(monk
     assert accepted.status_code == 200
     assert fake.updates and fake.updates[-1]["payload"]["update_id"] == 3
 
+    # H3 fail-closed: secret chưa cấu hình thì webhook trả 503 và KHÔNG xử lý update.
     dev_fake = FakeTelegramApp()
     monkeypatch.setattr(bot, "tg_app", dev_fake)
     monkeypatch.setattr(bot, "TELEGRAM_WEBHOOK_SECRET", "")
     dev_response = client.post(bot.TELEGRAM_WEBHOOK_PATH, json={"update_id": 4})
-    assert dev_response.status_code == 200
-    assert dev_fake.updates and dev_fake.updates[-1]["payload"]["update_id"] == 4
+    assert dev_response.status_code == 503
+    assert dev_response.json()["detail"] == "webhook secret not configured"
+    assert dev_fake.updates == []
 
 
 def test_set_telegram_webhook_includes_secret_token_when_configured(monkeypatch):

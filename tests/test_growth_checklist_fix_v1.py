@@ -81,6 +81,8 @@ def test_goal_audit_marks_disabled_bridge_as_non_blocking(monkeypatch, tmp_path)
 
 def test_affiliate_import_creates_defaults_only_after_real_affiliate(monkeypatch, tmp_path):
     _init_temp_db(monkeypatch, tmp_path)
+    # H1: owner "admin" trong test này là admin nên link import được active.
+    monkeypatch.setattr(bot, "ADMIN_IDS", set(bot.ADMIN_IDS) | {"admin"})
 
     no_data = bot.ensure_growth_content_defaults_after_affiliate_import("admin")
     assert no_data["active_affiliates"] == 0

@@ -860,7 +860,12 @@ def test_local1_no_payos_changes() -> None:
 
 def test_local1_no_wallet_business_rule_changes() -> None:
     changed = subprocess.run(["git", "diff", "--name-only", "origin/main"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.lower()
-    assert "wallet" not in changed
+    # L1 exception (Owner decision A, 2026-11-24): narrowing wallet/credit auth
+    # to dedicated tokens intentionally touches services/admin_wallet_service.py.
+    # Every other "wallet" path stays guarded.
+    changed_files = [line.strip() for line in changed.splitlines() if line.strip()]
+    unexpected = [f for f in changed_files if "wallet" in f and f != "services/admin_wallet_service.py"]
+    assert not unexpected, f"unexpected wallet changes: {unexpected}"
 
 
 def test_local1_services_do_not_call_real_providers() -> None:
