@@ -98,6 +98,12 @@ def create_job_workspace(job_id: str | int, *, root: str | os.PathLike[str] | No
     workspace = base / clean_id
     require_path_within(workspace, base)
     workspace.mkdir(parents=True, exist_ok=True)
+    # Delivery checkpoints are published through a guard that requires an
+    # owner-private parent (no group/other bits). Default mkdir modes
+    # (0755/0770) fail that guard, so the render fails at validating_output
+    # with video_local_edit_checkpoint_persistence_failed. Enforce 0700 here
+    # so both fresh and resumed workspaces stay publishable.
+    os.chmod(workspace, 0o700)
     return workspace
 
 
@@ -125,6 +131,9 @@ def create_video_edit_claim_workspace(
     if claim.exists() and (claim.is_symlink() or not claim.is_dir()):
         raise LocalVideoValidationError("unsafe_job_id")
     claim.mkdir(parents=False, exist_ok=True)
+    # Same owner-private requirement as the project workspace: user media
+    # under the claim must not be readable through group/other bits.
+    os.chmod(claim, 0o700)
     return project, require_path_within(claim, project)
 
 
