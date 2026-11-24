@@ -95,8 +95,12 @@ def test_local1_video_edit_menu_present() -> None:
 
 def test_local1_manual_edit_entry_present() -> None:
     hub = _between(BOT_SOURCE, "def video_edit_hub_keyboard", "def video_edit_info_text")
-    assert "✂️ Chỉnh sửa thủ công" in hub
     assert '"videoedit|manual"' in hub
+    # The label moved to the i18n copy dict; the keyboard now references the
+    # copy key instead of embedding the literal Vietnamese string.
+    assert "copy['video_edit_manual']" in hub
+    copy_source = (ROOT / "services" / "pricing_guide_content.py").read_text(encoding="utf-8")
+    assert '"Chỉnh sửa thủ công"' in copy_source
 
 
 def test_local1_split_entry_present() -> None:
