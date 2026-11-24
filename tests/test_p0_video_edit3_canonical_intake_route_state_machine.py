@@ -11,6 +11,7 @@ import shutil
 import tempfile
 import threading
 import time
+import uuid
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from services import (
+    video_ai_edit_state,
     video_edit_long_media,
     video_edit_media_transport,
     video_edit_state_machine,
@@ -37,19 +39,24 @@ def _is_whole_response_content_access(node: ast.AST) -> bool:
     return isinstance(node, ast.Attribute) and node.attr == "content"
 
 
+_BOT_SOURCE_LINES = BOT_SOURCE.splitlines()
+_BOT_FUNCTIONS = {
+    node.name: node
+    for node in BOT_MODULE.body
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+}
+
+
 def _function_source(name: str) -> str:
-    async_marker = f"async def {name}("
-    sync_marker = f"def {name}("
-    start = BOT_SOURCE.find(async_marker)
-    if start < 0:
-        start = BOT_SOURCE.index(sync_marker)
-    candidates = [
-        BOT_SOURCE.find("\ndef ", start + 1),
-        BOT_SOURCE.find("\nasync def ", start + 1),
-        BOT_SOURCE.find("\n@", start + 1),
-    ]
-    ends = [position for position in candidates if position >= 0]
-    return BOT_SOURCE[start:min(ends) if ends else len(BOT_SOURCE)]
+    # AST-based slice: the old text search stopped at the first "\ndef " /
+    # "\n@ " line, which truncates functions containing triple-quoted strings
+    # with such lines (e.g. autopost_engine_code). Use the node's exact span.
+    # Lines/nodes are cached at module level: direct_calls() iterates every
+    # top-level function, so re-splitting the 15 MB source per call spins CPU.
+    node = _BOT_FUNCTIONS.get(name)
+    if node is None:
+        raise AssertionError(f"missing function: {name}")
+    return "\n".join(_BOT_SOURCE_LINES[node.lineno - 1:node.end_lineno])
 
 
 def _compile_function(name: str, namespace: dict):
@@ -459,6 +466,10 @@ def _run_canonical_upload(
 
     class Message:
         message_id = 901
+        # Real Telegram messages always carry chat_id; the AI-edit branch
+        # needs it to claim the source draft (video_ai_edit_state enforces a
+        # nonzero chat id). The manual/quality branches never read it.
+        chat_id = 123456
         video = SimpleNamespace(
             file_id="video-file-901",
             file_unique_id="telegram-opaque-901",
@@ -508,6 +519,10 @@ def _run_canonical_upload(
             "width": 1_080,
             "height": 1_920,
             "fps": 30.0,
+            # The real inspector reports has_video; the AI-edit admission gate
+            # (video_ai_edit_state.source_admission) requires it, so the fake
+            # must mirror the real contract instead of failing admission.
+            "has_video": True,
             "has_audio": True,
             "audio_stream_count": 1,
             "format_name": "mov,mp4",
@@ -595,10 +610,25 @@ def _run_canonical_upload(
             "video_local_manual_options_text": lambda _state, _lang: "manual-screen",
             "video_local_manual_options_keyboard": lambda lang, _state=None: f"manual-keyboard:{lang}",
             "video_ai_edit_router": SimpleNamespace(DEFAULT_PRESERVE_CONTROLS={"identity": True}),
+            "video_ai_edit_state": video_ai_edit_state,
             "video_quality_enhance_source_text": lambda _state, _lang: "quality-screen",
             "video_quality_enhance_source_keyboard": lambda lang, _state=None: f"quality-keyboard:{lang}",
             "video_ai_edit_source_summary_text": lambda _state, _lang: "ai-screen",
+            # Current main routes the AI-edit success reply through the public
+            # summary text variant; stub it to the same routing marker so the
+            # test keeps asserting the lane, not the literal copy.
+            "video_ai_edit_public_source_summary_text": lambda _state, _lang: "ai-screen",
+            # Pure dict lookup in bot.py; compile the real function so the
+            # admission-failure path returns real copy.
+            "video_ai_edit_source_admission_error": _compile_function(
+                "video_ai_edit_source_admission_error", {}
+            ),
             "video_ai_edit_source_summary_keyboard": lambda lang, _state: f"ai-keyboard:{lang}",
+            # The handler's reply path uses uuid (nested send/normalize helper).
+            "uuid": uuid,
+            # Second invocation (duplicate upload) clears the pending editor
+            # state instead of probing or replying again.
+            "clear_video_editor_pending": lambda _uid: None,
         },
     )
     first = asyncio.run(handler(update, context))
@@ -1862,9 +1892,14 @@ def test_edit3_actual_byte_evidence_promotes_short_declaration_without_demoting(
     assert state["source_metadata"]["actual_bytes"] == 20 * MIB + 1
 
 
+# NOTE: this property cannot be exercised through "ai_edit" on current main:
+# the AI-edit admission gate caps sources at 30 seconds, so a 60s declaration
+# is refused before any lane promotion happens (the reply is the admission
+# error, and no media_lane is persisted). quality_enhance exercises the same
+# canonical promotion logic on a lane that can actually reach large_media.
 def test_edit3_actual_duration_promotes_short_declaration_without_demoting() -> None:
     first, second, state, _replies, probes = _run_canonical_upload(
-        "ai_edit",
+        "quality_enhance",
         source_size=1 * MIB,
         source_duration=60,
         inspected_size=1 * MIB,
@@ -2124,6 +2159,10 @@ def test_edit3_legacy_editor_state_fences_upload_from_another_product(
             "video_editor_aux_source_from_update": lambda _update, _kind: {},
             "video_editor_source_from_update": lambda _update: {},
             "video_local_logo_parent_callback": lambda _state: "videoedit|branding",
+            # Current main also consults the logo-input back callback when
+            # fencing a legacy await_logo step; the callback value itself is
+            # not asserted, only that the upload is fenced.
+            "video_local_logo_input_back_callback": lambda _state=None: "videoedit|logo_input",
             "video_local_input_keyboard": lambda *_args, **_kwargs: "input-keyboard",
             "video_local_public_error": lambda reason, *_args: reason,
         },
@@ -2421,10 +2460,21 @@ def test_edit3_large_media_inspector_is_exclusive_to_video_edit_routes() -> None
         and direct_calls(node.name, unbounded_inspector)
     }
 
-    assert unbounded_callers == {"handle_video_editor_pending_upload"}
+    # Both callers are video-edit routes: the canonical upload handler and the
+    # AI650 intake handler (which gates the file through source_admission).
+    # The safety property is unchanged: no non-video-edit route may use the
+    # unbounded inspector; product/reference handlers still use the bounded
+    # inspector (asserted below).
+    assert unbounded_callers == {
+        "handle_video_editor_pending_upload",
+        "handle_video_ai_edit_pending_media",
+    }
     assert direct_calls("handle_video_product_pending_media", unbounded_inspector) == 0
     assert direct_calls("handle_video_reference_pending_upload", unbounded_inspector) == 0
-    assert direct_calls("handle_video_product_pending_media", bounded_inspector) == 2
+    # Current main calls the bounded inspector three times in the product
+    # handler (a third bounded call site was added since this test was written);
+    # more bounded calls in a non-video-edit route is the safe direction.
+    assert direct_calls("handle_video_product_pending_media", bounded_inspector) == 3
     assert direct_calls("handle_video_reference_pending_upload", bounded_inspector) == 1
 
 
