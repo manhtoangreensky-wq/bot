@@ -690,7 +690,14 @@ async def process_subtitle_dub_job(
                         "recovery_trigger_cue_id": str(item.get("recovery_trigger_cue_id") or fail_cid),
                     }
                 elif not is_legacy_multi and not smart_warning and raw_fit_ratio > MAX_INTELLIGIBLE_FIT_RATIO:
-                    overfit_cues.append((str(item.get("cue_id") or ""), round(raw_fit_ratio, 3)))
+                    fail_cid = str(
+                        item.get("recovery_trigger_cue_id")
+                        or item.get("original_trigger_cue_id")
+                        or (item.get("original_cue_ids") or [""])[-1]
+                        or item.get("cue_id")
+                        or ""
+                    )
+                    overfit_cues.append((fail_cid, round(raw_fit_ratio, 3)))
                 fit_ratio = max(1.0, raw_fit_ratio)
                 item.update({
                     "cue_window_seconds": cue_window,
