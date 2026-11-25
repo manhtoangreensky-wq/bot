@@ -34,15 +34,15 @@ from services.autopost_affiliate import (
 )
 from services.autopost_publish import check_platform_capability, OmnichannelPublishQueue, TelegramAdapter, execute_publish_job, process_due_publish_jobs
 from services.autopost_ads import evaluate_organic_to_ads, validate_ad_spend_request, DEFAULT_OWNER_BUDGET_ENVELOPE
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
-║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
 from services.autopost_engine import (
     autopost_hub_keyboard,
     autopost_hub_text,
     handle_autopost_callback,
 )
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║   TOAN AAS v1.0 Beta - DYNAMIC QR READY                         ║
+║   FastAPI + Telegram Bot (Shared Event Loop via Lifespan)        ║
 ║   Dynamic Billing | Deepgram | Auto-Tiers | PayOS Dynamic QR     ║
 ║   Cutout Fallback | OpenAI Fallback | Full Env Vars              ║
 ╚══════════════════════════════════════════════════════════════════╝
