@@ -606,7 +606,7 @@ def _telegram_proxy_env(
     reason: str,
 ) -> str:
     raw = str(os.environ.get(str(name or ""), default) or "")
-    if "\r" in raw or "\\n" in raw:
+    if "\r" in raw or "\n" in raw or "\\r" in raw or "\\n" in raw:
         raise ValueError(str(reason or "telegram_proxy_env_invalid"))
     return raw.strip()
 
@@ -238399,7 +238399,7 @@ def set_video_dubbing_pending(user_id, step: str, **fields) -> dict:
             else:
                 state[key] = _short_pending_text(value)
     state.update(acoustic_fields)
-    if translation_target_changed:
+    if translation_target_changed and "translated_subtitle_ref" not in fields:
         state["translated_subtitle_ref"] = ""
         state["translated_subtitle_target_language"] = ""
         state["translated_subtitle_source_hash"] = ""
