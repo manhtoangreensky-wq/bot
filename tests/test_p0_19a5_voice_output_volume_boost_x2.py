@@ -31,7 +31,7 @@ async def _run_custom_voice_preview(tmp_path):
         return "PASS", "file-1", "ok", 200
 
     async def clone_call(_file_id, _voice_id):
-        return "PASS", {}, "ok", 200
+        return "PASS", {"voice_id": _voice_id}, "ok", 200
 
     async def tts_call(_text, voice_id="", **_kwargs):
         assert voice_id == "toanaas-voice-user1-20260628"
