@@ -112,8 +112,8 @@ _MAGIC_SIGNATURES = {
 def sanitize_filename(filename: str, fallback: str = "upload.bin") -> str:
     """Eliminate directory traversal tokens, control characters, and unsafe characters."""
     raw = str(filename or "").strip()
-    # Strip path separators
-    raw = os.path.basename(raw).replace("\\", "").replace("/", "")
+    # Strip path separators across Windows and POSIX
+    raw = os.path.basename(raw.replace("\\", "/")).replace("/", "")
     # Remove null bytes & controls
     raw = _CONTROL_CHARS.sub("", raw).replace(_NULL_BYTE, "")
     # Keep only safe characters: alphanumeric, dot, underscore, dash
