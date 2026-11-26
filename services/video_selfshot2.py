@@ -353,10 +353,16 @@ def select_subjects(
         if len(selected) != len(requested):
             raise ValueError("subject_id_not_found")
     elif choice == "person":
+        if len(persons) > 1:
+            raise ValueError("person_subject_choice_required")
         selected = persons or [_user_confirmed_subject("person")]
     elif choice == "object":
+        if len(objects) > 1:
+            raise ValueError("object_subject_choice_required")
         selected = objects or [_user_confirmed_subject("object")]
     elif choice == "person_object":
+        if len(persons) > 1 or len(objects) > 1:
+            raise ValueError("person_object_subject_choice_required")
         selected = (persons or [_user_confirmed_subject("person")]) + (objects or [_user_confirmed_subject("object")])
     elif choice == "motion_only":
         selected = []
@@ -412,7 +418,22 @@ def default_preserve_constraints(subject_manifest: Mapping[str, Any] | None) -> 
 
 
 def preserve_gate(subject_manifest: Mapping[str, Any] | None, constraints: Mapping[str, Any] | None) -> dict[str, Any]:
-    return {"ok": True, "blockers": [], "blocker": ""}
+    manifest = dict(subject_manifest or {})
+    rules = dict(constraints or {})
+    blockers: list[str] = []
+    has_person = bool(manifest.get("person_subject_ids"))
+    has_object = bool(manifest.get("object_subject_ids"))
+    if not manifest.get("confirmed") or (not has_person and not has_object and not manifest.get("motion_only")):
+        blockers.append("subject_manifest_missing")
+    if has_person and not rules.get("person_identity"):
+        blockers.append("person_identity_lock_missing")
+    if has_object and not rules.get("object_identity"):
+        blockers.append("object_identity_lock_missing")
+    if (has_person and has_object) and not rules.get("person_object_relation"):
+        blockers.append("person_object_relationship_lock_missing")
+    if not rules.get("action_expression"):
+        blockers.append("source_action_lock_missing")
+    return {"ok": not blockers, "blockers": blockers, "blocker": blockers[0] if blockers else ""}
 
 
 def suggestion_catalog(
@@ -588,12 +609,13 @@ def compile_scene_prompts(
         end_sec = scene.get("source_segment_end")
         prompt = (
             f"Cảnh {idx}: Giữ nhận diện [{subjects}]. "
+            f"Quan hệ giữ nguyên [{interactions}] (person-object contact points). "
             f"Nội dung: {content_text}. "
             f"Hướng: {dir_label}. "
             f"Chuyển động từ {start_sec}s đến {end_sec}s của video nguồn."
         )
         negative = (
-            "no face drift, no body drift, no product mutation, no extra limbs, no duplicated person or object, no broken contact point"
+            "no face drift, no body drift, no product shape drift, no lost held object, no product mutation, no extra limbs, no duplicated person or object, no broken contact point"
         )
         result.append({
             "scene_id": int(scene.get("scene_id") or idx),
@@ -1319,7 +1341,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
         ]
         rows = [prompt_buttons[offset:offset + 2] for offset in range(0, len(prompt_buttons), 2)]
         rows.append([('↩️ Tạo lại tất cả', 'vproduct|ss2|compile_prompts'), ('✅ Tiếp tục tới Add-on', 'vproduct|ss2|finish')])
-        rows.append(_nav("scene_plan"))
+        rows.append(_nav(screen_parent("prompts", draft)))
     elif name == "audio":
         plan = dict(draft.get("audio_plan") or {})
         text = "🎚️ <b>Âm thanh và phần bổ sung</b>\n\nMỗi mục có thể đặt âm lượng từ 0–200%. Hệ thống chỉ áp dụng những mục anh/chị bật."
@@ -1397,7 +1419,7 @@ def screen_model(screen: str, state: Mapping[str, Any] | None = None) -> dict[st
     elif name == "requirements":
         text = "🔒 <b>Yêu cầu giữ nguyên</b>"
         rows = [
-            [("⬅️ Quay lại kế hoạch cảnh", "vproduct|ss2|show|scene_plan"), ("🎬 Menu Video", "menu|main_video")],
+            _nav(screen_parent("requirements", draft)),
         ]
     else:
         return screen_model("intro", draft)
