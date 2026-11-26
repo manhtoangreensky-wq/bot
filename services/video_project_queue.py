@@ -1607,6 +1607,10 @@ def reconcile_provider_progress_telemetry(
     return telemetry
 
 
+_SCHEMA_VERIFIED_CACHE: dict[tuple[str, int, int], bool] = {}
+_SCHEMA_REQUIRED_TABLES = ("video_projects", "video_scenes", "video_jobs")
+
+
 def _columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
 
@@ -1616,8 +1620,34 @@ def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_nam
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
 
 
+def _queue_schema_cache_key(conn: sqlite3.Connection) -> tuple[str, int, int] | None:
+    try:
+        rows = conn.execute("PRAGMA database_list").fetchall()
+    except Exception:
+        return None
+    db_file = ""
+    for row in rows:
+        if len(row) >= 3 and str(row[1] or "") == "main":
+            db_file = str(row[2] or "").strip()
+            break
+    if not db_file or db_file == ":memory:":
+        return None
+    try:
+        st = os.stat(db_file)
+        schema_row = conn.execute("PRAGMA schema_version").fetchone()
+        schema_version = int(schema_row[0]) if schema_row else 0
+    except Exception:
+        return None
+    if schema_version <= 0:
+        return None
+    return (db_file, int(st.st_ino), schema_version)
+
+
 def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
     """Create/adapt queue tables without dropping or deleting existing data."""
+    cache_key = _queue_schema_cache_key(conn)
+    if cache_key is not None and cache_key in _SCHEMA_VERIFIED_CACHE:
+        return
     caller_transaction_active = bool(conn.in_transaction)
     conn.execute(
         """CREATE TABLE IF NOT EXISTS video_projects (
@@ -1722,6 +1752,7 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )"""
     )
+    project_cols = _columns(conn, "video_projects")
     for column_name, column_sql in [
         ("project_uuid", "project_uuid TEXT"),
         ("profile_id", "profile_id TEXT"),
@@ -1757,7 +1788,10 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("completed_at", "completed_at DATETIME"),
         ("cancelled_at", "cancelled_at DATETIME"),
     ]:
-        _add_column_if_missing(conn, "video_projects", column_name, column_sql)
+        if column_name not in project_cols:
+            conn.execute(f"ALTER TABLE video_projects ADD COLUMN {column_sql}")
+            project_cols.add(column_name)
+    scene_cols = _columns(conn, "video_scenes")
     for column_name, column_sql in [
         ("role", "role TEXT"),
         ("script_text", "script_text TEXT DEFAULT ''"),
@@ -1770,7 +1804,10 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("video_file_path", "video_file_path TEXT DEFAULT ''"),
         ("scene_status", "scene_status TEXT DEFAULT 'pending'"),
     ]:
-        _add_column_if_missing(conn, "video_scenes", column_name, column_sql)
+        if column_name not in scene_cols:
+            conn.execute(f"ALTER TABLE video_scenes ADD COLUMN {column_sql}")
+            scene_cols.add(column_name)
+    job_cols = _columns(conn, "video_jobs")
     for column_name, column_sql in [
         ("project_id", "project_id INTEGER"),
         ("user_id", "user_id INTEGER"),
@@ -1789,7 +1826,9 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
         ("started_at", "started_at DATETIME"),
         ("completed_at", "completed_at DATETIME"),
     ]:
-        _add_column_if_missing(conn, "video_jobs", column_name, column_sql)
+        if column_name not in job_cols:
+            conn.execute(f"ALTER TABLE video_jobs ADD COLUMN {column_sql}")
+            job_cols.add(column_name)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_projects_user_status ON video_projects(user_id, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_projects_project_uuid ON video_projects(project_uuid)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_video_scenes_project ON video_scenes(project_id, scene_index)")
@@ -1809,6 +1848,11 @@ def ensure_video_project_queue_schema(conn: sqlite3.Connection) -> None:
     )
     if not caller_transaction_active:
         conn.commit()
+    post_cache_key = _queue_schema_cache_key(conn)
+    if post_cache_key is not None:
+        if len(_SCHEMA_VERIFIED_CACHE) >= 128:
+            _SCHEMA_VERIFIED_CACHE.pop(next(iter(_SCHEMA_VERIFIED_CACHE)), None)
+        _SCHEMA_VERIFIED_CACHE[post_cache_key] = True
 
 
 def _project_from_row(row: sqlite3.Row | tuple | None) -> dict[str, Any]:

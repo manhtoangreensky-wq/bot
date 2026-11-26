@@ -6632,6 +6632,49 @@ def set_system_setting(key, value, note="", updated_by=""):
             conn.close()
 
 
+_DEFAULT_SET_SYSTEM_SETTING = set_system_setting
+
+
+def set_system_settings_batch(items, note="", updated_by=""):
+    entries = list(items or [])
+    if not entries:
+        return
+    if set_system_setting is not _DEFAULT_SET_SYSTEM_SETTING:
+        for item in entries:
+            key, value = item[0], item[1]
+            item_note = item[2] if len(item) > 2 else note
+            item_by = item[3] if len(item) > 3 else updated_by
+            set_system_setting(key, value, item_note, item_by)
+        return
+    now_value = now_text()
+    rows = [
+        (
+            str(item[0]),
+            str(item[1] or ""),
+            str((item[2] if len(item) > 2 else note) or "")[:1200],
+            now_value,
+            str((item[3] if len(item) > 3 else updated_by) or ""),
+        )
+        for item in entries
+    ]
+    conn = None
+    try:
+        conn = db_connect()
+        conn.executemany(
+            """INSERT OR REPLACE INTO system_settings
+            (key, value, note, updated_at, updated_by)
+            VALUES (?,?,?,?,?)""",
+            rows,
+        )
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"System settings batch write failed: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+
 CSKH_SESSION_WINDOW_SETTING = "cskh_session_window_hours"
 CSKH_TURN_RETENTION_SETTING = "cskh_turn_retention_days"
 CSKH_RECENT_TURN_LIMIT_SETTING = "cskh_recent_turn_limit"
@@ -77200,6 +77243,14 @@ def claim_video_uiflow3_tail_owner(context, raw_state: dict) -> dict:
 
 def video_uiflow3_build_tail_state(raw_state: dict) -> dict:
     state = video_uiflow3.normalize_state(raw_state)
+    if (
+        str(state.get("parent_product") or "").strip() == "multi_scene_film"
+        and not str((state.get("format") or {}).get("ratio") or "").strip()
+    ):
+        state.setdefault("format", {})["ratio"] = "9:16"
+        for item in state.get("scenes") or []:
+            if isinstance(item, dict) and not str(item.get("ratio") or "").strip():
+                item["ratio"] = "9:16"
     route = video_uiflow3_execution_adapter(state)
     if route["kind"] != "product_tail":
         raise ValueError("video_uiflow3_shared_tail_not_supported")
@@ -85434,6 +85485,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
 
             dur = int(ep.get("duration") or 60)
             scene_count = 4 if dur <= 45 else (5 if dur <= 60 else 6)
+            state["format"]["ratio"] = str((state.get("format") or {}).get("ratio") or "").strip() or "9:16"
             state["format"]["scene_count"] = scene_count
             state["format"]["scene_count_confirmed"] = True
             state["format"]["duration_seconds"] = dur
@@ -85556,6 +85608,7 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             scene_count = safe_int((state.get("format") or {}).get("scene_count"), 0)
             if scene_count <= 0:
                 scene_count = 5
+            state["format"]["ratio"] = str((state.get("format") or {}).get("ratio") or "").strip() or "9:16"
             state["format"]["scene_count"] = scene_count
             state["format"]["scene_count_confirmed"] = True
 
@@ -85587,6 +85640,9 @@ async def handle_video_uiflow3_callback(update: Update, context: ContextTypes.DE
             await query.answer()
             return await video_tail9_render(query, user_id, context, "addon")
         elif action == "episode_tail_addon":
+            state.setdefault("format", {})["ratio"] = (
+                str((state.get("format") or {}).get("ratio") or "").strip() or "9:16"
+            )
             snapshot = video_uiflow3.approved_snapshot(state)
             legacy_compat = dict(state.get("legacy_compat") or {})
             legacy_compat["approved_snapshot"] = snapshot
@@ -277091,21 +277147,24 @@ def _record_owner_product_video_worker_identity(
         "last_heartbeat_request_at": heartbeat_updated_at,
     }
     try:
-        for key, value in values.items():
-            set_system_setting(prefix + key, value, "owner product video worker identity", worker_id)
         generation_key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", generation_id)[:160]
-        set_system_setting(
+        batch_items = [
+            (prefix + key, value, "owner product video worker identity", worker_id)
+            for key, value in values.items()
+        ]
+        batch_items.append((
             prefix + "generation:" + generation_key,
             json.dumps(record, ensure_ascii=True, separators=(",", ":")),
             "owner product video worker generation heartbeat",
             worker_id,
-        )
-        set_system_setting(
+        ))
+        batch_items.append((
             prefix + "owner_heartbeat_persisted",
             "yes",
             "owner product video heartbeat diagnostic",
             worker_id,
-        )
+        ))
+        set_system_settings_batch(batch_items, "owner product video worker identity", worker_id)
         authoritative = product_video_worker_admission_status(caller_generation_id=generation_id)
         return {
             **diagnostics,
@@ -277349,246 +277408,269 @@ def remote_worker_status_snapshot() -> dict:
 async def internal_worker_heartbeat(request: Request):
     worker_scope = verify_local_worker_access(request) or "all"
     payload = await read_json_body(request)
-    payload_scope = str(payload.get("job_scope") or worker_scope).strip().lower()
-    valid_scopes = globals().get("LOCAL_WORKER_JOB_SCOPES", frozenset({"all", "video_edit_only"}))
-    if payload_scope != worker_scope or payload_scope not in valid_scopes:
-        raise HTTPException(status_code=403, detail="worker job scope mismatch")
-    worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
-    worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
-    worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(
-        payload.get("frame_video_engine_flags")
-    )
-    ffmpeg_path = str(payload.get("ffmpeg_path") or "")
-    ffprobe_path = str(payload.get("ffprobe_path") or "")
-    if worker_scope == "all":
-        set_system_setting("local_worker:last_heartbeat", now_text(), "last local worker heartbeat", worker_id)
-        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
-        set_system_setting("local_worker:job_scope", worker_scope, "last local worker job scope", worker_id)
-        set_system_setting(
-            "local_worker:worker_sha",
-            worker_sha,
-            "last local worker revision",
-            worker_id,
-        )
-        set_system_setting(
-            "local_worker:frame_video_engine_flags_json",
-            json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
-            "last local Frame engine flag snapshot",
-            worker_id,
-        )
-        set_system_setting(
-            "local_worker:ffmpeg_path_seen",
-            ffmpeg_path[:500],
-            "worker reported ffmpeg path",
-            worker_id,
-        )
-        set_system_setting(
-            "local_worker:ffprobe_configured",
-            "1" if ffprobe_path else "0",
-            "worker reported ffprobe availability",
-            worker_id,
-        )
-    contract_version = max(0, safe_int(payload.get("heartbeat_contract_version"), 0))
-    if contract_version >= 1 and worker_scope == "video_edit_only":
-        received_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        capabilities = payload.get("capabilities") or []
-        if not isinstance(capabilities, list):
-            capabilities = []
-        reported_filters = payload.get("video_edit_filters") or []
-        if not isinstance(reported_filters, list):
-            reported_filters = []
-        safe_filters = sorted({
-            str(item).strip()
-            for item in reported_filters
-            if re.fullmatch(r"[a-z0-9_]{1,64}", str(item).strip())
-        })[:VIDEO_EDIT_FILTER_SNAPSHOT_MAX_ITEMS]
 
-        def heartbeat_nonnegative_int(name: str, maximum: int) -> int:
-            raw = payload.get(name)
-            if (
-                isinstance(raw, bool)
-                or not isinstance(raw, int)
-                or raw < 0
-            ):
-                return 0
-            return min(raw, maximum)
+    def _run_sync_internal_worker_heartbeat():
+        payload_scope = str(payload.get("job_scope") or worker_scope).strip().lower()
+        valid_scopes = globals().get("LOCAL_WORKER_JOB_SCOPES", frozenset({"all", "video_edit_only"}))
+        if payload_scope != worker_scope or payload_scope not in valid_scopes:
+            raise HTTPException(status_code=403, detail="worker job scope mismatch")
+        worker_id = str(payload.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
+        worker_sha = frame_video_public_seam.sanitize_frame_video_worker_sha(payload.get("worker_sha"))
+        worker_flags = frame_video_public_seam.normalize_frame_video_worker_flags(
+            payload.get("frame_video_engine_flags")
+        )
+        ffmpeg_path = str(payload.get("ffmpeg_path") or "")
+        ffprobe_path = str(payload.get("ffprobe_path") or "")
+        batch_writer = globals().get("set_system_settings_batch")
+        if worker_scope == "all":
+            now_val = now_text()
+            all_items = [
+                ("local_worker:last_heartbeat", now_val, "last local worker heartbeat", worker_id),
+                ("local_worker:worker_id", worker_id, "last local worker id", worker_id),
+                ("local_worker:job_scope", worker_scope, "last local worker job scope", worker_id),
+                ("local_worker:worker_sha", worker_sha, "last local worker revision", worker_id),
+                (
+                    "local_worker:frame_video_engine_flags_json",
+                    json.dumps(worker_flags, ensure_ascii=True, separators=(",", ":")),
+                    "last local Frame engine flag snapshot",
+                    worker_id,
+                ),
+                ("local_worker:ffmpeg_path_seen", ffmpeg_path[:500], "worker reported ffmpeg path", worker_id),
+                ("local_worker:ffprobe_configured", "1" if ffprobe_path else "0", "worker reported ffprobe availability", worker_id),
+            ]
+            if callable(batch_writer):
+                batch_writer(all_items)
+            else:
+                for k, v, n, by in all_items:
+                    set_system_setting(k, v, n, by)
+        contract_version = max(0, safe_int(payload.get("heartbeat_contract_version"), 0))
+        if contract_version >= 1 and worker_scope == "video_edit_only":
+            received_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            capabilities = payload.get("capabilities") or []
+            if not isinstance(capabilities, list):
+                capabilities = []
+            reported_filters = payload.get("video_edit_filters") or []
+            if not isinstance(reported_filters, list):
+                reported_filters = []
+            safe_filters = sorted({
+                str(item).strip()
+                for item in reported_filters
+                if re.fullmatch(r"[a-z0-9_]{1,64}", str(item).strip())
+            })[:VIDEO_EDIT_FILTER_SNAPSHOT_MAX_ITEMS]
 
-        adapter_settings = {
-            "local_worker:video_edit_received_at_utc": received_at_utc,
-            "local_worker:video_edit_timestamp_utc": str(payload.get("timestamp_utc") or "")[:80],
-            "local_worker:video_edit_job_scope": worker_scope,
-            "local_worker:video_edit_worker_id": worker_id,
-            "local_worker:video_edit_worker_sha": worker_sha,
-            "local_worker:video_edit_ffmpeg_path_seen": ffmpeg_path[:500],
-            "local_worker:video_edit_ffprobe_configured": "1" if ffprobe_path else "0",
-            "local_worker:video_edit_worker_owner": str(payload.get("worker_owner") or "")[:120],
-            "local_worker:video_edit_engine_route": str(payload.get("engine_route") or "")[:120],
-            "local_worker:video_edit_capabilities_json": json.dumps(
-                [str(item)[:120] for item in capabilities if str(item).strip()],
-                ensure_ascii=False,
-            ),
-            "local_worker:video_edit_instance_id": str(payload.get("instance_id") or "")[:180],
-            "local_worker:video_edit_process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
-            "local_worker:video_edit_queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
-            "local_worker:video_edit_last_error": str(payload.get("last_error") or "")[:500],
-            "local_worker:video_edit_heartbeat_contract_version": str(contract_version),
-            "local_worker:video_edit_started_at_utc": str(payload.get("started_at_utc") or "")[:80],
-            "local_worker:video_edit_filters_json": json.dumps(safe_filters, ensure_ascii=True, separators=(",", ":")),
-            "local_worker:video_edit_filters_known": "1" if bool(payload.get("video_edit_filters_known")) else "0",
-            "local_worker:video_edit_filter_worker_id": str(payload.get("video_edit_filter_worker_id") or "")[:120],
-            "local_worker:video_edit_filter_ffmpeg_path": str(payload.get("video_edit_filter_ffmpeg_path") or "")[:500],
-            "local_worker:video_edit_workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
-            "local_worker:video_edit_workspace_free_bytes": str(
-                heartbeat_nonnegative_int("workspace_free_bytes", (1 << 63) - 1)
-            ),
-            "local_worker:video_edit_max_deadline_seconds": str(
-                heartbeat_nonnegative_int(
-                    "video_edit_max_deadline_seconds",
-                    6 * 60 * 60,
-                )
-            ),
-            "local_worker:video_edit_worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
-            "local_worker:video_edit_local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
+            def heartbeat_nonnegative_int(name: str, maximum: int) -> int:
+                raw = payload.get(name)
+                if (
+                    isinstance(raw, bool)
+                    or not isinstance(raw, int)
+                    or raw < 0
+                ):
+                    return 0
+                return min(raw, maximum)
+
+            adapter_settings = {
+                "local_worker:video_edit_received_at_utc": received_at_utc,
+                "local_worker:video_edit_timestamp_utc": str(payload.get("timestamp_utc") or "")[:80],
+                "local_worker:video_edit_job_scope": worker_scope,
+                "local_worker:video_edit_worker_id": worker_id,
+                "local_worker:video_edit_worker_sha": worker_sha,
+                "local_worker:video_edit_ffmpeg_path_seen": ffmpeg_path[:500],
+                "local_worker:video_edit_ffprobe_configured": "1" if ffprobe_path else "0",
+                "local_worker:video_edit_worker_owner": str(payload.get("worker_owner") or "")[:120],
+                "local_worker:video_edit_engine_route": str(payload.get("engine_route") or "")[:120],
+                "local_worker:video_edit_capabilities_json": json.dumps(
+                    [str(item)[:120] for item in capabilities if str(item).strip()],
+                    ensure_ascii=False,
+                ),
+                "local_worker:video_edit_instance_id": str(payload.get("instance_id") or "")[:180],
+                "local_worker:video_edit_process_id": str(max(0, safe_int(payload.get("process_id"), 0))),
+                "local_worker:video_edit_queue_depth": str(max(0, safe_int(payload.get("queue_depth"), 0))),
+                "local_worker:video_edit_last_error": str(payload.get("last_error") or "")[:500],
+                "local_worker:video_edit_heartbeat_contract_version": str(contract_version),
+                "local_worker:video_edit_started_at_utc": str(payload.get("started_at_utc") or "")[:80],
+                "local_worker:video_edit_filters_json": json.dumps(safe_filters, ensure_ascii=True, separators=(",", ":")),
+                "local_worker:video_edit_filters_known": "1" if bool(payload.get("video_edit_filters_known")) else "0",
+                "local_worker:video_edit_filter_worker_id": str(payload.get("video_edit_filter_worker_id") or "")[:120],
+                "local_worker:video_edit_filter_ffmpeg_path": str(payload.get("video_edit_filter_ffmpeg_path") or "")[:500],
+                "local_worker:video_edit_workspace_ready": "1" if payload.get("workspace_ready") is True else "0",
+                "local_worker:video_edit_workspace_free_bytes": str(
+                    heartbeat_nonnegative_int("workspace_free_bytes", (1 << 63) - 1)
+                ),
+                "local_worker:video_edit_max_deadline_seconds": str(
+                    heartbeat_nonnegative_int(
+                        "video_edit_max_deadline_seconds",
+                        6 * 60 * 60,
+                    )
+                ),
+                "local_worker:video_edit_worker_token_ready": "1" if payload.get("worker_token_ready") is True else "0",
+                "local_worker:video_edit_local_bot_api_ready": "1" if payload.get("local_bot_api_ready") is True else "0",
+            }
+            if callable(batch_writer):
+                batch_writer([
+                    (key, value, "video edit worker heartbeat contract", worker_id)
+                    for key, value in adapter_settings.items()
+                ])
+            else:
+                for key, value in adapter_settings.items():
+                    set_system_setting(key, value, "video edit worker heartbeat contract", worker_id)
+        return {
+            "ok": True,
+            "time": now_text(),
+            "worker_id": worker_id,
+            "heartbeat_contract_version": contract_version,
         }
-        for key, value in adapter_settings.items():
-            set_system_setting(key, value, "video edit worker heartbeat contract", worker_id)
-    return {
-        "ok": True,
-        "time": now_text(),
-        "worker_id": worker_id,
-        "heartbeat_contract_version": contract_version,
-    }
+
+    to_thread = getattr(globals().get("asyncio"), "to_thread", None)
+    if callable(to_thread):
+        return await to_thread(_run_sync_internal_worker_heartbeat)
+    return _run_sync_internal_worker_heartbeat()
 
 @fastapi_app.get("/internal/worker/poll")
 async def internal_worker_poll(request: Request):
     worker_scope = verify_local_worker_access(request)
-    worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
-    worker_instance_id = str(request.query_params.get("worker_instance_id") or "")[:120]
-    video_edit_resume_version = str(
-        request.query_params.get("video_edit_resume_version") or ""
-    )[:8]
-    supports_video_edit_receipt_prefix_resume = bool(
-        video_edit_resume_version
-        == str(video_editengine1.VIDEO_LOCAL_EDIT_RESUME_VERSION)
-    )
-    lease_seconds = max(
-        30,
-        min(
-            3600,
-            safe_int(
-                request.query_params.get("lease_seconds"),
-                LOCAL_WORKER_MAX_JOB_SECONDS or 600,
-            ),
-        ),
-    )
-    if worker_scope == "all":
-        set_system_setting("local_worker:last_heartbeat", now_text(), "poll heartbeat", worker_id)
-        set_system_setting("local_worker:worker_id", worker_id, "last local worker id", worker_id)
-        set_system_setting("local_worker:job_scope", worker_scope, "poll worker job scope", worker_id)
-    else:
-        set_system_setting(
-            "local_worker:video_edit_poll_job_scope",
-            worker_scope,
-            "video edit poll worker job scope",
-            worker_id,
-        )
-    if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
-        return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
-    conn = db_connect()
-    try:
-        claim_now = now_text()
-        canonical_job = {}
-        if worker_scope == "video_edit_only":
-            canonical_job = video_editengine1.claim_next_video_local_edit(
-                conn,
-                lease_owner=worker_instance_id,
-                now=claim_now,
-                lease_seconds=lease_seconds,
-                supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
-            )
-        if canonical_job:
-            conn.commit()
-            return {
-                "ok": True,
-                "enabled": True,
-                "poll_enabled": True,
-                "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
-                "job": canonical_job,
-            }
-        if worker_scope == "video_edit_only":
-            conn.commit()
-            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
-        recoverable_job = claim_recoverable_video_ai_edit_job(
-            worker_id=worker_id,
-            lease_seconds=lease_seconds,
-            conn=conn,
-        )
-        if recoverable_job:
-            conn.commit()
-            return {
-                "ok": True,
-                "enabled": True,
-                "poll_enabled": True,
-                "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
-                "job": recoverable_job,
-            }
-        c = conn.cursor()
-        c.execute(
-            """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
-                      error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
-               FROM local_worker_jobs
-               WHERE status='queued' AND job_type<>?
-               ORDER BY id ASC
-               LIMIT 1""",
-            (video_editengine1.WORKER_JOB_TYPE,),
-        )
 
-        row = c.fetchone()
-        if not row:
-            conn.commit()
-            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
-        job = local_worker_job_from_row(row)
-        now = claim_now
-        c.execute(
-            "UPDATE local_worker_jobs SET status='running', started_at=?, worker_id=?, updated_at=? WHERE id=? AND status='queued'",
-            (now, worker_id, now, job["id"]),
+    def _run_sync_internal_worker_poll():
+        worker_id = str(request.query_params.get("worker_id") or request.headers.get("x-worker-id") or "local_worker")[:120]
+        worker_instance_id = str(request.query_params.get("worker_instance_id") or "")[:120]
+        video_edit_resume_version = str(
+            request.query_params.get("video_edit_resume_version") or ""
+        )[:8]
+        supports_video_edit_receipt_prefix_resume = bool(
+            video_edit_resume_version
+            == str(video_editengine1.VIDEO_LOCAL_EDIT_RESUME_VERSION)
         )
-        conn.commit()
-        if c.rowcount < 1:
-            return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
-        job = get_local_worker_job(job["id"])
-        if str(job.get("job_type") or "") == frame_video_commercial.WORKER_JOB_TYPE:
-            try:
-                frame_payload = json.loads(str(job.get("input_file_id") or "") or "{}")
-            except Exception:
-                frame_payload = {}
-            frame_job_id = str(frame_payload.get("frame_job_id") or "")
-            if frame_job_id:
-                update_frame_video_job(
-                    frame_job_id,
-                    status="rendering",
-                    owner="local_worker",
-                    progress_percent=45,
-                    lease_owner=worker_id,
-                    heartbeat_updated_at=now,
-                    started_at=now,
+        lease_seconds = max(
+            30,
+            min(
+                3600,
+                safe_int(
+                    request.query_params.get("lease_seconds"),
+                    LOCAL_WORKER_MAX_JOB_SECONDS or 600,
+                ),
+            ),
+        )
+        batch_writer = globals().get("set_system_settings_batch")
+        if worker_scope == "all":
+            now_val = now_text()
+            poll_settings = [
+                ("local_worker:last_heartbeat", now_val, "poll heartbeat", worker_id),
+                ("local_worker:worker_id", worker_id, "last local worker id", worker_id),
+                ("local_worker:job_scope", worker_scope, "poll worker job scope", worker_id),
+            ]
+            if callable(batch_writer):
+                batch_writer(poll_settings)
+            else:
+                for k, v, n, by in poll_settings:
+                    set_system_setting(k, v, n, by)
+        else:
+            set_system_setting(
+                "local_worker:video_edit_poll_job_scope",
+                worker_scope,
+                "video edit poll worker job scope",
+                worker_id,
+            )
+        if not LOCAL_WORKER_ENABLED or not LOCAL_WORKER_POLL_ENABLED:
+            return {"ok": True, "enabled": LOCAL_WORKER_ENABLED, "poll_enabled": LOCAL_WORKER_POLL_ENABLED, "job": None}
+        conn = db_connect()
+        try:
+            claim_now = now_text()
+            canonical_job = {}
+            if worker_scope == "video_edit_only":
+                canonical_job = video_editengine1.claim_next_video_local_edit(
+                    conn,
+                    lease_owner=worker_instance_id,
+                    now=claim_now,
+                    lease_seconds=lease_seconds,
+                    supports_receipt_prefix_resume=supports_video_edit_receipt_prefix_resume,
                 )
-                update_frame_video_job_config(
-                    frame_job_id,
-                    claim_attempted=True,
-                    claim_result="running",
-                    execution_owner="local_worker",
-                    ffmpeg_command_created=True,
-                )
-        return {
-            "ok": True,
-            "enabled": True,
-            "poll_enabled": True,
-            "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
-            "job": job,
-        }
-    finally:
-        conn.close()
+            if canonical_job:
+                conn.commit()
+                return {
+                    "ok": True,
+                    "enabled": True,
+                    "poll_enabled": True,
+                    "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+                    "job": canonical_job,
+                }
+            if worker_scope == "video_edit_only":
+                conn.commit()
+                return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+            recoverable_job = claim_recoverable_video_ai_edit_job(
+                worker_id=worker_id,
+                lease_seconds=lease_seconds,
+                conn=conn,
+            )
+            if recoverable_job:
+                conn.commit()
+                return {
+                    "ok": True,
+                    "enabled": True,
+                    "poll_enabled": True,
+                    "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+                    "job": recoverable_job,
+                }
+            c = conn.cursor()
+            c.execute(
+                """SELECT id,user_id,command,job_type,status,provider,input_file_id,output_file_id,output_url,
+                          error_short,created_at,started_at,finished_at,xu_cost,admin_only,worker_id,updated_at,provider_task_id
+                   FROM local_worker_jobs
+                   WHERE status='queued' AND job_type<>?
+                   ORDER BY id ASC
+                   LIMIT 1""",
+                (video_editengine1.WORKER_JOB_TYPE,),
+            )
+
+            row = c.fetchone()
+            if not row:
+                conn.commit()
+                return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+            job = local_worker_job_from_row(row)
+            now = claim_now
+            c.execute(
+                "UPDATE local_worker_jobs SET status='running', started_at=?, worker_id=?, updated_at=? WHERE id=? AND status='queued'",
+                (now, worker_id, now, job["id"]),
+            )
+            conn.commit()
+            if c.rowcount < 1:
+                return {"ok": True, "enabled": True, "poll_enabled": True, "job": None}
+            job = get_local_worker_job(job["id"])
+            if str(job.get("job_type") or "") == frame_video_commercial.WORKER_JOB_TYPE:
+                try:
+                    frame_payload = json.loads(str(job.get("input_file_id") or "") or "{}")
+                except Exception:
+                    frame_payload = {}
+                frame_job_id = str(frame_payload.get("frame_job_id") or "")
+                if frame_job_id:
+                    update_frame_video_job(
+                        frame_job_id,
+                        status="rendering",
+                        owner="local_worker",
+                        progress_percent=45,
+                        lease_owner=worker_id,
+                        heartbeat_updated_at=now,
+                        started_at=now,
+                    )
+                    update_frame_video_job_config(
+                        frame_job_id,
+                        claim_attempted=True,
+                        claim_result="running",
+                        execution_owner="local_worker",
+                        ffmpeg_command_created=True,
+                    )
+            return {
+                "ok": True,
+                "enabled": True,
+                "poll_enabled": True,
+                "max_job_seconds": LOCAL_WORKER_MAX_JOB_SECONDS,
+                "job": job,
+            }
+        finally:
+            conn.close()
+
+    to_thread = getattr(globals().get("asyncio"), "to_thread", None)
+    if callable(to_thread):
+        return await to_thread(_run_sync_internal_worker_poll)
+    return _run_sync_internal_worker_poll()
 
 @fastapi_app.post("/internal/worker/video_edit_cleanup/claim")
 async def internal_worker_video_edit_cleanup_claim(request: Request):
@@ -278251,118 +278333,141 @@ async def api_worker_ping(request: Request):
 async def api_worker_claim(request: Request):
     verify_remote_worker_api_access(request)
     payload = await read_json_body(request)
-    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
-    capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
-    max_jobs = max(1, min(safe_int(payload.get("max_jobs"), 1), 1))
-    lease_seconds = max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
-    canary_only = str(payload.get("canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    admin_canary_only = str(payload.get("admin_canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    admin_video_only = str(payload.get("admin_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    product_video_only = str(payload.get("product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
-    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker claim", worker_id)
-    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
-    heartbeat = _record_owner_product_video_worker_identity(
-        worker_id,
-        payload,
-        capabilities,
-        refresh_source="claim_request",
-    )
-    worker_compatibility = (
-        product_video_worker_admission_status(
-            caller_generation_id=str(payload.get("generation_id") or payload.get("worker_generation_id") or "")
-        )
-        if owner_product_video_only
-        else {}
-    )
-    conn = db_connect()
-    recovery_report = {}
-    try:
-        if owner_product_video_only and heartbeat.get("heartbeat_accepted") and (
-            not worker_compatibility
-            or worker_compatibility.get("compatible")
-        ):
-            try:
-                recovery_report = video_b14_recover_existing_tasks_for_worker_claim(
-                    conn,
-                    limit=20,
-                )
-            except Exception as exc:
-                recovery_report = {
-                    "ok": False,
-                    "owner": "worker_claim",
-                    "error": type(exc).__name__,
-                    "recovered": 0,
-                }
-        claim_result = remote_worker_api.claim_remote_worker_job(
-            conn,
-            worker_id=worker_id,
-            capabilities=capabilities,
-            max_jobs=max_jobs,
-            lease_seconds=lease_seconds,
-            canary_only=canary_only,
-            admin_canary_only=admin_canary_only,
-            admin_video_only=admin_video_only,
-            product_video_only=product_video_only,
-            owner_product_video_only=owner_product_video_only,
-            worker_compatibility=worker_compatibility,
-        )
-    finally:
-        conn.close()
-    if owner_product_video_only and not claim_result.get("job") and heartbeat.get("heartbeat_accepted"):
+
+    def _run_sync_worker_claim():
+        worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+        capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+        max_jobs = max(1, min(safe_int(payload.get("max_jobs"), 1), 1))
+        lease_seconds = max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600)))
+        canary_only = str(payload.get("canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        admin_canary_only = str(payload.get("admin_canary_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        admin_video_only = str(payload.get("admin_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        product_video_only = str(payload.get("product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        owner_product_video_only = str(payload.get("owner_product_video_only") or "").strip().lower() in {"1", "true", "yes", "on"}
+        now_val = now_text()
+        set_system_settings_batch([
+            ("remote_worker:last_heartbeat", now_val, "remote worker claim", worker_id),
+            ("remote_worker:worker_id", worker_id, "last remote worker id", worker_id),
+        ])
         heartbeat = _record_owner_product_video_worker_identity(
             worker_id,
             payload,
             capabilities,
-            refresh_source="claim_idle",
+            refresh_source="claim_request",
         )
-    claim_result.update(heartbeat)
-    if recovery_report:
-        claim_result["existing_task_recovery"] = recovery_report
-    return claim_result
+        worker_compatibility = (
+            product_video_worker_admission_status(
+                caller_generation_id=str(payload.get("generation_id") or payload.get("worker_generation_id") or "")
+            )
+            if owner_product_video_only
+            else {}
+        )
+        conn = db_connect()
+        recovery_report = {}
+        try:
+            if owner_product_video_only and heartbeat.get("heartbeat_accepted") and (
+                not worker_compatibility
+                or worker_compatibility.get("compatible")
+            ):
+                try:
+                    recovery_report = video_b14_recover_existing_tasks_for_worker_claim(
+                        conn,
+                        limit=20,
+                    )
+                except Exception as exc:
+                    recovery_report = {
+                        "ok": False,
+                        "owner": "worker_claim",
+                        "error": type(exc).__name__,
+                        "recovered": 0,
+                    }
+            claim_result = remote_worker_api.claim_remote_worker_job(
+                conn,
+                worker_id=worker_id,
+                capabilities=capabilities,
+                max_jobs=max_jobs,
+                lease_seconds=lease_seconds,
+                canary_only=canary_only,
+                admin_canary_only=admin_canary_only,
+                admin_video_only=admin_video_only,
+                product_video_only=product_video_only,
+                owner_product_video_only=owner_product_video_only,
+                worker_compatibility=worker_compatibility,
+            )
+        finally:
+            conn.close()
+        if owner_product_video_only and not claim_result.get("job") and heartbeat.get("heartbeat_accepted"):
+            heartbeat = _record_owner_product_video_worker_identity(
+                worker_id,
+                payload,
+                capabilities,
+                refresh_source="claim_idle",
+            )
+        claim_result.update(heartbeat)
+        if recovery_report:
+            claim_result["existing_task_recovery"] = recovery_report
+        return claim_result
+
+    to_thread = getattr(globals().get("asyncio"), "to_thread", None)
+    if callable(to_thread):
+        return await to_thread(_run_sync_worker_claim)
+    return _run_sync_worker_claim()
 
 
 @fastapi_app.post("/api/v1/worker/heartbeat")
 async def api_worker_heartbeat(request: Request):
     verify_remote_worker_api_access(request)
     payload = await read_json_body(request)
-    worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
-    job_id = safe_int(payload.get("job_id"), 0)
-    if not job_id:
-        raise HTTPException(status_code=400, detail="job_id required")
-    set_system_setting("remote_worker:last_heartbeat", now_text(), "remote worker heartbeat", worker_id)
-    set_system_setting("remote_worker:worker_id", worker_id, "last remote worker id", worker_id)
-    heartbeat_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
-    heartbeat = _record_owner_product_video_worker_identity(
-        worker_id,
-        payload,
-        heartbeat_capabilities,
-        refresh_source="job_heartbeat",
-    )
-    if heartbeat.get("owner_heartbeat_request_received") and not heartbeat.get("heartbeat_accepted"):
-        raise HTTPException(status_code=409, detail=heartbeat.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected")
-    worker_sha = str(payload.get("worker_git_sha") or "").strip()
-    if worker_sha:
-        set_system_setting("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id)
-    worker_parser = str(payload.get("worker_parser_version") or "").strip()
-    if worker_parser:
-        set_system_setting("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id)
-    conn = db_connect()
-    try:
-        result = remote_worker_api.heartbeat_remote_worker_job(
-            conn,
-            worker_id=worker_id,
-            job_id=job_id,
-            progress_percent=safe_int(payload.get("progress_percent"), 0),
-            message=str(payload.get("message") or "")[:500],
-            lease_seconds=max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600))),
+
+    def _run_sync_worker_heartbeat():
+        worker_id = remote_worker_api.sanitize_worker_id(payload.get("worker_id") or request.headers.get("x-worker-id") or "remote-worker")
+        job_id = safe_int(payload.get("job_id"), 0)
+        if not job_id:
+            raise HTTPException(status_code=400, detail="job_id required")
+        now_val = now_text()
+        set_system_settings_batch([
+            ("remote_worker:last_heartbeat", now_val, "remote worker heartbeat", worker_id),
+            ("remote_worker:worker_id", worker_id, "last remote worker id", worker_id),
+        ])
+        heartbeat_capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else []
+        heartbeat = _record_owner_product_video_worker_identity(
+            worker_id,
+            payload,
+            heartbeat_capabilities,
+            refresh_source="job_heartbeat",
         )
-        if not result.get("ok"):
-            raise HTTPException(status_code=409, detail=result.get("reason") or "heartbeat_rejected")
-        result.update(heartbeat)
-        return result
-    finally:
-        conn.close()
+        if heartbeat.get("owner_heartbeat_request_received") and not heartbeat.get("heartbeat_accepted"):
+            raise HTTPException(status_code=409, detail=heartbeat.get("owner_heartbeat_reject_reason") or "owner_heartbeat_rejected")
+        worker_sha = str(payload.get("worker_git_sha") or "").strip()
+        worker_parser = str(payload.get("worker_parser_version") or "").strip()
+        extra_settings = []
+        if worker_sha:
+            extra_settings.append(("remote_worker:worker_git_sha", worker_sha[:80], "remote worker git sha", worker_id))
+        if worker_parser:
+            extra_settings.append(("remote_worker:worker_parser_version", worker_parser[:80], "remote worker parser version", worker_id))
+        if extra_settings:
+            set_system_settings_batch(extra_settings)
+        conn = db_connect()
+        try:
+            result = remote_worker_api.heartbeat_remote_worker_job(
+                conn,
+                worker_id=worker_id,
+                job_id=job_id,
+                progress_percent=safe_int(payload.get("progress_percent"), 0),
+                message=str(payload.get("message") or "")[:500],
+                lease_seconds=max(30, min(3600, safe_int(payload.get("lease_seconds"), LOCAL_WORKER_MAX_JOB_SECONDS or 600))),
+            )
+            if not result.get("ok"):
+                raise HTTPException(status_code=409, detail=result.get("reason") or "heartbeat_rejected")
+            result.update(heartbeat)
+            return result
+        finally:
+            conn.close()
+
+    to_thread = getattr(globals().get("asyncio"), "to_thread", None)
+    if callable(to_thread):
+        return await to_thread(_run_sync_worker_heartbeat)
+    return _run_sync_worker_heartbeat()
 
 
 def product_video_delivery_report_product_type(
