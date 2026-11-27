@@ -704,15 +704,16 @@ async def internal_process_realtime_chunk(
             pcm_bytes = b""
 
     # Voice Resolution
+    clean_voice_id = str(req.voice_profile_id or "").strip() or None
     resolver = RealtimeVoiceResolver()
     resolved_voice = resolver.resolve(
         target_language=req.target_language,
         gender_preference=req.gender_preference or "male",
-        voice_profile_id=req.voice_profile_id,
+        voice_profile_id=clean_voice_id,
         owner_id=req.actor_id,
     )
 
-    if req.voice_profile_id and resolved_voice.validation_status != "valid":
+    if clean_voice_id and resolved_voice.validation_status != "valid":
         status_code = status.HTTP_403_FORBIDDEN if resolved_voice.error_code == "FOREIGN_PROFILE_BLOCKED" else status.HTTP_422_UNPROCESSABLE_ENTITY
         raise HTTPException(
             status_code=status_code,
@@ -780,3 +781,383 @@ async def internal_process_realtime_chunk(
         "segment_id": req.segment_id,
         "events": events,
     }
+
+
+class RealtimeSettleRequest(BaseModel):
+    session_id: str = Field(description="Realtime session ID")
+    actor_id: str = Field(description="Authenticated canonical owner/actor ID")
+    idempotency_key: str = Field(description="Unique deterministic idempotency key for this charge unit")
+    mode: str = Field(default="LIVE_DUB_BILINGUAL", description="Realtime mode")
+    char_count: int = Field(default=0, ge=0, description="Translated/spoken characters in this billable slice")
+    block_count: int = Field(default=0, ge=0, description="Billable time blocks in this slice")
+    audio_seconds: float = Field(default=0.0, ge=0.0, description="Processed audio seconds")
+    voice_profile_id: Optional[str] = Field(default=None, description="Optional custom voice profile ID")
+    is_final: bool = Field(default=False, description="Whether this is final stop settlement")
+
+
+def _resolve_bot_db_path() -> str:
+    import sys
+    bot_mod = sys.modules.get("bot") or sys.modules.get("__main__")
+    bot_db = getattr(bot_mod, "DB_FILE", None) if bot_mod is not None else None
+    return (
+        os.environ.get("DB_FILE", "").strip()
+        or os.environ.get("DB_PATH", "").strip()
+        or (str(bot_db).strip() if bot_db else "")
+        or "toandaas_system.db"
+    )
+
+
+def _now_bot_text() -> str:
+    import sys
+    from datetime import datetime, timezone
+    bot_mod = sys.modules.get("bot") or sys.modules.get("__main__")
+    now_fn = getattr(bot_mod, "now_text", None) if bot_mod is not None else None
+    if callable(now_fn):
+        try:
+            return str(now_fn())
+        except Exception:
+            pass
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _calculate_realtime_2x_subdub_charge(
+    *,
+    mode: str,
+    char_count: int,
+    block_count: int,
+    voice_profile_id: Optional[str] = None,
+) -> Tuple[int, int, str]:
+    """Calculates canonical 2x SubDub fee from Bot authority without cold module re-imports.
+
+    Returns (amount_xu, base_subdub_xu, mapped_subdub_mode).
+    """
+    import sys
+    from services.web_subdub_settlement_service import (
+        DEFAULT_DUB_CUSTOM_RATE_XU,
+        DEFAULT_DUB_PRESET_RATE_XU,
+        DEFAULT_SUBTITLE_TRANSLATE_RATE_XU,
+        calculate_subdub_char_price,
+    )
+
+    clean_mode = str(mode or "LIVE_DUB_BILINGUAL").strip().upper()
+    subdub_mode_map = {
+        "CAPTION_ONLY": "subtitle_translate",
+        "CAPTION_TRANSLATE": "subtitle_translate",
+        "LIVE_DUB": "dub",
+        "LIVE_DUB_BILINGUAL": "subtitle_plus_dub",
+    }
+    mapped_mode = subdub_mode_map.get(clean_mode, "subtitle_plus_dub")
+    clean_chars = max(0, int(char_count or 0))
+    clean_blocks = max(0, int(block_count or 0))
+    clean_voice = str(voice_profile_id or "").strip() or None
+
+    if clean_chars == 0 and clean_blocks == 0:
+        return 0, 0, mapped_mode
+
+    if clean_chars > 0:
+        translate_rate = DEFAULT_SUBTITLE_TRANSLATE_RATE_XU
+        dub_preset_rate = DEFAULT_DUB_PRESET_RATE_XU
+        dub_custom_rate = DEFAULT_DUB_CUSTOM_RATE_XU
+        bot_mod = sys.modules.get("bot") or sys.modules.get("__main__")
+        if bot_mod is not None and callable(getattr(bot_mod, "canonical_price_xu", None)):
+            try:
+                t_rate = bot_mod.canonical_price_xu("subtitle_translate_video")
+                if t_rate:
+                    translate_rate = float(t_rate)
+                d_rate = bot_mod.canonical_price_xu("dub_video")
+                if d_rate:
+                    dub_preset_rate = float(d_rate)
+                c_rate = bot_mod.canonical_price_xu("voice_clone_custom")
+                if c_rate:
+                    dub_custom_rate = float(c_rate)
+            except Exception:
+                pass
+        effective_dub_rate = dub_custom_rate if clean_voice else dub_preset_rate
+        if mapped_mode == "subtitle_translate":
+            base_xu = max(1, int(calculate_subdub_char_price(clean_chars, translate_rate)["total_xu"]))
+        elif mapped_mode == "dub":
+            base_xu = max(1, int(calculate_subdub_char_price(clean_chars, effective_dub_rate)["total_xu"]))
+        else:
+            t_xu = int(calculate_subdub_char_price(clean_chars, translate_rate)["total_xu"])
+            d_xu = int(calculate_subdub_char_price(clean_chars, effective_dub_rate)["total_xu"])
+            base_xu = max(1, t_xu + d_xu)
+        return base_xu * 2, base_xu, mapped_mode
+
+    # Duration/block fallback when block elapsed before char reporting: 2 Xu / block (2x base)
+    base_xu = max(1, clean_blocks)
+    return base_xu * 2, base_xu, mapped_mode
+
+
+@internal_router.post("/settle")
+async def internal_settle_realtime_usage(
+    req: RealtimeSettleRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    """Atomic, idempotent 2x-SubDub settlement in canonical Bot SQLite ledger."""
+    import sqlite3
+    from fastapi.responses import JSONResponse
+    from services.customer_read_model_service import normalize_target_user_id
+    from services.web_subdub_settlement_service import is_admin_or_owner_user
+
+    raw_body = b""
+    try:
+        if hasattr(request, "body"):
+            body_res = request.body()
+            raw_body = await body_res if inspect.isawaitable(body_res) else (body_res or b"")
+    except Exception:
+        raw_body = b""
+
+    if not raw_body:
+        raw_body = json.dumps(
+            {
+                "session_id": req.session_id,
+                "actor_id": req.actor_id,
+                "idempotency_key": req.idempotency_key,
+                "mode": req.mode,
+                "char_count": req.char_count,
+                "block_count": req.block_count,
+                "audio_seconds": req.audio_seconds,
+                "voice_profile_id": req.voice_profile_id,
+                "is_final": req.is_final,
+            },
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+    req_headers = getattr(request, "headers", {})
+    actor_header = str(req_headers.get("x-toan-aas-actor-id") or req.actor_id or "").strip()
+    auth_ok, auth_err, auth_status = verify_internal_realtime_bridge_auth(
+        authorization=req_headers.get("authorization", ""),
+        signature=req_headers.get("x-toan-aas-signature", ""),
+        timestamp=req_headers.get("x-toan-aas-timestamp", ""),
+        request_id=req_headers.get("x-toan-aas-request-id", ""),
+        method="POST",
+        path="/internal/v1/realtime/settle",
+        body_bytes=raw_body,
+        actor_id=actor_header,
+    )
+    if not auth_ok:
+        raise HTTPException(status_code=auth_status, detail=f"Bridge auth failed: {auth_err}")
+
+    if str(req.actor_id).strip() != actor_header:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ACTOR_BODY_HEADER_MISMATCH")
+
+    clean_uid = normalize_target_user_id(req.actor_id)
+    if not clean_uid:
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": "INVALID_USER_ID", "message": "Thiếu ID tài khoản canonical."})
+
+    amount_xu, base_subdub_xu, mapped_mode = _calculate_realtime_2x_subdub_charge(
+        mode=req.mode,
+        char_count=req.char_count,
+        block_count=req.block_count,
+        voice_profile_id=req.voice_profile_id,
+    )
+    clean_idemp = str(req.idempotency_key or "").strip()
+    if not clean_idemp:
+        return JSONResponse(status_code=400, content={"ok": False, "error_code": "IDEMPOTENCY_KEY_REQUIRED", "message": "Thiếu mã idempotency thanh toán realtime."})
+
+    db_path = _resolve_bot_db_path()
+    conn = sqlite3.connect(db_path, timeout=30.0, isolation_level=None)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS web_realtime_settlements (
+                id TEXT PRIMARY KEY,
+                idempotency_key TEXT UNIQUE NOT NULL,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                subdub_mode TEXT NOT NULL,
+                char_count INTEGER NOT NULL,
+                block_count INTEGER NOT NULL,
+                base_subdub_xu INTEGER NOT NULL,
+                amount_xu INTEGER NOT NULL,
+                balance_before INTEGER NOT NULL,
+                balance_after INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                settled_at TEXT NOT NULL
+            )
+            """
+        )
+
+        existing = conn.execute(
+            """
+            SELECT id, user_id, mode, char_count, block_count, base_subdub_xu, amount_xu,
+                   balance_before, balance_after, status, settled_at
+            FROM web_realtime_settlements
+            WHERE idempotency_key = ?
+            """,
+            (clean_idemp,),
+        ).fetchone()
+        if existing:
+            conn.execute("COMMIT")
+            return {
+                "ok": True,
+                "duplicate": True,
+                "settlement_id": existing[0],
+                "canonical_user_id": existing[1],
+                "mode": existing[2],
+                "char_count": existing[3],
+                "block_count": existing[4],
+                "base_subdub_xu": existing[5],
+                "amount_xu": existing[6],
+                "balance_before": existing[7],
+                "balance_after": existing[8],
+                "status": existing[9],
+                "settled_at": existing[10],
+            }
+
+        user_row = conn.execute(
+            "SELECT credits, COALESCE(total_spent, 0) FROM users WHERE user_id = ?",
+            (clean_uid,),
+        ).fetchone()
+        if not user_row:
+            conn.execute("ROLLBACK")
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "ok": False,
+                    "error_code": "BOT_USER_NOT_INITIALIZED",
+                    "message": "Tài khoản chưa kích hoạt ví trên Bot canonical.",
+                },
+            )
+
+        current_balance = int(user_row[0] or 0)
+        current_spent = int(user_row[1] or 0)
+        now_str = _now_bot_text()
+        settlement_id = f"rts_{uuid.uuid4().hex[:16]}"
+
+        if amount_xu <= 0:
+            conn.execute(
+                """
+                INSERT INTO web_realtime_settlements (
+                    id, idempotency_key, session_id, user_id, mode, subdub_mode,
+                    char_count, block_count, base_subdub_xu, amount_xu,
+                    balance_before, balance_after, status, settled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'no_billable_usage', ?)
+                """,
+                (
+                    settlement_id, clean_idemp, req.session_id, clean_uid,
+                    str(req.mode), mapped_mode, int(req.char_count), int(req.block_count),
+                    base_subdub_xu, current_balance, current_balance, now_str,
+                ),
+            )
+            conn.execute("COMMIT")
+            return {
+                "ok": True,
+                "duplicate": False,
+                "status": "no_billable_usage",
+                "settlement_id": settlement_id,
+                "canonical_user_id": clean_uid,
+                "amount_xu": 0,
+                "base_subdub_xu": base_subdub_xu,
+                "balance_before": current_balance,
+                "balance_after": current_balance,
+            }
+
+        if is_admin_or_owner_user(clean_uid):
+            conn.execute(
+                """
+                INSERT INTO web_realtime_settlements (
+                    id, idempotency_key, session_id, user_id, mode, subdub_mode,
+                    char_count, block_count, base_subdub_xu, amount_xu,
+                    balance_before, balance_after, status, settled_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'exempt', ?)
+                """,
+                (
+                    settlement_id, clean_idemp, req.session_id, clean_uid,
+                    str(req.mode), mapped_mode, int(req.char_count), int(req.block_count),
+                    base_subdub_xu, current_balance, current_balance, now_str,
+                ),
+            )
+            conn.execute("COMMIT")
+            return {
+                "ok": True,
+                "duplicate": False,
+                "exempt": True,
+                "status": "exempt",
+                "settlement_id": settlement_id,
+                "canonical_user_id": clean_uid,
+                "amount_xu": 0,
+                "quoted_2x_xu": amount_xu,
+                "base_subdub_xu": base_subdub_xu,
+                "balance_before": current_balance,
+                "balance_after": current_balance,
+            }
+
+        if current_balance < amount_xu:
+            conn.execute("ROLLBACK")
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "ok": False,
+                    "error_code": "INSUFFICIENT_FUNDS",
+                    "message": f"Số dư ({current_balance} Xu) không đủ thanh toán {amount_xu} Xu cho phiên Dịch trực tiếp (cước 2x SubDub).",
+                    "balance_xu": current_balance,
+                    "required_xu": amount_xu,
+                },
+            )
+
+        new_balance = current_balance - amount_xu
+        new_spent = current_spent + amount_xu
+        conn.execute(
+            "UPDATE users SET credits = ?, total_spent = ? WHERE user_id = ?",
+            (new_balance, new_spent, clean_uid),
+        )
+        conn.execute(
+            """
+            INSERT INTO credit_events (
+                user_id, delta, balance_after, event_type, ref_id, note, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_uid,
+                -amount_xu,
+                new_balance,
+                "realtime_translate_dub",
+                req.session_id,
+                f"Live Translate ({req.mode}, 2x SubDub, chars={req.char_count}, blocks={req.block_count}, key={clean_idemp})",
+                now_str,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO web_realtime_settlements (
+                id, idempotency_key, session_id, user_id, mode, subdub_mode,
+                char_count, block_count, base_subdub_xu, amount_xu,
+                balance_before, balance_after, status, settled_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled', ?)
+            """,
+            (
+                settlement_id, clean_idemp, req.session_id, clean_uid,
+                str(req.mode), mapped_mode, int(req.char_count), int(req.block_count),
+                base_subdub_xu, amount_xu, current_balance, new_balance, now_str,
+            ),
+        )
+        conn.execute("COMMIT")
+        return {
+            "ok": True,
+            "duplicate": False,
+            "exempt": False,
+            "status": "settled",
+            "settlement_id": settlement_id,
+            "canonical_user_id": clean_uid,
+            "mode": str(req.mode),
+            "char_count": int(req.char_count),
+            "block_count": int(req.block_count),
+            "base_subdub_xu": base_subdub_xu,
+            "amount_xu": amount_xu,
+            "balance_before": current_balance,
+            "balance_after": new_balance,
+            "settled_at": now_str,
+        }
+    except Exception as exc:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        logger.exception("Realtime settlement failed cleanly: %s", exc)
+        return JSONResponse(status_code=500, content={"ok": False, "error_code": "SETTLEMENT_FAILED", "message": "Lỗi đối soát giao dịch realtime."})
+    finally:
+        conn.close()

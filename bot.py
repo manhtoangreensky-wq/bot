@@ -284904,6 +284904,12 @@ async def api_internal_subdub_voice_resolve(request: Request):
 
 # ─── CANONICAL REALTIME STREAMING EXECUTION ROUTER (RT-FIX2) ──────────────────
 from services.copyfast_realtime_translate import internal_router as realtime_internal_router
+from services.realtime_asr_adapter import set_canonical_asr_primitive as _bind_realtime_asr
+from services.realtime_translation_adapter import set_canonical_translation_primitive as _bind_realtime_translation
+from services.realtime_tts_adapter import set_canonical_tts_primitive as _bind_realtime_tts
+_bind_realtime_asr(asr_transcribe_audio)
+_bind_realtime_translation(translate_subtitle_text)
+_bind_realtime_tts(tts_edge_bytes)
 fastapi_app.include_router(realtime_internal_router)
 
 
