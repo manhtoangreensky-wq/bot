@@ -10,6 +10,7 @@ Enforces:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -51,9 +52,9 @@ def get_canonical_translation_primitive() -> Optional[Callable]:
     if _CANONICAL_TRANSLATION_PRIMITIVE is not None:
         return _CANONICAL_TRANSLATION_PRIMITIVE
     import sys
-    if "bot" in sys.modules:
-        bot_mod = sys.modules["bot"]
-        if hasattr(bot_mod, "translate_subtitle_text"):
+    for mod_name in ("bot", "__main__"):
+        bot_mod = sys.modules.get(mod_name)
+        if bot_mod is not None and hasattr(bot_mod, "translate_subtitle_text"):
             _CANONICAL_TRANSLATION_PRIMITIVE = bot_mod.translate_subtitle_text
             return _CANONICAL_TRANSLATION_PRIMITIVE
     return None
@@ -110,7 +111,15 @@ class RealtimeTranslationAdapter:
 
         if trans_func is not None:
             try:
-                res = await trans_func(clean_text, target_lang=target_lang)
+                call_kwargs: Dict[str, Any] = {"target_lang": target_lang}
+                try:
+                    params = inspect.signature(trans_func).parameters
+                    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                    if has_var_kw or "allow_confirmed_product" in params:
+                        call_kwargs["allow_confirmed_product"] = True
+                except (TypeError, ValueError):
+                    pass
+                res = await trans_func(clean_text, **call_kwargs)
                 trans_text = str(res.get("text") or res.get("translated") or "").strip()
                 if trans_text:
                     self._record_context(clean_text, trans_text)

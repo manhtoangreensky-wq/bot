@@ -85,7 +85,10 @@ def _get_voice_db_connection() -> Any:
         return _DB_CONN_FACTORY()
     import os
     import sqlite3
-    target_path = os.environ.get("DB_FILE") or "toandaas_system.db"
+    import sys
+    bot_mod = sys.modules.get("bot") or sys.modules.get("__main__")
+    bot_db = getattr(bot_mod, "DB_FILE", None) if bot_mod is not None else None
+    target_path = os.environ.get("DB_FILE") or os.environ.get("DB_PATH") or bot_db or "toandaas_system.db"
     conn = sqlite3.connect(target_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn

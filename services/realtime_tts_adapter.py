@@ -56,9 +56,9 @@ def get_canonical_tts_primitive() -> Optional[Callable]:
     if _CANONICAL_TTS_PRIMITIVE is not None:
         return _CANONICAL_TTS_PRIMITIVE
     import sys
-    if "bot" in sys.modules:
-        bot_mod = sys.modules["bot"]
-        if hasattr(bot_mod, "tts_edge_bytes"):
+    for mod_name in ("bot", "__main__"):
+        bot_mod = sys.modules.get(mod_name)
+        if bot_mod is not None and hasattr(bot_mod, "tts_edge_bytes"):
             _CANONICAL_TTS_PRIMITIVE = bot_mod.tts_edge_bytes
             return _CANONICAL_TTS_PRIMITIVE
     return None

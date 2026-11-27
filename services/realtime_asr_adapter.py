@@ -10,6 +10,7 @@ Enforces:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
@@ -54,9 +55,9 @@ def get_canonical_asr_primitive() -> Optional[Callable]:
     if _CANONICAL_ASR_PRIMITIVE is not None:
         return _CANONICAL_ASR_PRIMITIVE
     import sys
-    if "bot" in sys.modules:
-        bot_mod = sys.modules["bot"]
-        if hasattr(bot_mod, "asr_transcribe_audio"):
+    for mod_name in ("bot", "__main__"):
+        bot_mod = sys.modules.get(mod_name)
+        if bot_mod is not None and hasattr(bot_mod, "asr_transcribe_audio"):
             _CANONICAL_ASR_PRIMITIVE = bot_mod.asr_transcribe_audio
             return _CANONICAL_ASR_PRIMITIVE
     return None
@@ -111,15 +112,31 @@ class RealtimeASRAdapter:
 
         if asr_func is not None:
             try:
-                res = await asr_func(wav_bytes, content_type="audio/wav", language=language)
+                call_kwargs: Dict[str, Any] = {
+                    "content_type": "audio/wav",
+                    "language": language,
+                }
+                try:
+                    params = inspect.signature(asr_func).parameters
+                    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+                    if has_var_kw or "allow_subdub_public" in params:
+                        call_kwargs["allow_subdub_public"] = True
+                    if has_var_kw or "allow_confirmed_product" in params:
+                        call_kwargs["allow_confirmed_product"] = True
+                except (TypeError, ValueError):
+                    pass
+                res = await asr_func(wav_bytes, **call_kwargs)
                 text = str(res.get("text") or "").strip()
+                ok_flag = bool(text) and bool(res.get("ok", True))
+                err_msg = None if ok_flag else (str(res.get("detail") or res.get("status") or "").strip() or None)
                 return RealtimeASRResult(
-                    ok=bool(text),
+                    ok=ok_flag,
                     text=text,
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     language=str(res.get("language") or language),
                     provider=str(res.get("provider") or self.provider),
+                    error=err_msg,
                 )
             except Exception as e:
                 logger.warning(f"Canonical ASR execution error: {e}")
