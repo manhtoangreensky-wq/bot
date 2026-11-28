@@ -765,14 +765,17 @@ async def internal_process_realtime_chunk(
     if mode_str in ("LIVE_DUB", "LIVE_DUB_BILINGUAL"):
         tts_adapter = RealtimeTTSAdapter()
         tts_res = await tts_adapter.synthesize(translated_text, voice=resolved_voice)
-        events.append({
+        tts_ev: Dict[str, Any] = {
             "type": "tts.audio",
             "segment_id": req.segment_id,
             "sequence": req.sequence,
             "audio_b64": tts_res.audio_base64 or "",
             "format": tts_res.format,
             "sample_rate": getattr(tts_res, "sample_rate", 24000),
-        })
+        }
+        if not tts_res.ok and tts_res.error:
+            tts_ev["error"] = str(tts_res.error)[:240]
+        events.append(tts_ev)
 
     return {
         "ok": True,
