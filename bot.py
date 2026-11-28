@@ -161292,6 +161292,92 @@ async def call_edge_tts_with_speed(text: str, voice_id: str = "", voice_speed: s
     except TypeError:
         return await func(text, voice_id=voice_id)
 
+def _split_tts_fallback_chunks(text: str, limit: int = 180) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return []
+    chunks, cur = [], []
+    cur_len = 0
+    for w in words:
+        add_len = len(w) + (1 if cur else 0)
+        if cur and cur_len + add_len > limit:
+            chunks.append(" ".join(cur))
+            cur = [w]
+            cur_len = len(w)
+        else:
+            cur.append(w)
+            cur_len += add_len
+    if cur:
+        chunks.append(" ".join(cur))
+    return chunks
+
+async def _google_translate_tts_fallback_bytes(text: str, language_code: str = "vi") -> tuple[str, bytes, str, int]:
+    from urllib.parse import quote
+    tl_map = {"vi": "vi", "en": "en", "zh": "zh-CN", "ja": "ja", "ko": "ko"}
+    tl = tl_map.get(str(language_code or "vi").lower().split("-")[0], "vi")
+    parts = _split_tts_fallback_chunks(text[:1200], limit=180)
+    if not parts:
+        return "FAIL", b"", "empty_text", 0
+    buf = bytearray()
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            for part in parts:
+                url = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={tl}&q={quote(part)}"
+                res = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                if res.status_code >= 400 or not res.content:
+                    return "FAIL", b"", f"gtts_http_{res.status_code}", int(res.status_code)
+                buf.extend(res.content)
+        return ("PASS", bytes(buf), f"provider=gtts_fallback; bytes={len(buf)}", 200) if buf else ("FAIL", b"", "empty_gtts", 0)
+    except Exception as exc:
+        return "FAIL", b"", provider_error_summary(exc), 0
+
+async def realtime_dub_tts_bytes(
+    text: str,
+    *,
+    voice_id: str = "",
+    gender: str = "male",
+    language_code: str = "vi",
+    voice_vault_id: str = "",
+    speed: float = 1.0,
+) -> tuple[str, bytes, str, int]:
+    clean_text = str(text or "").strip()[:1800]
+    if not clean_text:
+        return "PASS", b"", "empty_text", 0
+    clean_gender = "female" if str(gender or "").strip().lower() == "female" else "male"
+    lang_key = str(language_code or "vi").strip().lower().split("-")[0]
+    boost_map = {"vi": "Vietnamese", "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean"}
+    boost = boost_map.get(lang_key, "auto")
+    speed_str = f"{max(0.5, min(2.0, float(speed or 1.0))):.2f}".rstrip("0").rstrip(".") or "1.0"
+    is_custom_vault = bool(str(voice_vault_id or "").strip())
+    minimax_vid = str(voice_id or "").strip() if is_custom_vault else default_tts_voice_id(clean_gender)
+    errors = []
+
+    candidates = [
+        ("shopaikey_minimax", lambda: call_shopaikey_minimax_tts_bytes_with_speed(
+            clean_text, voice_id=minimax_vid, voice_style=clean_gender, voice_speed=speed_str, tts_language_boost=boost,
+        )),
+        ("key4u_minimax", lambda: call_key4u_minimax_tts_bytes_with_speed(
+            clean_text, voice_id=minimax_vid, voice_style=clean_gender, voice_speed=speed_str,
+            allow_admin=True, allow_confirmed_product=True, tts_language_boost=boost,
+        )),
+        ("direct_minimax", lambda: call_direct_minimax_tts_bytes_with_speed(
+            clean_text, voice_id=minimax_vid, voice_style=clean_gender, voice_speed=speed_str, tts_language_boost=boost,
+        )),
+    ]
+    if not is_custom_vault:
+        candidates.append(("edge_tts", lambda: tts_edge_bytes(clean_text, voice_id=str(voice_id or "").strip())))
+        candidates.append(("gtts_fallback", lambda: _google_translate_tts_fallback_bytes(clean_text, language_code=lang_key)))
+
+    for label, call_fn in candidates:
+        try:
+            st, audio_b, detail, http_st = await call_fn()
+            if st == "PASS" and audio_b:
+                return "PASS", audio_b, f"{label}:{detail}", int(http_st or 200)
+            errors.append(f"{label}={st}:{str(detail or '')[:80]}")
+        except Exception as exc:
+            errors.append(f"{label}=EXC:{str(exc)[:80]}")
+    return "FAIL", b"", "; ".join(errors)[:300], 0
+
 async def cmd_tool_test_tts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin_user(update.effective_user.id):
         return await update.message.reply_text("⛔ Bạn không có quyền dùng lệnh này.")
@@ -284909,7 +284995,7 @@ from services.realtime_translation_adapter import set_canonical_translation_prim
 from services.realtime_tts_adapter import set_canonical_tts_primitive as _bind_realtime_tts
 _bind_realtime_asr(asr_transcribe_audio)
 _bind_realtime_translation(translate_subtitle_text)
-_bind_realtime_tts(tts_edge_bytes)
+_bind_realtime_tts(realtime_dub_tts_bytes)
 fastapi_app.include_router(realtime_internal_router)
 
 

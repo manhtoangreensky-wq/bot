@@ -11,6 +11,7 @@ Enforces:
 from __future__ import annotations
 
 import base64
+import inspect
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
@@ -58,6 +59,9 @@ def get_canonical_tts_primitive() -> Optional[Callable]:
     import sys
     for mod_name in ("bot", "__main__"):
         bot_mod = sys.modules.get(mod_name)
+        if bot_mod is not None and callable(getattr(bot_mod, "realtime_dub_tts_bytes", None)):
+            _CANONICAL_TTS_PRIMITIVE = bot_mod.realtime_dub_tts_bytes
+            return _CANONICAL_TTS_PRIMITIVE
         if bot_mod is not None and hasattr(bot_mod, "tts_edge_bytes"):
             _CANONICAL_TTS_PRIMITIVE = bot_mod.tts_edge_bytes
             return _CANONICAL_TTS_PRIMITIVE
@@ -111,20 +115,39 @@ class RealtimeTTSAdapter:
 
         if tts_func is not None:
             try:
-                # bot.tts_edge_bytes returns tuple: (status, audio_bytes, detail, 0)
-                # or dict: {"audio_bytes": ..., "duration_seconds": ...}
-                res = await tts_func(clean_text, voice_id=voice.voice_id)
+                # Invoke bound canonical TTS primitive (either realtime_dub_tts_bytes or legacy tts_edge_bytes / test mock)
+                kwargs = {"voice_id": voice.voice_id}
+                try:
+                    sig_params = inspect.signature(tts_func).parameters
+                    has_var_kw = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig_params.values())
+                    if has_var_kw or "gender" in sig_params:
+                        kwargs["gender"] = voice.gender
+                    if has_var_kw or "language_code" in sig_params:
+                        kwargs["language_code"] = voice.language_code
+                    if has_var_kw or "voice_vault_id" in sig_params:
+                        kwargs["voice_vault_id"] = voice.voice_vault_id or ""
+                    if has_var_kw or "speed" in sig_params:
+                        kwargs["speed"] = voice.speed
+                except (TypeError, ValueError):
+                    pass
+                res = await tts_func(clean_text, **kwargs)
                 audio_bytes = b""
                 dur_ms = 1500
+                detail_msg = None
                 if isinstance(res, tuple):
                     status, audio_bytes, detail, _ = res
                     ok = (status == "PASS" and bool(audio_bytes))
+                    if not ok:
+                        detail_msg = str(detail or status or "tts_failed")
                 elif isinstance(res, dict):
                     audio_bytes = res.get("audio_bytes") or b""
                     ok = bool(res.get("ok", bool(audio_bytes)))
                     dur_ms = int(res.get("duration_seconds", 1.5) * 1000)
+                    if not ok:
+                        detail_msg = str(res.get("error") or res.get("error_code") or "tts_failed")
                 else:
                     ok = False
+                    detail_msg = "invalid_tts_response"
 
                 b64_str = base64.b64encode(audio_bytes).decode("ascii") if audio_bytes else None
                 return RealtimeTTSResult(
@@ -133,6 +156,7 @@ class RealtimeTTSAdapter:
                     duration_ms=dur_ms,
                     format=self.default_format,
                     provider=voice.provider,
+                    error=detail_msg,
                 )
             except Exception as e:
                 logger.warning(f"Canonical TTS execution error: {e}")
